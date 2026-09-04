@@ -117,4 +117,58 @@ class PurchaseOrder(Base):
     store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"))
     supplier_id: Mapped[int] = mapped_column(ForeignKey("suppliers.id"))
     status: Mapped[str] = mapped_column(Text, default="draft")
-    dispatch_run_id: Mapped[int | None] = mapped_column(
+    dispatch_run_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lines: Mapped[list["PurchaseOrderLine"]] = relationship(back_populates="order", cascade="all, delete-orphan")
+
+
+class PurchaseOrderLine(Base):
+    __tablename__ = "purchase_order_lines"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    purchase_order_id: Mapped[int] = mapped_column(ForeignKey("purchase_orders.id", ondelete="CASCADE"))
+    article_id: Mapped[int] = mapped_column(ForeignKey("articles.id"))
+    current_stock: Mapped[float] = mapped_column(Numeric(12, 2))
+    min_stock: Mapped[float] = mapped_column(Numeric(12, 2))
+    max_stock: Mapped[float] = mapped_column(Numeric(12, 2))
+    effective_max: Mapped[float] = mapped_column(Numeric(12, 2))
+    suggested_quantity: Mapped[float] = mapped_column(Numeric(12, 2))
+    ordered_quantity: Mapped[int] = mapped_column(Integer)
+    pack_size: Mapped[int] = mapped_column(Integer, default=1)
+    notes: Mapped[str | None] = mapped_column(Text)
+    order: Mapped["PurchaseOrder"] = relationship(back_populates="lines")
+
+
+class DispatchRun(Base):
+    __tablename__ = "dispatch_runs"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(Text, default="running")
+    stores_processed: Mapped[int | None] = mapped_column(Integer)
+    orders_created: Mapped[int | None] = mapped_column(Integer)
+    order_lines_created: Mapped[int | None] = mapped_column(Integer)
+    emails_sent: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class ArticleAlert(Base):
+    __tablename__ = "article_alerts"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"))
+    article_id: Mapped[int] = mapped_column(ForeignKey("articles.id"))
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"))
+    alert_type: Mapped[str] = mapped_column(Text)
+    details: Mapped[str | None] = mapped_column(Text)
+    max_adjusted: Mapped[bool] = mapped_column(Boolean, default=False)
+    old_max: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    new_max: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class StoreAlias(Base):
+    __tablename__ = "store_aliases"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id", ondelete="CASCADE"))
+    alias_normalized: Mapped[str] = mapped_column(Text, unique=True)
