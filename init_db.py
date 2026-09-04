@@ -23,11 +23,23 @@ def main():
         if exists:
             print("Схемата вече съществува - нищо не се прави.")
             return
-        print("Инициализирам схемата от schema.sql ...")
-        sql = open(schema_path, encoding="utf-8").read()
-        conn.execute(text(sql))
-        conn.commit()
-        print("Готово.")
+
+    print("Инициализирам схемата от schema.sql ...")
+    sql = open(schema_path, encoding="utf-8").read()
+
+    # schema.sql съдържа МНОГО SQL изречения (CREATE TABLE, CREATE INDEX...).
+    # SQLAlchemy's connection.execute(text(...)) поддържа само ЕДНО изречение
+    # наведнъж (extended query protocol) - затова минаваме през суровата
+    # psycopg2 връзка, която може да изпълни целия файл наведнъж.
+    raw = engine.raw_connection()
+    try:
+        cur = raw.cursor()
+        cur.execute(sql)
+        raw.commit()
+        cur.close()
+    finally:
+        raw.close()
+    print("Готово.")
 
 
 if __name__ == "__main__":
