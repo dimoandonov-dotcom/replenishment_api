@@ -238,6 +238,10 @@ def next_delivery_date(
         if not blocked:
             return candidate
     return None
+
+
+    
+def closure_gap_days(
         order_date: date,
     schedule: ScheduleEntry,
     closures: list[ClosurePeriod],
