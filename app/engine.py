@@ -148,3 +148,293 @@ def calculate_line(
 
     Количеството е ВИНАГИ допълване до максимума:
         нужда  = максимум - наличност
+        заявка = закръглено по опаковката
+    """
+    max_target = (
+        setting.max_stock if effective_max is None else effective_max
+    )
+
+    if not needs_reorder(
+        current_stock, setting.min_stock, mode, max_target
+    ):
+        return None
+
+    suggested = max(max_target - current_stock, 0.0)
+
+    # Под минимума сме -> гарантираме поне една опаковка.
+    # При ежедневно допълване над минимума малките нужди се натрупват.
+    below_min = current_stock < setting.min_stock
+    ordered = round_up_to_pack(
+        suggested, setting.pack_size, force_min_pack=below_min
+    )
+
+    if ordered <= 0:
+        return None
+
+    return OrderLine(
+        store_id=setting.store_id,
+        article_id=setting.article_id,
+        sku=setting.sku,
+        name=setting.name,
+        supplier_id=setting.supplier_id,
+        current_stock=current_stock,
+        min_stock=setting.min_stock,
+        max_stock=setting.max_stock,
+        effective_max=max_target,
+        suggested_quantity=suggested,
+        ordered_quantity=ordered,
+        pack_size=setting.pack_size,
+        closure_adjustment=closure_adjustment,
+        notes=notes,
+    )
+
+
+# ----------------------------------------
+# Логика за периоди на затваряне (Коледа, Великден)
+# ----------------------------------------
+
+
+def weekday_gap_to_next_order(
+    order_date: date, order_weekdays: set[int]
+) -> int:
+    """
+    Колко дни оставаме БЕЗ нова заявка след order_date, преди следващия
+    ден по график. За Пон-Пет график, петък връща 2 (събота + неделя) -
+    понеделник вече се покрива от нормалния еднодневен буфер в max.
+
+    Връща 0, ако утре пак е ден за заявка (нормален делничен ритъм).
+    """
+    if not order_weekdays:
+        return 0
+    gap = 0
+    d = order_date
+    for _ in range(7):
+        d = d + timedelta(days=1)
+        if d.isoweekday() in order_weekdays:
+            break
+        gap += 1
+    return gap
+
+
+def next_delivery_date(
+    from_date: date,
+    delivery_weekday: int,
+    closures: list[ClosurePeriod],
+    supplier_id: int,
+    max_lookahead_days: int = 30,
+) -> date | None:
+    """
+    Намира първата дата СЛЕД from_date, на която доставчикът реално доставя -
+    т.е. съвпада с деня за доставка по график И не пада в период на затваряне.
+    """
+    for offset in range(1, max_lookahead_days + 1):
+        candidate = from_date + timedelta(days=offset)
+        if candidate.isoweekday() != delivery_weekday:
+            continue
+        blocked = any(
+            c.supplier_id == supplier_id and c.covers(candidate)
+            for c in closures
+        )
+        if not blocked:
+            return candidate
+    return None
+        order_date: date,
+    schedule: ScheduleEntry,
+    closures: list[ClosurePeriod],
+) -> int:
+    """
+    Колко дни магазинът трябва да "изкара" без нова доставка.
+
+    Нормално това е интервалът до следващата доставка. Ако междувременно
+    доставчикът е затворен, интервалът се удължава автоматично, защото
+    next_delivery_date прескача блокираните дни.
+
+    Връща 0, ако няма удължаване спрямо нормалния ритъм.
+    """
+    this_delivery = next_delivery_date(
+        order_date, schedule.delivery_weekday, [], schedule.supplier_id
+    )
+    if this_delivery is None:
+        return 0
+
+    # следваща доставка при нормален график (без затваряния)
+    normal_next = next_delivery_date(
+        this_delivery, schedule.delivery_weekday, [], schedule.supplier_id
+    )
+    # следваща доставка с отчитане на затварянията
+    actual_next = next_delivery_date(
+        this_delivery,
+        schedule.delivery_weekday,
+        closures,
+        schedule.supplier_id,
+    )
+    if normal_next is None or actual_next is None:
+        return 0
+
+    gap = (actual_next - normal_next).days
+    return max(gap, 0)
+
+
+def apply_closure_buffer(
+    setting: ArticleSetting,
+    avg_daily_sales: float,
+    extra_days: int,
+) -> tuple[float, float]:
+    """
+    Връща (effective_max, добавка). Само за конкретната заявка -
+    max_stock в базата НЕ се променя.
+    """
+    if extra_days <= 0 or avg_daily_sales <= 0:
+        return setting.max_stock, 0.0
+    extra = avg_daily_sales * extra_days
+    return setting.max_stock + extra, extra
+
+
+# ----------------------------------------
+# Генериране на цяла заявка
+# ----------------------------------------
+
+
+@dataclass
+class ReplenishmentResult:
+    order_date: date
+    lines: list[OrderLine] = field(default_factory=list)
+    skipped_no_stock_data: list[str] = field(default_factory=list)
+    skipped_above_min: int = 0
+
+    @property
+    def total_lines(self) -> int:
+        return len(self.lines)
+
+    @property
+    def total_units(self) -> int:
+        return sum(l.ordered_quantity for l in self.lines)
+
+
+def generate_order_lines(
+    settings: list[ArticleSetting],
+    stock_by_article: dict[int, float],
+    order_date: date,
+    schedules: dict[tuple[int, int], list[ScheduleEntry]] | None = None,
+    closures: list[ClosurePeriod] | None = None,
+    avg_daily_sales: dict[tuple[int, int], float] | None = None,
+    mode: str = "below_min",
+    weekend_buffer: bool = True,
+) -> ReplenishmentResult:
+    """
+    Основната функция: за списък настройки + текущи наличности връща
+    редовете, които трябва да се поръчат.
+    mode="below_min"    - заявка само при падане под минимума
+    mode="daily_topup"  - ежедневно допълване до максимума (НДК)
+
+    schedules - dict[(store,supplier)] -> списък ВСИЧКИ дни от графика
+        (не само днешния), за да може да се засече колко дни оставаме
+        без заявка след order_date (напр. петък -> събота+неделя).
+
+    weekend_buffer - при mode="daily_topup" автоматично вдига ефективния
+        max за дните, следвани от "дупка" в графика (уикенди), с
+        avg_daily_sales * брой дни без заявка. Работи и БЕЗ запис в
+        supplier_closures - това е приблизителен ("Вариант А") буфер,
+        докато не дойдат точните часове на доставка по маршрут.
+    """
+    schedules = schedules or {}
+    closures = closures or []
+    avg_daily_sales = avg_daily_sales or {}
+
+    result = ReplenishmentResult(order_date=order_date)
+
+    for s in settings:
+        if s.article_id not in stock_by_article:
+            result.skipped_no_stock_data.append(s.sku)
+            continue
+
+        current = stock_by_article[s.article_id]
+
+        effective_max = s.max_stock
+        adjustment = 0.0
+        notes = ""
+
+        entries = schedules.get((s.store_id, s.supplier_id)) or []
+        sched_today = next(
+            (
+                e
+                for e in entries
+                if e.order_weekday == order_date.isoweekday()
+            ),
+            None,
+        )
+
+        # 1) явен период на затваряне (Коледа/Великден) - приоритетен
+        # буфер
+        if sched_today and closures:
+            extra_days = closure_gap_days(
+                order_date, sched_today, closures
+            )
+            if extra_days > 0:
+                adr = avg_daily_sales.get((s.store_id, s.article_id), 0.0)
+                effective_max, adjustment = apply_closure_buffer(
+                    s, adr, extra_days
+                )
+                if adjustment > 0:
+                    notes = (
+                        f"Предпразнична добавка за "
+                        f"{extra_days} дни без доставка"
+                    )
+
+        # 2) редовен седмичен пропуск (уикенд) - само daily_topup,
+        # само ако
+        #    няма вече по-голяма добавка от т.1
+        if (
+            mode == "daily_topup"
+            and weekend_buffer
+            and adjustment == 0
+            and entries
+        ):
+            order_weekdays = {e.order_weekday for e in entries}
+            gap = weekday_gap_to_next_order(order_date, order_weekdays)
+            if gap > 0:
+                adr = avg_daily_sales.get((s.store_id, s.article_id), 0.0)
+                effective_max, adjustment = apply_closure_buffer(
+                    s, adr, gap
+                )
+                if adjustment > 0:
+                    notes = (
+                        f"Уикенд добавка за {gap} "
+                        f"дни без заявка"
+                    )
+
+        if not needs_reorder(current, s.min_stock, mode, effective_max):
+            result.skipped_above_min += 1
+            continue
+
+        line = calculate_line(
+            s,
+            current,
+            effective_max=effective_max,
+            closure_adjustment=adjustment,
+            notes=notes,
+            mode=mode,
+        )
+        if line:
+            result.lines.append(line)
+        else:
+            result.skipped_above_min += 1
+
+    return result
+
+
+def group_lines_by_supplier(
+    lines: list[OrderLine],
+) -> dict[int, list[OrderLine]]:
+    """Групира редовете по доставчик - всяка фирма получава своя заявка."""
+    grouped: dict[int, list[OrderLine]] = {}
+    for line in lines:
+        grouped.setdefault(line.supplier_id, []).append(line)
+    return grouped
+
+
+def is_order_day(order_date: date, schedule: ScheduleEntry) -> bool:
+    """Проверява дали днес е ден за подаване на заявка към този доставчик."""
+    return order_date.isoweekday() == schedule.order_weekday
+
+
