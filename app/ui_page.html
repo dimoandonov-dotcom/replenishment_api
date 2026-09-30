@@ -576,6 +576,8 @@ async function showCmp(id) {
   const d = await api(`/ui/compare/${id}`);
   const tag = n => n === "и двамата" ? "" : n === "различно количество" ? "warn" : (n || "").startsWith("само MinMaxAI") ? "" : "bad";
   $("cDetail").innerHTML = `<div class="head"><h2>${esc(d.store)} · ${d.at}</h2><span class="note">наличности от ${d.stock_at || "—"}</span></div>
+  <div class="bar"><button onclick="download('/ui/compare/${d.id}/xlsx?side=store')">Excel — заявката на магазина</button>
+  <button class="warm" onclick="download('/ui/compare/${d.id}/xlsx?side=api')">Excel — заявката на MinMaxAI</button></div>
   <div class="scroll"><table><thead><tr><th>Код</th><th>Артикул</th><th class="num">Магазин</th><th class="num">MinMaxAI</th><th class="num">Разлика</th>
   <th class="num">Наличност</th><th class="num">Мин</th><th class="num">Макс</th><th class="num">Продажби/ден</th><th>Защо</th></tr></thead><tbody>
   ${d.lines.map(l => `<tr><td>${esc(l.sku)}</td><td class="name">${esc(l.name || "")}</td><td class="num">${fmtN(l.store_qty)}</td><td class="num"><b>${fmtN(l.api_qty)}</b></td>

@@ -42,25 +42,26 @@ def resolve_store(db: Session, raw: str) -> int | None:
     return None
 
 
-def _fresh_stock(db: Session) -> datetime | None:
-    last = db.execute(select(func.max(m.StockSnapshot.captured_at))).scalar()
-    now = datetime.now(timezone.utc)
-    if last is None or now - last > STALE_AFTER:
+def _fresh_stock(db: Session, store_id: int | None) -> datetime | None:
+    """Свежи наличности от Мистрал за ТОЗИ обект в същата секунда."""
+    if store_id is not None:
         try:
             from . import mistral
             if mistral.configured():
-                mistral.sync_stock(db)
-                last = db.execute(select(func.max(m.StockSnapshot.captured_at))).scalar()
+                mistral.sync_stock(db, only_store_id=store_id)
         except Exception:
             pass  # сравняваме по последните налични данни
-    return last
+    return db.execute(
+        select(func.max(m.StockSnapshot.captured_at))
+        .where(m.StockSnapshot.store_id == store_id)
+    ).scalar() if store_id is not None else None
 
 
 def record(db: Session, store_raw: str, lines: list[dict], raw_text: str | None,
            source: str = "anindk") -> dict:
     """lines: [{sku, name, qty}] - заявката на магазина в бройки."""
     store_id = resolve_store(db, store_raw)
-    stock_at = _fresh_stock(db)
+    stock_at = _fresh_stock(db, store_id)
     order = m.ManualOrder(store_id=store_id, store_raw=store_raw.strip(),
                           raw_text=(raw_text or "")[:20000] or None,
                           source=source, stock_at=stock_at)
@@ -288,3 +289,21 @@ def export_xlsx(db: Session, days: int = 14) -> bytes:
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def order_xlsx(db: Session, order_id: int, side: str) -> tuple[str, bytes] | None:
+    """Excel в бланката на НДК: side='store' (заявката на Ани) или 'api' (нашата)."""
+    from .exports import _write_workbook, order_filename
+    o = db.get(m.ManualOrder, order_id)
+    if o is None:
+        return None
+    ls = db.execute(
+        select(m.ManualOrderLine).where(m.ManualOrderLine.order_id == order_id)
+    ).scalars().all()
+    rows = [(l.sku, l.name or "", l.store_qty if side == "store" else l.api_qty)
+            for l in ls if (l.store_qty if side == "store" else l.api_qty) > 0]
+    store = db.get(m.Store, o.store_id) if o.store_id else None
+    base = order_filename(store)[:-5] if store else o.store_raw
+    when = o.received_at.astimezone(SOFIA).strftime("%d.%m %H.%M")
+    tag = "магазин" if side == "store" else "MinMaxAI"
+    return f"{base} {when} {tag}.xlsx", _write_workbook(rows)

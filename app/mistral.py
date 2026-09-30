@@ -76,7 +76,7 @@ def probe() -> dict:
     return out
 
 
-def sync_stock(db) -> dict:
+def sync_stock(db, only_store_id: int | None = None) -> dict:
     """
     Дърпа текущите наличности от Мистрал за всички наши артикули във
     всички наши магазини и ги записва като нова снимка (stock_snapshots).
@@ -114,10 +114,14 @@ def sync_stock(db) -> dict:
             if sid is None:
                 n = normalize_store_name(r["NAME"])
                 sid = lk.get(n.replace("Д.", "", 1).strip())
-            if sid is not None and sid in active_ids:
+            if sid is not None and sid in active_ids and (
+                    only_store_id is None or sid == only_store_id):
                 loc_map[r["ID"]] = sid
             else:
                 unmatched.append(r["NAME"])
+        if not loc_map:
+            return {"inserted": 0, "stores": 0, "articles": 0,
+                    "skipped_locations": unmatched, "seconds": 0, "captured_at": None}
         codes = ",".join(str(c) for c in arts)
         locs = ",".join(str(l) for l in loc_map)
         cur.execute(

@@ -499,6 +499,19 @@ def ui_compare_export(days: int = Query(14, ge=1, le=120), db: Session = Depends
                     headers={"Content-Disposition": f"attachment; filename*=UTF-8\'\'{quote(name)}"})
 
 
+@router.get("/ui/compare/{order_id}/xlsx")
+def ui_compare_xlsx(order_id: int, side: str = Query("api", pattern="^(api|store)$"),
+                    db: Session = Depends(get_db)):
+    from . import compare
+    r = compare.order_xlsx(db, order_id, side)
+    if r is None:
+        raise HTTPException(404, "Няма такава заявка")
+    name, content = r
+    return Response(content=content,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
+
+
 @router.get("/ui/compare/{order_id}")
 def ui_compare_detail(order_id: int, db: Session = Depends(get_db)):
     from . import compare
