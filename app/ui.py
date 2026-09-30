@@ -370,3 +370,23 @@ def stock_sync_mistral(db: Session = Depends(get_db)):
         return mistral.sync_stock(db)
     except Exception as e:
         raise HTTPException(502, f"Мистрал: {type(e).__name__}: {e}")
+
+
+@router.get("/ui/mistral/tables")
+def mistral_tables():
+    from . import mistral
+    try:
+        return mistral.list_tables()
+    except Exception as e:
+        raise HTTPException(502, f"Мистрал: {type(e).__name__}: {e}")
+
+
+@router.get("/ui/mistral/sample")
+def mistral_sample(table: str, n: int = 5):
+    from . import mistral
+    try:
+        return mistral.sample_table(table, n)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"Мистрал: {type(e).__name__}: {e}")

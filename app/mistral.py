@@ -145,3 +145,36 @@ def sync_stock(db) -> dict:
         "seconds": round((now - started).total_seconds(), 1),
         "captured_at": now.isoformat(),
     }
+
+
+def list_tables() -> list[dict]:
+    """Всички таблици с приблизителен брой редове (бързо, от метаданните)."""
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT t.name AS name, SUM(p.rows) AS rows "
+            "FROM sys.tables t JOIN sys.partitions p "
+            "ON p.object_id = t.object_id AND p.index_id IN (0,1) "
+            "GROUP BY t.name ORDER BY SUM(p.rows) DESC"
+        )
+        return [{"table": r["name"], "rows": int(r["rows"] or 0)} for r in cur.fetchall()]
+
+
+def sample_table(table: str, n: int = 5) -> dict:
+    """Колони + първите n реда. Името се проверява срещу списъка на базата."""
+    n = max(1, min(n, 50))
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sys.tables WHERE name = %s", (table,))
+        row = cur.fetchone()
+        if not row:
+            raise ValueError("Няма такава таблица")
+        safe = row["name"]
+        cur.execute(
+            "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
+            "WHERE TABLE_NAME = %s ORDER BY ORDINAL_POSITION", (safe,))
+        cols = [f"{r['COLUMN_NAME']}:{r['DATA_TYPE']}" for r in cur.fetchall()]
+        cur.execute(f"SELECT TOP {n} * FROM [{safe}]")
+        rows = [{k: (str(v) if v is not None else None) for k, v in r.items()}
+                for r in cur.fetchall()]
+    return {"table": safe, "columns": cols, "rows": rows}
