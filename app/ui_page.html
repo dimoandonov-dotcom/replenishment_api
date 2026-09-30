@@ -239,6 +239,12 @@ td input.changed { border-color:var(--amber); background:var(--amber-soft); }
 
 <!-- ============ ПУСКАНЕ И ИМПОРТ ============ -->
 <section class="tab" id="tab-run">
+  <div class="head"><h2>Наличности от Мистрал</h2><span class="note">автоматично преди всяко пускане</span></div>
+  <div class="bar">
+    <button class="go" id="syncNow">Дръпни наличности сега</button>
+    <span class="msg" id="syncMsg"></span>
+  </div>
+
   <div class="head"><h2>Пускане на заявки</h2><span class="note">автоматично всеки ден нед–пет в 15:00</span></div>
   <div class="bar">
     <button class="go" id="runNow">Пусни заявки сега</button>
@@ -255,8 +261,8 @@ td input.changed { border-color:var(--amber); background:var(--amber-soft); }
       <pre id="oWb"></pre>
     </div>
     <div class="imp">
-      <h3>Справка наличности</h3>
-      <p>Обект · Мат.№ · Име · К-во. Докато сървърът не подава наличности сам на всеки 30 минути.</p>
+      <h3>Справка наличности (резервно)</h3>
+      <p>Наличностите идват автоматично от Мистрал. Качване на справка е нужно само ако връзката не работи.</p>
       <div class="row"><input type="file" id="fStock" accept=".xlsx"><button class="go" data-imp="stock">Качи</button></div>
       <pre id="oStock"></pre>
     </div>
@@ -512,6 +518,15 @@ function renderPlano() {
 /* ---------- пускане и импорт ---------- */
 async function initRun() {
   fillStoreSelect($("mmStore"), await stores());
+  $("syncNow").onclick = async () => {
+    $("syncNow").disabled = true; msg("syncMsg", "Дърпам от Мистрал…");
+    try {
+      const r = await api("/stock/sync-mistral", { method: "POST" });
+      msg("syncMsg", `${r.inserted} наличности за ${r.stores} магазина, за ${r.seconds} сек.`);
+      loaded.board = false;
+    } catch (e) { msg("syncMsg", e.message, false); }
+    $("syncNow").disabled = false;
+  };
   $("runNow").onclick = async () => {
     if (!confirm("Да пусна заявките сега? Ще се запишат като нови заявки.")) return;
     $("runNow").disabled = true; msg("runMsg", "Изчислявам…");

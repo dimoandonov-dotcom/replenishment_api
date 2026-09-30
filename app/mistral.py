@@ -74,3 +74,74 @@ def probe() -> dict:
                 for r in cur.fetchall()
             ]
     return out
+
+
+def sync_stock(db) -> dict:
+    """
+    Дърпа текущите наличности от Мистрал за всички наши артикули във
+    всички наши магазини и ги записва като нова снимка (stock_snapshots).
+    Обектите се разпознават по име (същото нормализиране + псевдоними).
+    """
+    from datetime import datetime, timezone
+    from sqlalchemy import insert, select
+    from . import models as m
+    from .imports import normalize_store_name
+
+    lk: dict[str, int] = {}
+    for s in db.execute(select(m.Store)).scalars().all():
+        lk[normalize_store_name(s.name)] = s.id
+    for al in db.execute(select(m.StoreAlias)).scalars().all():
+        lk[al.alias_normalized] = al.store_id
+    active_ids = {
+        s.id for s in db.execute(
+            select(m.Store).where(m.Store.is_active.is_(True))
+        ).scalars().all()
+    }
+    arts = {
+        int(a.sku): a.id for a in db.execute(select(m.Article)).scalars().all()
+        if a.sku.isdigit()
+    }
+    if not arts:
+        return {"inserted": 0, "note": "няма артикули"}
+
+    started = datetime.now(timezone.utc)
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT ID, NAME FROM LOCATION")
+        loc_map, unmatched = {}, []
+        for r in cur.fetchall():
+            sid = lk.get(normalize_store_name(r["NAME"]))
+            if sid is None:
+                n = normalize_store_name(r["NAME"])
+                sid = lk.get(n.replace("Д.", "", 1).strip())
+            if sid is not None and sid in active_ids:
+                loc_map[r["ID"]] = sid
+            else:
+                unmatched.append(r["NAME"])
+        codes = ",".join(str(c) for c in arts)
+        locs = ",".join(str(l) for l in loc_map)
+        cur.execute(
+            f"SELECT LOCATIONID, MATERIALCODE, QTY FROM MATERIAL "
+            f"WHERE LOCATIONID IN ({locs}) AND MATERIALCODE IN ({codes})"
+        )
+        rows = cur.fetchall()
+
+    now = datetime.now(timezone.utc)
+    batch = [
+        {"store_id": loc_map[r["LOCATIONID"]],
+         "article_id": arts[int(r["MATERIALCODE"])],
+         "quantity": float(r["QTY"] or 0), "captured_at": now}
+        for r in rows
+        if r["LOCATIONID"] in loc_map and int(r["MATERIALCODE"]) in arts
+    ]
+    if batch:
+        db.execute(insert(m.StockSnapshot), batch)
+        db.commit()
+    return {
+        "inserted": len(batch),
+        "stores": len(set(b["store_id"] for b in batch)),
+        "articles": len(set(b["article_id"] for b in batch)),
+        "skipped_locations": unmatched,
+        "seconds": round((now - started).total_seconds(), 1),
+        "captured_at": now.isoformat(),
+    }

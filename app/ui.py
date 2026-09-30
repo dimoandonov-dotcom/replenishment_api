@@ -358,3 +358,15 @@ def mistral_probe():
         return mistral.probe()
     except Exception as e:  # покажи реалната причина - таймаут, вход и т.н.
         raise HTTPException(502, f"Мистрал: {type(e).__name__}: {e}")
+
+
+@router.post("/stock/sync-mistral")
+def stock_sync_mistral(db: Session = Depends(get_db)):
+    """Текущи наличности от Мистрал -> нова снимка. Вика се от cron и от бутона."""
+    from . import mistral
+    if not mistral.configured():
+        raise HTTPException(400, "Връзката към Мистрал не е настроена")
+    try:
+        return mistral.sync_stock(db)
+    except Exception as e:
+        raise HTTPException(502, f"Мистрал: {type(e).__name__}: {e}")
