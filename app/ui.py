@@ -75,13 +75,9 @@ def _active_promo(note: str | None, today: date):
 # ---------------------------------------------------------------------------
 
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
-def app_page(key: str = ""):
-    if not _key_ok(key):
-        return HTMLResponse(
-            "<h3 style='font-family:sans-serif'>Липсва ключ. Отвори адреса "
-            "с ?key=&lt;API ключ&gt; накрая.</h3>",
-            status_code=401,
-        )
+def app_page():
+    # Самата страница не съдържа данни - всички данни идват от защитените
+    # endpoints с X-API-Key. Ключът се въвежда веднъж и браузърът го помни.
     return HTMLResponse(_PAGE.read_text(encoding="utf-8"))
 
 
