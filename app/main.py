@@ -8,7 +8,7 @@ REST API за системата за автоматични заявки.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -29,7 +29,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 _API_KEY = _os.getenv("API_KEY", "").strip()
-_OPEN_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
+_OPEN_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/dashboard"}
 
 
 @app.middleware("http")
@@ -478,3 +478,238 @@ def export_orders_zip_file(
 from .admin import router as admin_router  # noqa: E402
 
 app.include_router(admin_router)
+
+
+# ---------------------------------------------------------------------------
+# Живо табло - винаги текущи данни, директно от базата, без нужда да питаш
+# Отваря се просто с линк + ?key=<API_KEY>, никакви заглавия (headers) не
+# трябват - затова е извън обичайната X-API-Key защита на middleware-а.
+# ---------------------------------------------------------------------------
+
+import html as _html
+from fastapi.responses import HTMLResponse
+
+
+def _dash_esc(s) -> str:
+    return _html.escape(str(s)) if s is not None else ""
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard(key: str = "", db: Session = Depends(get_db)):
+    if _API_KEY and key != _API_KEY:
+        return HTMLResponse(
+            "<h3>Невалиден или липсващ ключ. "
+            "Отвори с ?key=&lt;твоя API ключ&gt; в адреса.</h3>",
+            status_code=401,
+        )
+
+    active_stores = db.execute(
+        select(func.count()).select_from(m.Store).where(m.Store.is_active.is_(True))
+    ).scalar() or 0
+    total_stores = db.execute(select(func.count()).select_from(m.Store)).scalar() or 0
+    total_articles = db.execute(
+        select(func.count()).select_from(m.Article).where(m.Article.is_active.is_(True))
+    ).scalar() or 0
+    total_settings = db.execute(
+        select(func.count()).select_from(m.StoreArticleSetting)
+    ).scalar() or 0
+    review_count = db.execute(
+        select(func.count()).select_from(m.SettingsReviewQueue)
+        .where(m.SettingsReviewQueue.resolved.is_(False))
+    ).scalar() or 0
+    open_alerts = db.execute(
+        select(func.count()).select_from(m.ArticleAlert)
+        .where(m.ArticleAlert.resolved.is_(False))
+    ).scalar() or 0
+
+    suppliers = db.execute(select(m.Supplier)).scalars().all()
+
+    last_run = db.execute(
+        select(m.DispatchRun).order_by(m.DispatchRun.started_at.desc()).limit(1)
+    ).scalar_one_or_none()
+
+    top_rows = []
+    if last_run:
+        stmt = (
+            select(
+                m.PurchaseOrder.store_id,
+                func.count(m.PurchaseOrderLine.id).label("cnt"),
+            )
+            .join(
+                m.PurchaseOrderLine,
+                m.PurchaseOrderLine.purchase_order_id == m.PurchaseOrder.id,
+            )
+            .where(m.PurchaseOrder.dispatch_run_id == last_run.id)
+            .group_by(m.PurchaseOrder.store_id)
+            .order_by(func.count(m.PurchaseOrderLine.id).desc())
+            .limit(10)
+        )
+        top_rows = db.execute(stmt).all()
+
+    store_names = {
+        s.id: s.name
+        for s in db.execute(
+            select(m.Store).where(
+                m.Store.id.in_([r.store_id for r in top_rows])
+            )
+        ).scalars().all()
+    }
+
+    recent_runs = db.execute(
+        select(m.DispatchRun).order_by(m.DispatchRun.started_at.desc()).limit(8)
+    ).scalars().all()
+
+    SOFIA = timezone(timedelta(hours=3))
+
+    def fmt_time(dt):
+        if dt is None:
+            return "—"
+        return dt.astimezone(SOFIA).strftime("%d.%m.%Y %H:%M")
+
+    max_cnt = max([r.cnt for r in top_rows], default=1) or 1
+    rack_rows = ""
+    for r in top_rows:
+        pct = round(100 * r.cnt / max_cnt, 1)
+        name = _dash_esc(store_names.get(r.store_id, f"обект {r.store_id}"))
+        rack_rows += f"""
+        <div class="rack-row">
+          <div class="rack-name">{name}</div>
+          <div class="rack-track"><div class="rack-bar" style="width:{pct}%"></div></div>
+          <div class="rack-val">{r.cnt}</div>
+        </div>"""
+
+    run_rows = ""
+    for r in recent_runs:
+        dot = "" if r.orders_created else " empty"
+        run_rows += f"""
+        <tr>
+          <td><span class="status-dot{dot}"></span>#{r.id} {_dash_esc(r.status)}</td>
+          <td>{fmt_time(r.started_at)}</td>
+          <td>{r.orders_created or 0}</td>
+          <td>{r.order_lines_created or 0}</td>
+        </tr>"""
+
+    supplier_lines = ""
+    for s in suppliers:
+        mode_label = "ежедневно допълване" if s.replenishment_mode == "daily_topup" else "под минимума"
+        supplier_lines += f"<div>{_dash_esc(s.name)} — режим: <b>{mode_label}</b></div>"
+
+    generated = fmt_time(datetime.now(timezone.utc))
+
+    page = f"""<!DOCTYPE html>
+<html lang="bg"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Диспечерски пулт — живо</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {{
+  --ink:#1C2430; --paper:#F3F0E8; --paper-raised:#FBF9F4;
+  --line:#D8D2C4; --line-strong:#B8AF9A; --amber:#C96A1F;
+  --teal:#2F6358; --teal-soft:#D8E6E1; --slate:#5B6B7A;
+  --font-head:"Space Grotesk",system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,monospace;
+}}
+@media (prefers-color-scheme: dark) {{
+  :root {{ --ink:#EDE9DF; --paper:#14191F; --paper-raised:#1B222A;
+    --line:#2C343E; --line-strong:#3C4753; --amber:#E2872E;
+    --teal:#6FB3A2; --teal-soft:#1E2E2A; --slate:#8C99A6; }}
+}}
+* {{ box-sizing:border-box; }}
+html,body {{ margin:0; background:var(--paper); color:var(--ink); font-family:var(--font-head); }}
+body {{ max-width:980px; margin:0 auto; padding:28px 20px 60px; }}
+header {{ display:flex; justify-content:space-between; align-items:flex-end; gap:16px;
+  border-bottom:2px solid var(--ink); padding-bottom:18px; margin-bottom:22px; flex-wrap:wrap; }}
+.brand-mark {{ font-family:var(--font-mono); font-size:12px; letter-spacing:.12em; color:var(--slate); margin-bottom:6px; }}
+h1 {{ font-size:clamp(24px,5vw,32px); margin:0; font-weight:700; }}
+.snapshot-time {{ font-family:var(--font-mono); font-size:12.5px; color:var(--slate); text-align:right; line-height:1.6; }}
+.snapshot-time b {{ color:var(--ink); }}
+.board {{ display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line-strong);
+  border:1px solid var(--line-strong); margin-bottom:30px; }}
+@media (max-width:620px) {{ .board {{ grid-template-columns:repeat(2,1fr); }} }}
+.tile {{ background:var(--paper-raised); padding:18px 16px; }}
+.tile-label {{ font-family:var(--font-mono); font-size:11px; letter-spacing:.06em; color:var(--slate); margin-bottom:10px; }}
+.tile-value {{ font-family:var(--font-mono); font-size:30px; font-weight:600; font-variant-numeric:tabular-nums; line-height:1; }}
+.tile-value.amber {{ color:var(--amber); }}
+.tile-value.teal {{ color:var(--teal); }}
+.tile-sub {{ margin-top:8px; font-size:12px; color:var(--slate); }}
+section {{ margin-bottom:34px; }}
+.section-head {{ display:flex; align-items:baseline; justify-content:space-between;
+  border-bottom:1px solid var(--line-strong); padding-bottom:8px; margin-bottom:16px; }}
+h2 {{ font-size:16px; margin:0; font-weight:600; }}
+.section-note {{ font-family:var(--font-mono); font-size:11.5px; color:var(--slate); }}
+.rack {{ display:flex; flex-direction:column; gap:10px; }}
+.rack-row {{ display:grid; grid-template-columns:168px 1fr 44px; align-items:center; gap:10px; }}
+.rack-name {{ font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+.rack-track {{ height:16px; background:repeating-linear-gradient(90deg,var(--line) 0,var(--line) 1px,transparent 1px,transparent 9px);
+  border-bottom:1px solid var(--line-strong); }}
+.rack-bar {{ height:100%; background:var(--teal); opacity:.85; }}
+.rack-val {{ font-family:var(--font-mono); font-size:12.5px; text-align:right; }}
+table {{ width:100%; border-collapse:collapse; font-family:var(--font-mono); font-size:12.5px; }}
+th {{ text-align:left; font-weight:500; color:var(--slate); font-size:11px; padding:6px 10px; border-bottom:1px solid var(--line-strong); }}
+td {{ padding:9px 10px; border-bottom:1px solid var(--line); }}
+th:last-child,td:last-child,th:nth-child(3),td:nth-child(3),th:nth-child(4),td:nth-child(4) {{ text-align:right; }}
+tr:last-child td {{ border-bottom:none; }}
+.status-dot {{ display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--teal); margin-right:6px; }}
+.status-dot.empty {{ background:var(--line-strong); }}
+.strip {{ background:var(--paper-raised); border:1px solid var(--line-strong); border-left:4px solid var(--amber);
+  padding:14px 16px; font-size:13px; line-height:1.6; }}
+footer {{ margin-top:40px; padding-top:16px; border-top:1px solid var(--line-strong);
+  font-family:var(--font-mono); font-size:11.5px; color:var(--slate); }}
+</style></head><body>
+
+<header>
+  <div>
+    <div class="brand-mark">СИСТЕМА ЗА АВТОМАТИЧНИ ЗАЯВКИ / ЖИВО ТАБЛО</div>
+    <h1>Диспечерски пулт</h1>
+  </div>
+  <div class="snapshot-time">
+    Заредено: <b>{generated}</b> бг. час<br>
+    {supplier_lines}
+  </div>
+</header>
+
+<div class="board">
+  <div class="tile"><div class="tile-label">АКТИВНИ ОБЕКТИ</div>
+    <div class="tile-value teal">{active_stores}</div>
+    <div class="tile-sub">от общо {total_stores} заведени</div></div>
+  <div class="tile"><div class="tile-label">АКТИВНИ АРТИКУЛИ</div>
+    <div class="tile-value">{total_articles}</div>
+    <div class="tile-sub">в номенклатурата</div></div>
+  <div class="tile"><div class="tile-label">НАСТРОЙКИ МИН / МАКС</div>
+    <div class="tile-value">{total_settings:,}</div>
+    <div class="tile-sub">комбинации обект × артикул</div></div>
+  <div class="tile"><div class="tile-label">ПОСЛЕДНО ПУСКАНЕ — ЗАЯВКИ</div>
+    <div class="tile-value amber">{last_run.orders_created if last_run else 0}</div>
+    <div class="tile-sub">{fmt_time(last_run.started_at) if last_run else "няма пускания"}</div></div>
+  <div class="tile"><div class="tile-label">ПОСЛЕДНО ПУСКАНЕ — РЕДОВЕ</div>
+    <div class="tile-value amber">{last_run.order_lines_created if last_run else 0}</div>
+    <div class="tile-sub">поръчани позиции</div></div>
+  <div class="tile"><div class="tile-label">СИГНАЛИ / ЗА ПРЕГЛЕД</div>
+    <div class="tile-value">{open_alerts} / {review_count}</div>
+    <div class="tile-sub">отворени сигнали / чакат мин-макс</div></div>
+</div>
+
+<section>
+  <div class="section-head"><h2>Обекти по обем в последното пускане</h2>
+  <div class="section-note">топ {len(top_rows)}</div></div>
+  <div class="rack">{rack_rows or "<p>Няма данни за пускане още.</p>"}</div>
+</section>
+
+<section>
+  <div class="section-head"><h2>История на пусканията</h2>
+  <div class="section-note">последни {len(recent_runs)}</div></div>
+  <table><thead><tr><th>Статус</th><th>Час (бг.)</th><th>Заявки</th><th>Редове</th></tr></thead>
+  <tbody>{run_rows or "<tr><td colspan=4>Няма пускания.</td></tr>"}</tbody></table>
+</section>
+
+<div class="strip">
+  Това табло се смята на живо от базата при всяко отваряне — просто
+  презареди страницата за актуални данни. Пълна интерактивна документация:
+  <a href="/docs">/docs</a>
+</div>
+
+<footer>replenishment_api · живо табло</footer>
+</body></html>"""
+    return HTMLResponse(page)
