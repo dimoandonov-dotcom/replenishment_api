@@ -69,7 +69,10 @@ def is_authenticated(request: Request) -> bool:
 
 @app.middleware("http")
 async def _require_auth(request: Request, call_next):
-    if request.url.path in _OPEN_PATHS:
+    # логото се ВИЖДА без вход (нужно е на екрана за вход), но се сменя само с вход
+    open_path = request.url.path in _OPEN_PATHS and not (
+        request.url.path == "/brand/logo" and request.method != "GET")
+    if open_path:
         return await call_next(request)
     if not _API_KEY and not APP_PASSWORD:
         client = request.client.host if request.client else ""
