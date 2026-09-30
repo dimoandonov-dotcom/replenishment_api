@@ -170,7 +170,8 @@ def run(db: Session, apply: bool = True) -> dict:
                     signals.append({"store": store.name, "sku": a.sku,
                                     "name": a.supplier_name or a.name, "times": len(hits),
                                     "sold_14d": sold})
-            if (_capped(a.name) or _capped(a.supplier_name or "")) and mx_t > 3:
+            capped = _capped(a.name) or _capped(a.supplier_name or "")
+            if capped and mx_t > 3:
                 mn_t, mx_t = min(mn_t, 3), 3
 
             if s is None:
@@ -189,6 +190,8 @@ def run(db: Session, apply: bool = True) -> dict:
                 else:
                     new_min, new_max = round(_step(om, mn_t)), round(_step(oM, mx_t))
                 new_min = max(new_min, MIN_SHELF)
+                if capped:  # таванът 3 е правило - важи веднага, без плавност
+                    new_min, new_max = min(new_min, 3), min(new_max, 3)
                 new_max = max(new_max, new_min)
                 if (new_min, new_max) == (om, oM):
                     continue
