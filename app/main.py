@@ -29,12 +29,22 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 _API_KEY = _os.getenv("API_KEY", "").strip()
-_OPEN_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/dashboard"}
+_OPEN_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/dashboard", "/orders-view"}
+
+
+def _path_uses_own_key_check(path: str) -> bool:
+    """Пътища, които сами проверяват ?key=... (отварят се директно в
+    браузъра, не могат да пращат X-API-Key header)."""
+    if path in _OPEN_PATHS:
+        return True
+    if path.startswith("/orders/preview/") and path.endswith("/export"):
+        return True
+    return False
 
 
 @app.middleware("http")
 async def _require_api_key(request: Request, call_next):
-    if request.url.path in _OPEN_PATHS:
+    if _path_uses_own_key_check(request.url.path):
         return await call_next(request)
     if _API_KEY:
         if request.headers.get("X-API-Key", "") != _API_KEY:
@@ -713,3 +723,266 @@ footer {{ margin-top:40px; padding-top:16px; border-top:1px solid var(--line-str
 <footer>replenishment_api · живо табло</footer>
 </body></html>"""
     return HTMLResponse(page)
+
+
+# ---------------------------------------------------------------------------
+# Интерактивен преглед на заявки по магазин + редакция на min/max + износ
+# в Excel. Живее в самото API - JS-ът тук вика собствените ни endpoints
+# със заявения ключ, затова няма CORS/CSP пречки (не е публикуван Artifact).
+# ---------------------------------------------------------------------------
+
+@app.get("/orders-view", response_class=HTMLResponse)
+def orders_view(key: str = ""):
+    if _API_KEY and key != _API_KEY:
+        return HTMLResponse(
+            "<h3>Невалиден или липсващ ключ. "
+            "Отвори с ?key=&lt;твоя API ключ&gt; в адреса.</h3>",
+            status_code=401,
+        )
+
+    page = """<!DOCTYPE html>
+<html lang="bg"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Преглед на заявки по магазин</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink:#1C2430; --paper:#F3F0E8; --paper-raised:#FBF9F4;
+  --line:#D8D2C4; --line-strong:#B8AF9A; --amber:#C96A1F;
+  --teal:#2F6358; --teal-soft:#D8E6E1; --slate:#5B6B7A; --danger:#A8402F;
+  --font-head:"Space Grotesk",system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --ink:#EDE9DF; --paper:#14191F; --paper-raised:#1B222A;
+    --line:#2C343E; --line-strong:#3C4753; --amber:#E2872E;
+    --teal:#6FB3A2; --teal-soft:#1E2E2A; --slate:#8C99A6; --danger:#D9705C; }
+}
+* { box-sizing:border-box; }
+html,body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--font-head); }
+body { max-width:1100px; margin:0 auto; padding:20px 16px 60px; }
+header { display:flex; justify-content:space-between; align-items:center; gap:12px;
+  border-bottom:2px solid var(--ink); padding-bottom:14px; margin-bottom:18px; flex-wrap:wrap; }
+h1 { font-size:20px; margin:0; font-weight:700; }
+.toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+select, button, input {
+  font-family:var(--font-mono); font-size:13px;
+  border:1px solid var(--line-strong); background:var(--paper-raised);
+  color:var(--ink); padding:8px 10px; border-radius:2px;
+}
+select { min-width:260px; }
+button { cursor:pointer; font-weight:500; }
+button:hover { border-color:var(--ink); }
+button.primary { background:var(--teal); color:#fff; border-color:var(--teal); }
+button.amber { background:var(--amber); color:#fff; border-color:var(--amber); }
+button:disabled { opacity:.4; cursor:default; }
+.nav-btn { font-size:16px; padding:8px 12px; }
+.summary { font-family:var(--font-mono); font-size:12.5px; color:var(--slate); margin-bottom:14px; }
+.summary b { color:var(--ink); }
+table { width:100%; border-collapse:collapse; font-family:var(--font-mono); font-size:12.5px; }
+th { text-align:left; font-weight:500; color:var(--slate); font-size:11px;
+  padding:6px 8px; border-bottom:1px solid var(--line-strong); position:sticky; top:0; background:var(--paper); }
+td { padding:7px 8px; border-bottom:1px solid var(--line); }
+tr:hover td { background:var(--paper-raised); }
+td.num, th.num { text-align:right; }
+td input { width:60px; padding:4px 6px; font-size:12.5px; text-align:right; }
+td input.changed { border-color:var(--amber); background:var(--teal-soft); }
+.below-min { color:var(--danger); font-weight:600; }
+.pill { display:inline-block; font-size:10.5px; padding:1px 6px; border-radius:10px;
+  background:var(--teal-soft); color:var(--teal); }
+.empty-state { padding:40px 0; text-align:center; color:var(--slate); font-family:var(--font-mono); }
+.loading { opacity:.5; }
+#status-msg { font-family:var(--font-mono); font-size:12px; color:var(--teal); min-height:16px; }
+#status-msg.err { color:var(--danger); }
+</style></head><body>
+
+<header>
+  <h1>Преглед на заявки по магазин</h1>
+  <a href="/dashboard?key=__KEY__" style="font-family:var(--font-mono);font-size:12px;color:var(--slate);">&larr; табло</a>
+</header>
+
+<div class="toolbar">
+  <button id="prevBtn" class="nav-btn">&larr;</button>
+  <select id="storeSelect"></select>
+  <button id="nextBtn" class="nav-btn">&rarr;</button>
+  <button id="loadBtn" class="primary">Изчисли заявка</button>
+  <button id="saveBtn" disabled>Запази промените (<span id="changeCount">0</span>)</button>
+  <button id="exportBtn" class="amber">Свали Excel</button>
+  <span id="status-msg"></span>
+</div>
+
+<div class="summary" id="summary">Избери магазин и натисни "Изчисли заявка".</div>
+
+<div id="tableWrap"></div>
+
+<script>
+const KEY = "__KEY__";
+const H = { "X-API-Key": KEY };
+let stores = [];
+let currentIdx = 0;
+let currentLines = [];
+let edits = {};  // sku -> {min_stock, max_stock}
+
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({headers: H}, opts || {}));
+  if (!res.ok) throw new Error((await res.text()).slice(0, 200));
+  return res.json();
+}
+
+function setStatus(msg, isErr) {
+  const el = document.getElementById("status-msg");
+  el.textContent = msg;
+  el.className = isErr ? "err" : "";
+}
+
+async function loadStores() {
+  stores = await api("/stores");
+  stores = stores.filter(s => s.is_active).sort((a,b) => a.id - b.id);
+  const sel = document.getElementById("storeSelect");
+  sel.innerHTML = stores.map(s => `<option value="${s.id}">#${s.id} — ${s.name}</option>`).join("");
+}
+
+function storeIdAt(idx) { return stores[idx] ? stores[idx].id : null; }
+
+async function loadOrder() {
+  const sel = document.getElementById("storeSelect");
+  const storeId = sel.value;
+  currentIdx = stores.findIndex(s => String(s.id) === String(storeId));
+  document.getElementById("tableWrap").innerHTML = '<div class="empty-state">Зареждам...</div>';
+  edits = {};
+  updateSaveBtn();
+  try {
+    const d = await api(`/orders/preview/${storeId}?respect_schedule=false`);
+    currentLines = d.lines;
+    renderTable(d);
+    setStatus("");
+  } catch (e) {
+    setStatus("Грешка: " + e.message, true);
+    document.getElementById("tableWrap").innerHTML = '<div class="empty-state">Неуспешно зареждане.</div>';
+  }
+}
+
+function renderTable(d) {
+  document.getElementById("summary").innerHTML =
+    `<b>${d.total_lines}</b> реда за поръчка &middot; <b>${d.total_units}</b> общо бройки &middot; ` +
+    `${d.skipped_above_min} над минимума &middot; ${d.skipped_no_stock_data.length} без данни за наличност`;
+
+  if (!d.lines.length) {
+    document.getElementById("tableWrap").innerHTML = '<div class="empty-state">Няма артикули за поръчка в този магазин в момента.</div>';
+    return;
+  }
+
+  let html = `<table><thead><tr>
+    <th>SKU</th><th>Артикул</th>
+    <th class="num">Наличност</th>
+    <th class="num">Мин</th><th class="num">Макс</th>
+    <th class="num">Предложено</th><th class="num">Поръчка</th>
+    <th>Бележка</th>
+  </tr></thead><tbody>`;
+
+  for (const l of d.lines) {
+    const belowMin = l.current_stock < l.min_stock ? ' class="below-min"' : '';
+    html += `<tr data-sku="${l.sku}">
+      <td>${l.sku}</td>
+      <td>${l.name}</td>
+      <td class="num"${belowMin}>${l.current_stock}</td>
+      <td class="num"><input type="number" step="1" value="${l.min_stock}" data-field="min"></td>
+      <td class="num"><input type="number" step="1" value="${l.max_stock}" data-field="max"></td>
+      <td class="num">${l.suggested_quantity}</td>
+      <td class="num"><b>${l.ordered_quantity}</b></td>
+      <td>${l.notes ? '<span class="pill">' + l.notes + '</span>' : ''}</td>
+    </tr>`;
+  }
+  html += "</tbody></table>";
+  document.getElementById("tableWrap").innerHTML = html;
+
+  document.querySelectorAll('#tableWrap input').forEach(inp => {
+    inp.addEventListener("input", onEdit);
+  });
+}
+
+function onEdit(e) {
+  const tr = e.target.closest("tr");
+  const sku = tr.dataset.sku;
+  const min = tr.querySelector('[data-field="min"]').value;
+  const max = tr.querySelector('[data-field="max"]').value;
+  edits[sku] = { min_stock: parseFloat(min), max_stock: parseFloat(max) };
+  e.target.classList.add("changed");
+  updateSaveBtn();
+}
+
+function updateSaveBtn() {
+  const n = Object.keys(edits).length;
+  document.getElementById("changeCount").textContent = n;
+  document.getElementById("saveBtn").disabled = n === 0;
+}
+
+async function saveChanges() {
+  const storeId = document.getElementById("storeSelect").value;
+  const payload = Object.entries(edits).map(([sku, v]) => ({
+    store_id: parseInt(storeId), sku, min_stock: v.min_stock, max_stock: v.max_stock,
+  }));
+  setStatus("Записвам...");
+  try {
+    const res = await fetch("/settings", {
+      method: "PUT",
+      headers: Object.assign({"Content-Type": "application/json"}, H),
+      body: JSON.stringify(payload),
+    });
+    const d = await res.json();
+    if (d.invalid && d.invalid.length) {
+      setStatus(`Записано, но ${d.invalid.length} невалидни (макс < мин)`, true);
+    } else {
+      setStatus(`Записани ${d.updated} промени.`);
+    }
+    await loadOrder();
+  } catch (e) {
+    setStatus("Грешка при запис: " + e.message, true);
+  }
+}
+
+function exportExcel() {
+  const storeId = document.getElementById("storeSelect").value;
+  window.location = `/orders/preview/${storeId}/export?key=${encodeURIComponent(KEY)}`;
+}
+
+document.getElementById("loadBtn").addEventListener("click", loadOrder);
+document.getElementById("saveBtn").addEventListener("click", saveChanges);
+document.getElementById("exportBtn").addEventListener("click", exportExcel);
+document.getElementById("storeSelect").addEventListener("change", loadOrder);
+document.getElementById("prevBtn").addEventListener("click", () => {
+  if (currentIdx > 0) { currentIdx--; document.getElementById("storeSelect").value = storeIdAt(currentIdx); loadOrder(); }
+});
+document.getElementById("nextBtn").addEventListener("click", () => {
+  if (currentIdx < stores.length - 1) { currentIdx++; document.getElementById("storeSelect").value = storeIdAt(currentIdx); loadOrder(); }
+});
+
+loadStores();
+</script>
+</body></html>"""
+    page = page.replace("__KEY__", _dash_esc(key))
+    return HTMLResponse(page)
+
+
+@app.get("/orders/preview/{store_id}/export")
+def export_preview(
+    store_id: int,
+    key: str = "",
+    order_date: date | None = None,
+    respect_schedule: bool = False,
+    db: Session = Depends(get_db),
+):
+    if _API_KEY and key != _API_KEY:
+        raise HTTPException(401, "Невалиден или липсващ ключ")
+    store = db.get(m.Store, store_id)
+    if not store:
+        raise HTTPException(404, f"Няма магазин с id {store_id}")
+    d = order_date or date.today()
+    res = service.calculate_for_store(db, store_id, d, None, respect_schedule)
+    content = exports_svc.build_workbook_from_lines(res.lines)
+    filename = exports_svc.order_filename(store)
+    return _attachment(
+        filename, content,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
