@@ -596,18 +596,63 @@ async function loadCmp() {
     || `<tr><td colspan="8" class="empty">Още няма получени заявки от магазините.</td></tr>`;
   document.querySelectorAll("#cBody tr[data-id]").forEach(tr => tr.onclick = () => showCmp(tr.dataset.id));
 }
+function salesChart(series, days, st, mn, mx) {
+  const W = 620, H = 170, P = 28, n = series.length, max = Math.max(1, ...series);
+  const bw = (W - P - 10) / n, avg = series.reduce((a, b) => a + b, 0) / n;
+  const y = v => H - 26 - (v / max) * (H - 50);
+  let bars = "";
+  series.forEach((v, i) => {
+    const x = P + i * bw + 3, h = Math.max(v > 0 ? 2 : 1, (H - 26) - y(v));
+    bars += `<rect x="${x}" y="${(H - 26) - h}" width="${bw - 6}" height="${h}" rx="3" fill="${v > 0 ? "var(--teal)" : "var(--line)"}"><title>${days[i]}: ${fmtN(v)} бр.</title></rect>`;
+    if (v > 0) bars += `<text x="${x + (bw - 6) / 2}" y="${(H - 26) - h - 5}" font-size="11" text-anchor="middle" fill="var(--slate)" font-family="IBM Plex Mono, monospace">${fmtN(v)}</text>`;
+    if (i % 2 === 0 || n <= 7) bars += `<text x="${x + (bw - 6) / 2}" y="${H - 8}" font-size="11" text-anchor="middle" fill="var(--slate)" font-family="IBM Plex Mono, monospace">${days[i]}</text>`;
+  });
+  const ay = y(avg);
+  const avgLine = avg > 0 ? `<line x1="${P}" x2="${W - 8}" y1="${ay}" y2="${ay}" stroke="var(--amber)" stroke-dasharray="5 4" stroke-width="1.5"/>
+    <rect x="${P}" y="${ay - 17}" width="92" height="15" rx="3" fill="var(--paper)" opacity="0.9"/><text x="${P + 4}" y="${ay - 5}" font-size="11" fill="var(--amber)" font-family="IBM Plex Mono, monospace">ср. ${fmtN(Math.round(avg * 10) / 10)}/ден</text>` : "";
+  // лента наличност спрямо мин/макс
+  let gauge = "";
+  if (st != null && mx) {
+    const top = Math.max(mx, st, 1) * 1.15, gx = v => 8 + Math.max(0, Math.min(v, top)) / top * 300;
+    gauge = `<svg width="360" height="54" role="img" aria-label="Наличност спрямо мин и макс" style="display:block">
+      <rect x="8" y="16" width="300" height="12" rx="6" fill="var(--line)"/>
+      <rect x="${gx(mn || 0)}" y="16" width="${Math.max(2, gx(mx) - gx(mn || 0))}" height="12" fill="var(--teal-soft)"/>
+      <line x1="${gx(mn || 0)}" x2="${gx(mn || 0)}" y1="10" y2="34" stroke="var(--slate)"/><line x1="${gx(mx)}" x2="${gx(mx)}" y1="10" y2="34" stroke="var(--slate)"/>
+      <circle cx="${gx(st)}" cy="22" r="7" fill="${st < (mn || 0) ? "var(--danger)" : "var(--ink)"}"/>
+      <text x="${gx(mn || 0) - 3}" y="48" font-size="11" text-anchor="end" fill="var(--slate)" font-family="IBM Plex Mono, monospace">мин ${fmtN(mn)}</text>
+      <text x="${gx(mx) + 3}" y="48" font-size="11" text-anchor="start" fill="var(--slate)" font-family="IBM Plex Mono, monospace">макс ${fmtN(mx)}</text>
+      <text x="${gx(st)}" y="9" font-size="11" text-anchor="middle" fill="var(--ink)" font-family="IBM Plex Mono, monospace">нал. ${fmtN(st)}</text></svg>`;
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;display:block" role="img" aria-label="Продажби по дни">${bars}${avgLine}</svg>${gauge}`;
+}
+const VERD = { "MinMaxAI": ["по-близо: MinMaxAI", ""], "Ани": ["по-близо: Ани", "warn"], "равни": ["равни", "off"], "неясно": ["неясно", "off"] };
+let CMP = null;
 async function showCmp(id) {
-  const d = await api(`/ui/compare/${id}`);
+  CMP = await api(`/ui/compare/${id}`); const d = CMP;
   const tag = n => n === "и двамата" ? "" : n === "различно количество" ? "warn" : (n || "").startsWith("само MinMaxAI") ? "" : "bad";
+  const v = d.verdicts || {};
+  const diffs = d.lines.filter(l => Math.abs(l.diff) >= 0.01).length;
   $("cDetail").innerHTML = `<div class="head"><h2>${esc(d.store)} · ${d.at}</h2><span class="note">наличности от ${d.stock_at || "—"}</span></div>
   <div class="bar"><button onclick="download('/ui/compare/${d.id}/xlsx?side=store')">Excel — заявката на магазина</button>
-  <button class="warm" onclick="download('/ui/compare/${d.id}/xlsx?side=api')">Excel — заявката на MinMaxAI</button></div>
-  <div class="scroll"><table><thead><tr><th>Код</th><th>Артикул</th><th class="num">Магазин</th><th class="num">MinMaxAI</th><th class="num">Разлика</th>
-  <th class="num">Наличност</th><th class="num">Мин</th><th class="num">Макс</th><th class="num">Продажби/ден</th><th>Защо</th></tr></thead><tbody>
-  ${d.lines.map(l => `<tr><td>${esc(l.sku)}</td><td class="name">${esc(l.name || "")}</td><td class="num">${fmtN(l.store_qty)}</td><td class="num"><b>${fmtN(l.api_qty)}</b></td>
-  <td class="num">${l.diff > 0 ? "+" : ""}${fmtN(l.diff)}</td><td class="num">${fmtN(l.stock)}</td><td class="num">${fmtN(l.min)}</td><td class="num">${fmtN(l.max)}</td>
-  <td class="num">${fmtN(l.sales_per_day)}</td><td><span class="tag ${tag(l.note)}">${esc(l.note || "")}</span></td></tr>`).join("")}
+  <button class="warm" onclick="download('/ui/compare/${d.id}/xlsx?side=api')">Excel — заявката на MinMaxAI</button>
+  <button id="cAll">Покажи всички графики</button></div>
+  <div class="totals"><span>Разлики <b>${diffs}</b></span><span>По продажбите по-близо: MinMaxAI <b>${v["MinMaxAI"] || 0}</b></span><span>Ани <b>${v["Ани"] || 0}</b></span><span>равни <b>${v["равни"] || 0}</b></span></div>
+  <p class="note" style="margin:0 0 10px">Цъкни на ред с разлика — графика на продажбите ден по ден за 14 дни и обяснение.</p>
+  <div class="scroll"><table><thead><tr><th>Код</th><th>Артикул</th><th class="num">Ани</th><th class="num">MinMaxAI</th><th class="num">Разлика</th>
+  <th class="num">Наличност</th><th class="num">Мин</th><th class="num">Макс</th><th class="num">Прод./ден</th><th>Защо</th><th>По продажбите</th></tr></thead><tbody id="cRows">
+  ${d.lines.map((l, i) => { const [vl, vc] = VERD[l.verdict] || ["", "off"]; const has = Math.abs(l.diff) >= 0.01;
+    return `<tr data-i="${i}" style="${has ? "cursor:pointer" : ""}"><td>${esc(l.sku)}</td><td class="name">${has ? "▸ " : ""}${esc(l.name || "")}</td><td class="num">${fmtN(l.store_qty)}</td><td class="num"><b>${fmtN(l.api_qty)}</b></td>
+    <td class="num">${l.diff > 0 ? "+" : ""}${fmtN(l.diff)}</td><td class="num">${fmtN(l.stock)}</td><td class="num">${fmtN(l.min)}</td><td class="num">${fmtN(l.max)}</td>
+    <td class="num">${fmtN(l.sales_per_day)}</td><td><span class="tag ${tag(l.note)}">${esc(l.note || "")}</span></td><td>${has ? `<span class="tag ${vc}">${vl}</span>` : ""}</td></tr>
+    <tr class="xrow" id="x${i}" style="display:none"><td colspan="11" style="background:var(--paper)">
+      <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;padding:10px 4px;position:sticky;left:0;max-width:min(1100px, calc(100vw - 48px))">
+        <div style="flex:1 1 420px;min-width:0">${salesChart(l.series, d.days, l.stock, l.min, l.max)}</div>
+        <div style="flex:1 1 280px;font-family:var(--head);font-size:14px;line-height:1.6"><b>Защо има разлика</b><br>${esc(l.explain)}</div>
+      </div></td></tr>`; }).join("")}
   </tbody></table></div>`;
+  const toggle = i => { const r = $("x" + i); if (r) r.style.display = r.style.display === "none" ? "" : "none"; };
+  document.querySelectorAll("#cRows tr[data-i]").forEach(tr => { const i = +tr.dataset.i; if (Math.abs(d.lines[i].diff) >= 0.01) tr.onclick = () => toggle(i); });
+  $("cAll").onclick = () => d.lines.forEach((l, i) => { if (Math.abs(l.diff) >= 0.01) $("x" + i).style.display = ""; });
   $("cDetail").scrollIntoView({ behavior: "smooth" });
 }
 

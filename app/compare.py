@@ -206,6 +206,99 @@ def summary(db: Session, days: int = 14) -> dict:
     return {"days": days, "totals": tot, "orders": rows}
 
 
+def _series(db: Session, store_id: int, day) -> dict[str, list[float]]:
+    """Продажби ден по ден за 14-те дни преди заявката: sku -> [14 стойности]."""
+    start = day - timedelta(days=14)
+    out: dict[str, list[float]] = {}
+    for sku, d, q in db.execute(
+        select(m.Article.sku, m.SalesHistory.sale_date, func.sum(m.SalesHistory.quantity_sold))
+        .join(m.Article, m.Article.id == m.SalesHistory.article_id)
+        .where(m.SalesHistory.store_id == store_id,
+               m.SalesHistory.sale_date >= start, m.SalesHistory.sale_date < day)
+        .group_by(m.Article.sku, m.SalesHistory.sale_date)
+    ).all():
+        i = (d - start).days
+        if 0 <= i < 14:
+            out.setdefault(sku, [0.0] * 14)[i] = max(float(q or 0), 0.0)
+    return out
+
+
+def _fmt(x: float) -> str:
+    return f"{x:.1f}".rstrip("0").rstrip(".") if x is not None else "—"
+
+
+def explain(l, series: list[float] | None) -> dict:
+    """Обяснение с думи + оценка по продажбите кой е по-близо до търсенето."""
+    sq, aq = float(l.store_qty), float(l.api_qty)
+    st = float(l.stock) if l.stock is not None else None
+    mn = float(l.min_stock) if l.min_stock is not None else None
+    mx = float(l.max_stock) if l.max_stock is not None else None
+    ser = series or [0.0] * 14
+    sold = sum(ser)
+    sdp = sold / 14
+    last7, prev7 = sum(ser[7:]), sum(ser[:7])
+    zero_days = sum(1 for v in ser if v == 0)
+    note = l.note or ""
+    parts = []
+
+    def cover(q):
+        return None if sdp <= 0 or q is None else q / sdp
+
+    base = f"Продава {_fmt(sdp)} бр./ден ({_fmt(sold)} бр. за 14 дни)" if sold > 0 else "Не е продаван нито веднъж за 14 дни"
+    if sold > 0 and prev7 > 0 and last7 > prev7 * 1.3:
+        base += ", продажбите растат"
+    elif sold > 0 and last7 < prev7 * 0.7:
+        base += ", продажбите падат"
+    parts.append(base + ".")
+    c_now = cover(st)
+    if st is not None:
+        parts.append(f"Наличност {_fmt(st)} бр." + (f" ≈ {_fmt(c_now)} дни продажби." if c_now is not None else ""))
+
+    if note.startswith("и двамата") and abs(sq - aq) < 0.01:
+        parts.append(f"И двамата поръчват {_fmt(sq)} бр. — пълно съвпадение.")
+    elif note == "различно количество":
+        parts.append(f"Ани поръчва {_fmt(sq)} бр., MinMaxAI {_fmt(aq)} бр. (допълва до макс {_fmt(mx)} в цели опаковки).")
+    elif note.startswith("само магазин"):
+        if "над мин" in note:
+            parts.append(f"Ани поръчва {_fmt(sq)} бр., но наличността е над минимума {_fmt(mn)} — MinMaxAI още не поръчва.")
+            if c_now is not None and c_now < 2:
+                parts.append("Внимание: наличността стига за под 2 дни — минимумът изглежда нисък; ученето ще го вдигне, ако продажбите го потвърдят.")
+        elif "извън планограмата" in note:
+            parts.append(f"Ани поръчва {_fmt(sq)} бр., но артикулът не е в планограмата на магазина — MinMaxAI не го поръчва."
+                         + (" Продава се — да се помисли за добавяне в планограмата." if sdp >= 0.5 else ""))
+        elif "0-0" in note or "спрян" in note:
+            parts.append(f"Ани поръчва {_fmt(sq)} бр., но артикулът е спрян (0-0) по правилата."
+                         + (" Продава се над 1 бр./ден — спирането да се преразгледа." if sdp >= 1 else ""))
+        elif "няма мин/макс" in note:
+            parts.append(f"Ани поръчва {_fmt(sq)} бр., но позицията няма мин/макс — MinMaxAI не я поръчва; ученето ще я настрои, щом започне да се продава.")
+        else:
+            parts.append(f"Ани поръчва {_fmt(sq)} бр.; MinMaxAI не поръчва.")
+    elif note.startswith("само MinMaxAI"):
+        parts.append(f"MinMaxAI поръчва {_fmt(aq)} бр., защото наличността е под минимума {_fmt(mn)}; Ани не го е поръчала.")
+        if c_now is not None and c_now < 2:
+            parts.append("Рискът да свърши преди следващата доставка е висок.")
+    elif note:
+        parts.append(note)
+
+    # оценка: след доставка запасът трябва да е между 2 дни и (дни покритие + 2)
+    verdict = "равни" if abs(sq - aq) < 0.01 else "неясно"
+    if abs(sq - aq) >= 0.01 and st is not None:
+        if sdp <= 0:
+            verdict = "Ани" if sq < aq else "MinMaxAI"
+            parts.append("Без продажби — по-малката поръчка е по-правилна.")
+        else:
+            hi = 16 if sdp < 0.3 else 7 if sdp < 1 else 5 if sdp < 3 else 4
+            def dist(q):
+                c = (st + q) / sdp
+                return 0 if 2 <= c <= hi else (2 - c if c < 2 else c - hi)
+            ds, da = dist(sq), dist(aq)
+            cs, ca = (st + sq) / sdp, (st + aq) / sdp
+            parts.append(f"След доставка: по Ани ≈ {_fmt(cs)} дни запас, по MinMaxAI ≈ {_fmt(ca)} дни (разумно: 2–{hi} дни).")
+            verdict = "равни" if abs(ds - da) < 0.5 else ("MinMaxAI" if da < ds else "Ани")
+    return {"text": " ".join(parts), "verdict": verdict, "sdp": round(sdp, 2),
+            "sold_14d": round(sold, 1), "zero_days": zero_days}
+
+
 def detail(db: Session, order_id: int) -> dict:
     o = db.get(m.ManualOrder, order_id)
     if o is None:
@@ -214,21 +307,12 @@ def detail(db: Session, order_id: int) -> dict:
     ls = db.execute(
         select(m.ManualOrderLine).where(m.ManualOrderLine.order_id == order_id)
     ).scalars().all()
-    # средни продажби на ден за последните 14 дни (за преценка кой е прав)
-    sdp = {}
-    if o.store_id:
-        since = o.received_at.date() - timedelta(days=14)
-        for aid, sku, q in db.execute(
-            select(m.SalesHistory.article_id, m.Article.sku,
-                   func.sum(m.SalesHistory.quantity_sold))
-            .join(m.Article, m.Article.id == m.SalesHistory.article_id)
-            .where(m.SalesHistory.store_id == o.store_id,
-                   m.SalesHistory.sale_date >= since)
-            .group_by(m.SalesHistory.article_id, m.Article.sku)
-        ).all():
-            sdp[sku] = round(float(q or 0) / 14, 2)
+    day = o.received_at.astimezone(SOFIA).date()
+    series = _series(db, o.store_id, day) if o.store_id else {}
+    days = [(day - timedelta(days=14 - i)).strftime("%d.%m") for i in range(14)]
     out = []
     for l in ls:
+        ex = explain(l, series.get(l.sku))
         out.append({
             "sku": l.sku, "name": l.name,
             "store_qty": float(l.store_qty), "api_qty": float(l.api_qty),
@@ -237,15 +321,20 @@ def detail(db: Session, order_id: int) -> dict:
             "min": float(l.min_stock) if l.min_stock is not None else None,
             "max": float(l.max_stock) if l.max_stock is not None else None,
             "pack": l.pack_size, "price": float(l.price) if l.price is not None else None,
-            "sales_per_day": sdp.get(l.sku), "note": l.note,
+            "sales_per_day": ex["sdp"], "note": l.note,
+            "series": series.get(l.sku, [0.0] * 14),
+            "explain": ex["text"], "verdict": ex["verdict"],
         })
-    out.sort(key=lambda r: (r["note"] != "различно количество",
-                            -abs(r["diff"]), r["name"] or ""))
+    out.sort(key=lambda r: (abs(r["diff"]) < 0.01, -abs(r["diff"]), r["name"] or ""))
+    verdicts = {}
+    for r in out:
+        if abs(r["diff"]) >= 0.01:
+            verdicts[r["verdict"]] = verdicts.get(r["verdict"], 0) + 1
     return {
         "id": o.id, "store": store.name if store else o.store_raw,
         "at": o.received_at.astimezone(SOFIA).strftime("%d.%m.%Y %H:%M"),
         "stock_at": o.stock_at.astimezone(SOFIA).strftime("%d.%m.%Y %H:%M") if o.stock_at else None,
-        "raw_text": o.raw_text, "lines": out,
+        "raw_text": o.raw_text, "days": days, "verdicts": verdicts, "lines": out,
     }
 
 
@@ -269,18 +358,18 @@ def export_xlsx(db: Session, days: int = 14) -> bytes:
     d2 = wb.create_sheet("Всички редове")
     d2.append(["Магазин", "Получена", "Код", "Артикул", "Магазин поръча", "MinMaxAI",
                "Разлика", "Наличност", "Мин", "Макс", "Опак.", "Продажби/ден",
-               "Цена €", "Коментар"])
+               "Цена €", "Коментар", "По-близо до продажбите", "Обяснение"])
     for r in s["orders"]:
         d = detail(db, r["id"])
         for l in d["lines"]:
             d2.append([d["store"], d["at"], int(l["sku"]) if l["sku"].isdigit() else l["sku"],
                        l["name"], l["store_qty"], l["api_qty"], l["diff"], l["stock"],
                        l["min"], l["max"], l["pack"], l["sales_per_day"], l["price"],
-                       l["note"]])
+                       l["note"], l["verdict"], l["explain"]])
     hf = Font(bold=True, color="FFFFFF")
     hb = PatternFill("solid", fgColor="2F6358")
     for sh, widths in ((ws, [30, 17, 14, 12, 12, 13, 12, 13, 14, 15, 16]),
-                       (d2, [28, 17, 9, 44, 12, 11, 9, 10, 7, 7, 7, 12, 9, 36])):
+                       (d2, [28, 17, 9, 44, 12, 11, 9, 10, 7, 7, 7, 12, 9, 36, 16, 90])):
         for c in sh[1]:
             c.font, c.fill = hf, hb
         for i, w in enumerate(widths):
