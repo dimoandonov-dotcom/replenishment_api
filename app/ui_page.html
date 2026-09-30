@@ -639,12 +639,13 @@ async function showCmp(id) {
   <div class="totals"><span>Разлики <b>${diffs}</b></span><span>По продажбите по-близо: MinMaxAI <b>${v["MinMaxAI"] || 0}</b></span><span>Ани <b>${v["Ани"] || 0}</b></span><span>равни <b>${v["равни"] || 0}</b></span></div>
   <p class="note" style="margin:0 0 10px">Цъкни на ред с разлика — графика на продажбите ден по ден за 14 дни и обяснение.</p>
   <div class="scroll"><table><thead><tr><th>Код</th><th>Артикул</th><th class="num">Ани</th><th class="num">MinMaxAI</th><th class="num">Разлика</th>
-  <th class="num">Наличност</th><th class="num">Мин</th><th class="num">Макс</th><th class="num">Прод./ден</th><th>Защо</th><th>По продажбите</th></tr></thead><tbody id="cRows">
+  <th class="num" title="В момента на заявката на Ани">Нал. при заявката</th><th class="num" title="Последни данни от Мистрал">Нал. сега</th><th class="num">Мин</th><th class="num">Макс</th><th class="num">Прод./ден</th><th>Защо</th><th>По продажбите</th></tr></thead><tbody id="cRows">
   ${d.lines.map((l, i) => { const [vl, vc] = VERD[l.verdict] || ["", "off"]; const has = Math.abs(l.diff) >= 0.01;
     return `<tr data-i="${i}" style="${has ? "cursor:pointer" : ""}"><td>${esc(l.sku)}</td><td class="name">${has ? "▸ " : ""}${esc(l.name || "")}</td><td class="num">${fmtN(l.store_qty)}</td><td class="num"><b>${fmtN(l.api_qty)}</b></td>
-    <td class="num">${l.diff > 0 ? "+" : ""}${fmtN(l.diff)}</td><td class="num">${fmtN(l.stock)}</td><td class="num">${fmtN(l.min)}</td><td class="num">${fmtN(l.max)}</td>
+    <td class="num">${l.diff > 0 ? "+" : ""}${fmtN(l.diff)}</td><td class="num ${l.stock != null && l.min != null && l.stock < l.min ? "low" : ""}">${fmtN(l.stock)}</td>
+    <td class="num ${l.stock_now != null && l.stock_now <= 0 ? "low" : ""}">${fmtN(l.stock_now)}</td><td class="num">${fmtN(l.min)}</td><td class="num">${fmtN(l.max)}</td>
     <td class="num">${fmtN(l.sales_per_day)}</td><td><span class="tag ${tag(l.note)}">${esc(l.note || "")}</span></td><td>${has ? `<span class="tag ${vc}">${vl}</span>` : ""}</td></tr>
-    <tr class="xrow" id="x${i}" style="display:none"><td colspan="11" style="background:var(--paper)">
+    <tr class="xrow" id="x${i}" style="display:none"><td colspan="12" style="background:var(--paper)">
       <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;padding:10px 4px;position:sticky;left:0;max-width:min(1100px, calc(100vw - 48px))">
         <div style="flex:1 1 420px;min-width:0">${salesChart(l.series, d.days, l.stock, l.min, l.max)}</div>
         <div style="flex:1 1 280px;font-family:var(--head);font-size:14px;line-height:1.6"><b>Защо има разлика</b><br>${esc(l.explain)}</div>

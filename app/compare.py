@@ -309,6 +309,10 @@ def detail(db: Session, order_id: int) -> dict:
     ).scalars().all()
     day = o.received_at.astimezone(SOFIA).date()
     series = _series(db, o.store_id, day) if o.store_id else {}
+    now_stock = {}
+    if o.store_id:
+        idmap = {a.id: a.sku for a in db.execute(select(m.Article)).scalars().all()}
+        now_stock = {idmap[k]: v for k, v in service.latest_stock_map(db, o.store_id).items() if k in idmap}
     days = [(day - timedelta(days=14 - i)).strftime("%d.%m") for i in range(14)]
     out = []
     for l in ls:
@@ -318,6 +322,7 @@ def detail(db: Session, order_id: int) -> dict:
             "store_qty": float(l.store_qty), "api_qty": float(l.api_qty),
             "diff": float(l.api_qty) - float(l.store_qty),
             "stock": float(l.stock) if l.stock is not None else None,
+            "stock_now": float(now_stock[l.sku]) if l.sku in now_stock else None,
             "min": float(l.min_stock) if l.min_stock is not None else None,
             "max": float(l.max_stock) if l.max_stock is not None else None,
             "pack": l.pack_size, "price": float(l.price) if l.price is not None else None,
@@ -357,19 +362,19 @@ def export_xlsx(db: Session, days: int = 14) -> bytes:
                    r["store_value"], r["api_value"]])
     d2 = wb.create_sheet("Всички редове")
     d2.append(["Магазин", "Получена", "Код", "Артикул", "Магазин поръча", "MinMaxAI",
-               "Разлика", "Наличност", "Мин", "Макс", "Опак.", "Продажби/ден",
+               "Разлика", "Наличност при заявката", "Наличност сега", "Мин", "Макс", "Опак.", "Продажби/ден",
                "Цена €", "Коментар", "По-близо до продажбите", "Обяснение"])
     for r in s["orders"]:
         d = detail(db, r["id"])
         for l in d["lines"]:
             d2.append([d["store"], d["at"], int(l["sku"]) if l["sku"].isdigit() else l["sku"],
-                       l["name"], l["store_qty"], l["api_qty"], l["diff"], l["stock"],
+                       l["name"], l["store_qty"], l["api_qty"], l["diff"], l["stock"], l["stock_now"],
                        l["min"], l["max"], l["pack"], l["sales_per_day"], l["price"],
                        l["note"], l["verdict"], l["explain"]])
     hf = Font(bold=True, color="FFFFFF")
     hb = PatternFill("solid", fgColor="2F6358")
     for sh, widths in ((ws, [30, 17, 14, 12, 12, 13, 12, 13, 14, 15, 16]),
-                       (d2, [28, 17, 9, 44, 12, 11, 9, 10, 7, 7, 7, 12, 9, 36, 16, 90])):
+                       (d2, [28, 17, 9, 44, 12, 11, 9, 14, 12, 7, 7, 7, 12, 9, 36, 16, 90])):
         for c in sh[1]:
             c.font, c.fill = hf, hb
         for i, w in enumerate(widths):
