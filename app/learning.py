@@ -52,7 +52,7 @@ def _capped(name: str) -> bool:
     n = _C(name)
     wine = "ВИНО" in n and re.search(r"750\s*МЛ|0[.,]7\s*Л", n)
     hard = (not any(x in n for x in _EXCL) and any(k in n for k in _HARD)
-            and re.search(r"0[.,]?[57]\s*Л\b|500\s*МЛ|700\s*МЛ", n))
+            and re.search(r"0[.,]?[57]\s*Л\b|500\s*МЛ|700\s*МЛ|(?<![0-9])0[.,][57](?![0-9])", n))
     return bool(wine or hard)
 
 
@@ -170,13 +170,15 @@ def run(db: Session, apply: bool = True) -> dict:
                     signals.append({"store": store.name, "sku": a.sku,
                                     "name": a.supplier_name or a.name, "times": len(hits),
                                     "sold_14d": sold})
-            if _capped(a.supplier_name or a.name) and mx_t > 3:
+            if (_capped(a.name) or _capped(a.supplier_name or "")) and mx_t > 3:
                 mn_t, mx_t = min(mn_t, 3), 3
 
             if s is None:
                 new_min, new_max, kind = mn_t, mx_t, "нов"
             else:
-                if (store.id, aid) in recent and not urgent:
+                # веднъж седмично на позиция - и за свършване; само потвърден
+                # сигнал от Ани може по-често
+                if (store.id, aid) in recent and not reason.startswith("Ани"):
                     continue
                 om, oM = float(s.min_stock), float(s.max_stock)
                 # мъртва зона: дребни разлики не се пипат (без шум всяка нощ)
