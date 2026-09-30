@@ -343,3 +343,18 @@ def export_preview(
         headers={"Content-Disposition":
                  f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Мистрал (MS SQL) - проверка на връзката и съдържанието
+# ---------------------------------------------------------------------------
+
+@router.get("/ui/mistral/probe")
+def mistral_probe():
+    from . import mistral
+    if not mistral.configured():
+        raise HTTPException(400, "Връзката към Мистрал не е настроена")
+    try:
+        return mistral.probe()
+    except Exception as e:  # покажи реалната причина - таймаут, вход и т.н.
+        raise HTTPException(502, f"Мистрал: {type(e).__name__}: {e}")
