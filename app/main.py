@@ -49,7 +49,16 @@ def session_token() -> str:
     return _hmac.new(secret, ("session:" + APP_USER).encode(), _hashlib.sha256).hexdigest()
 
 
+INGEST_TOKEN = _os.getenv("INGEST_TOKEN", "").strip()
+# Пътища, в които страницата anindk (публична, без вход) може само да
+# ЗАПИСВА заявки за сравнение - с отделен ограничен ключ, не с главния.
+_INGEST_PATHS = {"/compare/manual-order"}
+
+
 def is_authenticated(request: Request) -> bool:
+    if (request.url.path in _INGEST_PATHS and INGEST_TOKEN
+            and _hmac.compare_digest(request.headers.get("X-Ingest-Token", ""), INGEST_TOKEN)):
+        return True
     if _API_KEY and _hmac.compare_digest(request.headers.get("X-API-Key", ""), _API_KEY):
         return True
     cookie = request.cookies.get(SESSION_COOKIE, "")
@@ -69,6 +78,17 @@ async def _require_auth(request: Request, call_next):
     if not is_authenticated(request):
         return JSONResponse(status_code=401, content={"detail": "Нужен е вход"})
     return await call_next(request)
+
+
+# anindk.netlify.app праща копие на заявките на магазините (CORS)
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://anindk.netlify.app", "http://anindk.netlify.app"],
+    allow_methods=["POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Ingest-Token"],
+)
 
 
 class OrderLineOut(BaseModel):

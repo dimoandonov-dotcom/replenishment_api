@@ -423,3 +423,39 @@ class Planogram(Base):
     article_id: Mapped[int] = mapped_column(
         ForeignKey("articles.id", ondelete="CASCADE"), primary_key=True
     )
+
+
+class ManualOrder(Base):
+    """Заявка от магазина (от Viber през anindk) + снимка на нашата в същия момент."""
+
+    __tablename__ = "manual_orders"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    store_id: Mapped[int | None] = mapped_column(ForeignKey("stores.id"))
+    store_raw: Mapped[str] = mapped_column(Text)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    source: Mapped[str] = mapped_column(Text, default="anindk")
+    raw_text: Mapped[str | None] = mapped_column(Text)
+    stock_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ManualOrderLine(Base):
+    """Един ред от сравнението: какво поръча магазинът и какво бихме поръчали ние."""
+
+    __tablename__ = "manual_order_lines"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("manual_orders.id", ondelete="CASCADE"), index=True
+    )
+    sku: Mapped[str] = mapped_column(Text)
+    name: Mapped[str | None] = mapped_column(Text)
+    store_qty: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
+    api_qty: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
+    stock: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    min_stock: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    max_stock: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    pack_size: Mapped[int | None] = mapped_column(Integer)
+    in_planogram: Mapped[bool | None] = mapped_column(Boolean)
+    price: Mapped[float | None] = mapped_column(Numeric(12, 4))
+    note: Mapped[str | None] = mapped_column(Text)

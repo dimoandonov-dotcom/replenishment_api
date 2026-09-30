@@ -14,7 +14,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -431,3 +431,87 @@ def mistral_supplier_info(codes: str):
         return mistral.supplier_info(parsed)
     except Exception as e:
         raise HTTPException(502, f"Мистрал: {type(e).__name__}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Сравнение: заявки на магазините срещу MinMaxAI
+# ---------------------------------------------------------------------------
+
+class ManualLine(BaseModel):
+    sku: str
+    name: str | None = None
+    qty: float
+
+
+class ManualOrderIn(BaseModel):
+    store: str
+    lines: list[ManualLine]
+    text: str | None = None
+    source: str = "anindk"
+
+
+@router.post("/compare/manual-order")
+def compare_manual_order(payload: ManualOrderIn, db: Session = Depends(get_db)):
+    """Получава заявка на магазин (от anindk) и записва нашата за същия момент."""
+    from . import compare
+    return compare.record(db, payload.store,
+                          [l.model_dump() for l in payload.lines],
+                          payload.text, payload.source)
+
+
+@router.post("/compare/upload")
+async def compare_upload(files: list[UploadFile] = File(...), db: Session = Depends(get_db)):
+    """
+    Ръчно качване на Excel заявки на магазини (бланката на НДК:
+    ArtNomer / Artikul / MerEd / Kol). Магазинът се взима от името на файла.
+    """
+    import openpyxl
+    from io import BytesIO
+    from . import compare
+    out = []
+    for f in files:
+        wb = openpyxl.load_workbook(BytesIO(await f.read()), data_only=True)
+        ws = wb.worksheets[0]
+        lines = []
+        for r in ws.iter_rows(min_row=2, values_only=True, max_col=5):
+            if r and r[0] is not None and isinstance(r[3], (int, float)):
+                lines.append({"sku": str(int(r[0])) if isinstance(r[0], (int, float)) else str(r[0]),
+                              "name": r[1], "qty": float(r[3])})
+        store = (f.filename or "").rsplit(".", 1)[0]
+        res = compare.record(db, store, lines, None, "upload")
+        out.append({"file": f.filename, **res})
+    return out
+
+
+@router.get("/ui/compare")
+def ui_compare(days: int = Query(14, ge=1, le=120), db: Session = Depends(get_db)):
+    from . import compare
+    return compare.summary(db, days)
+
+
+@router.get("/ui/compare/export")
+def ui_compare_export(days: int = Query(14, ge=1, le=120), db: Session = Depends(get_db)):
+    from . import compare
+    content = compare.export_xlsx(db, days)
+    name = f"Сравнение_заявки_{days}дни.xlsx"
+    return Response(content=content,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8\'\'{quote(name)}"})
+
+
+@router.get("/ui/compare/{order_id}")
+def ui_compare_detail(order_id: int, db: Session = Depends(get_db)):
+    from . import compare
+    d = compare.detail(db, order_id)
+    if not d:
+        raise HTTPException(404, "Няма такава заявка")
+    return d
+
+
+@router.delete("/ui/compare/{order_id}")
+def ui_compare_delete(order_id: int, db: Session = Depends(get_db)):
+    o = db.get(m.ManualOrder, order_id)
+    if o:
+        db.delete(o)
+        db.commit()
+    return {"deleted": bool(o)}

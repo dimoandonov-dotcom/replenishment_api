@@ -26,6 +26,32 @@ MIGRATIONS = [
         article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
         PRIMARY KEY (store_id, article_id)
     )""",
+    """CREATE TABLE IF NOT EXISTS manual_orders (
+        id          SERIAL PRIMARY KEY,
+        store_id    INTEGER REFERENCES stores(id),
+        store_raw   TEXT NOT NULL,
+        received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        source      TEXT NOT NULL DEFAULT 'anindk',
+        raw_text    TEXT,
+        stock_at    TIMESTAMPTZ
+    )""",
+    """CREATE TABLE IF NOT EXISTS manual_order_lines (
+        id           SERIAL PRIMARY KEY,
+        order_id     INTEGER NOT NULL REFERENCES manual_orders(id) ON DELETE CASCADE,
+        sku          TEXT NOT NULL,
+        name         TEXT,
+        store_qty    NUMERIC(12,2) NOT NULL DEFAULT 0,
+        api_qty      NUMERIC(12,2) NOT NULL DEFAULT 0,
+        stock        NUMERIC(12,2),
+        min_stock    NUMERIC(12,2),
+        max_stock    NUMERIC(12,2),
+        pack_size    INTEGER,
+        in_planogram BOOLEAN,
+        price        NUMERIC(12,4),
+        note         TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_mol_order ON manual_order_lines(order_id)",
+    "CREATE INDEX IF NOT EXISTS ix_mo_received ON manual_orders(received_at)",
 ]
 
 
