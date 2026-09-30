@@ -52,6 +52,18 @@ MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_mol_order ON manual_order_lines(order_id)",
     "CREATE INDEX IF NOT EXISTS ix_mo_received ON manual_orders(received_at)",
+    """CREATE TABLE IF NOT EXISTS settings_log (
+        id         SERIAL PRIMARY KEY,
+        store_id   INTEGER NOT NULL REFERENCES stores(id),
+        article_id INTEGER NOT NULL REFERENCES articles(id),
+        old_min    NUMERIC(12,2), old_max NUMERIC(12,2),
+        new_min    NUMERIC(12,2), new_max NUMERIC(12,2),
+        source     TEXT NOT NULL,
+        reason     TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
+    "CREATE INDEX IF NOT EXISTS ix_slog_store ON settings_log(store_id)",
+    "CREATE INDEX IF NOT EXISTS ix_slog_created ON settings_log(created_at)",
 ]
 
 

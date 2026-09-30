@@ -106,11 +106,18 @@ def scan_stockouts(db: Session, store_id: int, bump_max: bool = True) -> list[m.
         adjusted = False
         if bump_max:
             row = db.get(m.StoreArticleSetting, (store_id, article_id))
-            if row is not None:
+            # заключените от човек позиции не се пипат
+            if row is not None and row.auto_adjust is not False:
                 old_max = float(row.max_stock)
                 new_max = math.ceil(old_max * (1 + STOCKOUT_MAX_BUMP))
                 row.max_stock = new_max
                 adjusted = True
+                db.add(m.SettingsLog(
+                    store_id=store_id, article_id=article_id,
+                    old_min=row.min_stock, old_max=old_max,
+                    new_min=row.min_stock, new_max=new_max,
+                    source="learning", reason="свърши — макс +10%",
+                ))
 
         alert = m.ArticleAlert(
             store_id=store_id, article_id=article_id, supplier_id=s.supplier_id,

@@ -528,3 +528,49 @@ def ui_compare_delete(order_id: int, db: Session = Depends(get_db)):
         db.delete(o)
         db.commit()
     return {"deleted": bool(o)}
+
+
+# ---------------------------------------------------------------------------
+# Самообучение на мин/макс
+# ---------------------------------------------------------------------------
+
+@router.post("/learning/run")
+def learning_run(apply: bool = True, db: Session = Depends(get_db)):
+    """Нощното учене (вика се от cron в 02:30). apply=false = само преглед."""
+    from . import learning
+    return learning.run(db, apply)
+
+
+@router.get("/ui/learning")
+def ui_learning(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db)):
+    from . import learning
+    stores = {x.id: x.name for x in db.execute(select(m.Store)).scalars().all()}
+    arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
+    locked = [
+        {"store_id": x.store_id, "store": stores.get(x.store_id), "sku": arts[x.article_id].sku,
+         "name": arts[x.article_id].supplier_name or arts[x.article_id].name,
+         "min": float(x.min_stock), "max": float(x.max_stock)}
+        for x in db.execute(select(m.StoreArticleSetting)
+                            .where(m.StoreArticleSetting.auto_adjust.is_(False))).scalars().all()
+        if x.article_id in arts
+    ]
+    return {"log": learning.recent_log(db, days), "locked": locked}
+
+
+class UnlockIn(BaseModel):
+    store_id: int
+    sku: str
+
+
+@router.post("/settings/unlock")
+def settings_unlock(items: list[UnlockIn], db: Session = Depends(get_db)):
+    """Отключва позиции, за да ги поеме автоматичното учене."""
+    arts = {a.sku: a.id for a in db.execute(select(m.Article)).scalars().all()}
+    n = 0
+    for it in items:
+        row = db.get(m.StoreArticleSetting, (it.store_id, arts.get(it.sku)))
+        if row is not None and row.auto_adjust is False:
+            row.auto_adjust = True
+            n += 1
+    db.commit()
+    return {"unlocked": n}

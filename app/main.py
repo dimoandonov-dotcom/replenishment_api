@@ -234,9 +234,20 @@ def get_settings(store_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/settings")
-def upsert_settings(items: list[SettingIn], db: Session = Depends(get_db)):
+def upsert_settings(
+    items: list[SettingIn],
+    source: str = Query("api", pattern="^(api|manual|learning|rules|import)$"),
+    reason: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """
+    source=manual  -> корекция от човек в пулта: записва се и се ЗАКЛЮЧВА
+                      (автоматичното учене никога не я презаписва).
+    source=learning -> автоматично учене: заключените позиции се пропускат.
+    Всяка промяна отива в дневника settings_log.
+    """
     sku_map = {a.sku: a.id for a in db.execute(select(m.Article)).scalars().all()}
-    updated, unknown, invalid = 0, [], []
+    updated, unknown, invalid, skipped_locked = 0, [], [], 0
 
     for it in items:
         aid = sku_map.get(it.sku)
@@ -248,17 +259,30 @@ def upsert_settings(items: list[SettingIn], db: Session = Depends(get_db)):
             continue
 
         existing = db.get(m.StoreArticleSetting, (it.store_id, aid))
+        if existing is not None and source == "learning" and existing.auto_adjust is False:
+            skipped_locked += 1
+            continue
+        lock = False if source == "manual" else (
+            existing.auto_adjust if existing is not None else it.auto_adjust)
+        old = (float(existing.min_stock), float(existing.max_stock)) if existing else (None, None)
         if existing:
             existing.min_stock = it.min_stock
             existing.max_stock = it.max_stock
-            existing.auto_adjust = it.auto_adjust
+            existing.auto_adjust = lock
             if it.supplier_id:
                 existing.supplier_id = it.supplier_id
         else:
             db.add(m.StoreArticleSetting(
                 store_id=it.store_id, article_id=aid,
                 min_stock=it.min_stock, max_stock=it.max_stock,
-                supplier_id=it.supplier_id, auto_adjust=it.auto_adjust,
+                supplier_id=it.supplier_id, auto_adjust=lock,
+            ))
+        if old != (float(it.min_stock), float(it.max_stock)):
+            db.add(m.SettingsLog(
+                store_id=it.store_id, article_id=aid,
+                old_min=old[0], old_max=old[1],
+                new_min=it.min_stock, new_max=it.max_stock,
+                source=source, reason=reason,
             ))
         q = db.execute(
             select(m.SettingsReviewQueue).where(
@@ -271,7 +295,8 @@ def upsert_settings(items: list[SettingIn], db: Session = Depends(get_db)):
         updated += 1
 
     db.commit()
-    return {"updated": updated, "unknown_skus": unknown, "invalid": invalid}
+    return {"updated": updated, "unknown_skus": unknown, "invalid": invalid,
+            "skipped_locked": skipped_locked}
 
 
 @app.get("/review-queue")

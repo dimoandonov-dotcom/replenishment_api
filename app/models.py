@@ -459,3 +459,21 @@ class ManualOrderLine(Base):
     in_planogram: Mapped[bool | None] = mapped_column(Boolean)
     price: Mapped[float | None] = mapped_column(Numeric(12, 4))
     note: Mapped[str | None] = mapped_column(Text)
+
+
+class SettingsLog(Base):
+    """Дневник на всяка промяна на мин/макс: кой, кога, старо -> ново, защо."""
+
+    __tablename__ = "settings_log"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    store_id: Mapped[int] = mapped_column(ForeignKey("stores.id"), index=True)
+    article_id: Mapped[int] = mapped_column(ForeignKey("articles.id"))
+    old_min: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    old_max: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    new_min: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    new_max: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    source: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )

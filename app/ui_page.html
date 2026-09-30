@@ -151,6 +151,7 @@ td input.changed { border-color:var(--amber); background:var(--amber-soft); }
   <a href="#assort" data-tab="assort">Асортимент и цени</a>
   <a href="#plano" data-tab="plano">Планограма</a>
   <a href="#cmp" data-tab="cmp">Сравнение</a>
+  <a href="#learn" data-tab="learn">Обучение</a>
   <a href="#run" data-tab="run">Пускане и импорт</a>
 </nav>
 
@@ -256,6 +257,28 @@ td input.changed { border-color:var(--amber); background:var(--amber-soft); }
   <div id="cDetail"></div>
 </section>
 
+<!-- ============ ОБУЧЕНИЕ ============ -->
+<section class="tab" id="tab-learn">
+  <div class="bar">
+    <select id="lDays"><option value="1">Днес</option><option value="7">7 дни</option><option value="14" selected>14 дни</option><option value="30">30 дни</option></select>
+    <button id="lPreview">Какво би научил сега</button>
+    <span class="msg" id="lMsg"></span>
+  </div>
+  <p class="note" style="margin:0 0 16px;line-height:1.6">Всяка нощ в 02:30 MinMaxAI преизчислява мин/макс от продажбите в Мистрал (14 дни), вдига при свършване
+  и приема сигнал от Ани <b>само ако продажбите го потвърждават</b>. Промените са плавни (до ±30%). Ръчните корекции са 🔒 и не се пипат.</p>
+  <div class="board" id="lKpis"></div>
+  <div class="head"><h2>Промени на мин/макс</h2><span class="note">кой, кога и защо</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Кога</th><th>Магазин</th><th>Код</th><th>Артикул</th><th class="num">Мин</th><th class="num">Макс</th><th>От</th><th>Защо</th></tr></thead>
+    <tbody id="lBody"></tbody>
+  </table></div>
+  <div class="head"><h2>🔒 Заключени от теб</h2><span class="note">ученето не ги пипа</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Магазин</th><th>Код</th><th>Артикул</th><th class="num">Мин</th><th class="num">Макс</th><th></th></tr></thead>
+    <tbody id="lLocked"></tbody>
+  </table></div>
+</section>
+
 <!-- ============ ПУСКАНЕ И ИМПОРТ ============ -->
 <section class="tab" id="tab-run">
   <div class="head"><h2>Наличности от Мистрал</h2><span class="note">автоматично преди всяко пускане</span></div>
@@ -334,7 +357,7 @@ const loaded = {};
 function show(tab) {
   document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + tab));
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, cmp: initCmp, run: initRun})[tab]?.(); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -419,7 +442,8 @@ async function loadOrder() {
   const id = $("storeSel").value;
   $("ordBody").innerHTML = `<tr><td colspan="10" class="empty">Изчислявам…</td></tr>`;
   try {
-    const [d, a] = await Promise.all([api(`/orders/preview/${id}?respect_schedule=false`), arts()]);
+    const [d, a, st] = await Promise.all([api(`/orders/preview/${id}?respect_schedule=false`), arts(), api(`/settings/${id}`)]);
+    const LOCK = {}; st.forEach(x => LOCK[x.sku] = x.auto_adjust === false);
     ordLines = d.lines;
     let value = 0, units = 0;
     const rows = d.lines.map(l => {
@@ -438,7 +462,7 @@ async function loadOrder() {
         <td class="num">${l.pack_size > 1 ? l.pack_size : "бр."}</td>
         <td class="num">${fmtE(price)}</td>
         <td class="num">${fmtE(val)}</td>
-        <td>${promo}</td></tr>`;
+        <td>${promo}${LOCK[l.sku] ? ' <span class="tag" title="Коригирано ръчно — ученето не го пипа">🔒</span>' : ''}</td></tr>`;
     });
     $("ordBody").innerHTML = rows.join("") || `<tr><td colspan="10" class="empty">В този магазин няма артикул под минимума.</td></tr>`;
     $("ordTotals").innerHTML =
@@ -468,10 +492,10 @@ async function saveOrder() {
   if (bad.length) { msg("ordMsg", `Макс е под мин при ${bad.map(b => b[0]).join(", ")}`, false); return; }
   const body = Object.entries(edits).map(([sku, v]) => ({ store_id, sku, ...v }));
   try {
-    const r = await api("/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const r = await api("/settings?source=manual&reason=" + encodeURIComponent("корекция от пулта"), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     edits = {}; updateSave();
     await loadOrder();
-    msg("ordMsg", `Запазени ${r.updated} промени.`);
+    msg("ordMsg", `Запазени ${r.updated} промени — заключени са и ученето няма да ги пипа.`);
   } catch (e) { msg("ordMsg", e.message, false); }
 }
 
@@ -585,6 +609,43 @@ async function showCmp(id) {
   <td class="num">${fmtN(l.sales_per_day)}</td><td><span class="tag ${tag(l.note)}">${esc(l.note || "")}</span></td></tr>`).join("")}
   </tbody></table></div>`;
   $("cDetail").scrollIntoView({ behavior: "smooth" });
+}
+
+/* ---------- обучение ---------- */
+const SRC = { manual: ["ти", "warn"], learning: ["учене", ""], rules: ["правила", "off"], import: ["импорт", "off"], api: ["система", "off"] };
+function initLearn() {
+  $("lDays").onchange = loadLearn;
+  $("lPreview").onclick = async () => {
+    msg("lMsg", "Смятам (без да записвам)…");
+    try { const r = await api("/learning/run?apply=false", { method: "POST" });
+      const c = r.counts;
+      msg("lMsg", `Сега би променил ${r.changes}: нагоре ${c["нагоре"]||0}, надолу ${c["надолу"]||0}, нови ${c["нов"]||0}. Заключени ${c["заключени"]||0}.`);
+    } catch (e) { msg("lMsg", e.message, false); }
+  };
+  loadLearn();
+}
+async function loadLearn() {
+  const d = await api(`/ui/learning?days=${$("lDays").value}`);
+  const by = s => d.log.filter(x => x.source === s).length;
+  const up = d.log.filter(x => x.source === "learning" && (x.new_max ?? 0) > (x.old_max ?? 0)).length;
+  const dn = d.log.filter(x => x.source === "learning" && (x.new_max ?? 0) < (x.old_max ?? 0)).length;
+  const ani = d.log.filter(x => (x.reason || "").startsWith("Ани")).length;
+  const tiles = [["НАУЧЕНИ ПРОМЕНИ", by("learning"), "t", `нагоре ${up} · надолу ${dn}`], ["ОТ АНИ, ПОТВЪРДЕНИ", ani, "a", "продажбите показват, че е права"],
+    ["ТВОИ КОРЕКЦИИ", by("manual"), "", "заключени, ученето не ги пипа"], ["ЗАКЛЮЧЕНИ ОБЩО", d.locked.length, "", "позиции магазин × артикул"]];
+  $("lKpis").innerHTML = tiles.map(([l, v, c, s]) => `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("");
+  const mm = (a, b) => a == null ? `<b>${fmtN(b)}</b>` : (a === b ? fmtN(b) : `${fmtN(a)} → <b>${fmtN(b)}</b>`);
+  $("lBody").innerHTML = d.log.map(x => { const [l, c] = SRC[x.source] || [x.source, "off"];
+    return `<tr><td>${x.at}</td><td>${esc(x.store)}</td><td>${esc(x.sku)}</td><td class="name">${esc(x.name)}</td>
+    <td class="num">${mm(x.old_min, x.new_min)}</td><td class="num">${mm(x.old_max, x.new_max)}</td><td><span class="tag ${c}">${l}</span></td><td class="muted" style="font-size:12px">${esc(x.reason || "")}</td></tr>`; }).join("")
+    || `<tr><td colspan="8" class="empty">Още няма промени за периода. Първото учене е тази нощ в 02:30.</td></tr>`;
+  $("lLocked").innerHTML = d.locked.map(x => `<tr><td>${esc(x.store)}</td><td>${esc(x.sku)}</td><td class="name">${esc(x.name)}</td><td class="num">${fmtN(x.min)}</td><td class="num">${fmtN(x.max)}</td>
+    <td class="num"><button data-unlock="${x.store_id}|${esc(x.sku)}">Отключи</button></td></tr>`).join("")
+    || `<tr><td colspan="6" class="empty">Няма заключени позиции.</td></tr>`;
+  document.querySelectorAll("[data-unlock]").forEach(b => b.onclick = async () => {
+    const [store_id, sku] = b.dataset.unlock.split("|");
+    await api("/settings/unlock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify([{ store_id: +store_id, sku }]) });
+    loadLearn();
+  });
 }
 
 /* ---------- пускане и импорт ---------- */
