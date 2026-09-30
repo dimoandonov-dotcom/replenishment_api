@@ -64,6 +64,12 @@ MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS ix_slog_store ON settings_log(store_id)",
     "CREATE INDEX IF NOT EXISTS ix_slog_created ON settings_log(created_at)",
+    """CREATE TABLE IF NOT EXISTS app_assets (
+        key        TEXT PRIMARY KEY,
+        mime       TEXT NOT NULL,
+        content    BYTEA NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )""",
 ]
 
 

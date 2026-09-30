@@ -574,3 +574,39 @@ def settings_unlock(items: list[UnlockIn], db: Session = Depends(get_db)):
             n += 1
     db.commit()
     return {"unlocked": n}
+
+
+# ---------------------------------------------------------------------------
+# Логото на 300 - качва се веднъж от пулта, показва се навсякъде
+# ---------------------------------------------------------------------------
+
+@router.get("/brand/logo", include_in_schema=False)
+def brand_logo(db: Session = Depends(get_db)):
+    a = db.get(m.AppAsset, "logo")
+    if a is None:
+        raise HTTPException(404, "Няма качено лого")
+    return Response(content=a.content, media_type=a.mime,
+                    headers={"Cache-Control": "public, max-age=300"})
+
+
+@router.post("/brand/logo")
+async def brand_logo_upload(request: Request, db: Session = Depends(get_db)):
+    """Качване на логото (PNG / SVG / JPG / WEBP, до 2 MB). GET /brand/logo е публичен,
+    POST изисква вход - минава през общата проверка."""
+    form = await request.form()
+    f = form.get("file")
+    if f is None:
+        raise HTTPException(400, "Липсва файл")
+    data = await f.read()
+    mime = (f.content_type or "").lower()
+    if mime not in ("image/png", "image/svg+xml", "image/jpeg", "image/webp"):
+        raise HTTPException(400, "Само PNG, SVG, JPG или WEBP")
+    if len(data) > 2 * 1024 * 1024:
+        raise HTTPException(400, "Файлът е над 2 MB")
+    a = db.get(m.AppAsset, "logo")
+    if a is None:
+        db.add(m.AppAsset(key="logo", mime=mime, content=data))
+    else:
+        a.mime, a.content = mime, data
+    db.commit()
+    return {"ok": True, "bytes": len(data)}

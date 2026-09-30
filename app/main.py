@@ -39,7 +39,7 @@ APP_PASSWORD = _os.getenv("APP_PASSWORD", "").strip()
 SESSION_COOKIE = "minmax_session"
 _OPEN_PATHS = {
     "/", "/health", "/docs", "/openapi.json", "/redoc",
-    "/dashboard", "/orders-view", "/ui/login", "/ui/logout",
+    "/dashboard", "/orders-view", "/ui/login", "/ui/logout", "/brand/logo",
 }
 
 
