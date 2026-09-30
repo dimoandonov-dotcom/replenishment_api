@@ -870,3 +870,28 @@ async def import_supplier_workbook(
     report["unmatched_store_columns"] = sorted(unmatched)
     report["planogram_unknown_skus"] = sorted(unknown_skus)[:50]
     return report
+
+
+class PlanogramItem(BaseModel):
+    store_id: int
+    sku: str
+
+
+@router.post("/planogram/add")
+def planogram_add(items: list[PlanogramItem], db: Session = Depends(get_db)):
+    """Добавя артикули в планограмата на конкретни магазини (без да трие нищо)."""
+    arts = {a.sku: a.id for a in db.execute(select(m.Article)).scalars().all()}
+    existing = set(db.execute(select(m.Planogram.store_id, m.Planogram.article_id)).all())
+    new, unknown = [], []
+    for it in items:
+        aid = arts.get(it.sku)
+        if aid is None:
+            unknown.append(it.sku)
+            continue
+        if (it.store_id, aid) not in existing:
+            new.append({"store_id": it.store_id, "article_id": aid})
+            existing.add((it.store_id, aid))
+    if new:
+        db.execute(insert(m.Planogram), new)
+    db.commit()
+    return {"added": len(new), "unknown_skus": sorted(set(unknown))}
