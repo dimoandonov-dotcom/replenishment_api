@@ -270,3 +270,46 @@ def sync_sales(db, days: int = 14) -> dict:
         "operation_types": op_types,
         "seconds": round((datetime.now(timezone.utc) - started).total_seconds(), 1),
     }
+
+
+def supplier_info(codes: list[int]) -> list[dict]:
+    """
+    За дадени артикулни кодове: кой е доставчикът във всеки обект
+    (MATERIAL.PARTNERNUM, ако е 0/-1 - DEFAULTPARTNERNUM) и последната
+    доставка от НДК (STORAGEPARTNER), ако има такава.
+    """
+    codes = [int(c) for c in codes][:500]
+    if not codes:
+        return []
+    cl = ",".join(str(c) for c in codes)
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute(f"""
+            SELECT m.LOCATIONID AS loc, l.NAME AS store, m.MATERIALCODE AS code,
+                   m.MATERIAL AS name, m.QTY AS qty, m.LASTDELIVERYDATE AS last_delivery,
+                   p1.NAME AS partner, p2.NAME AS default_partner
+            FROM MATERIAL m
+            JOIN LOCATION l ON l.ID = m.LOCATIONID
+            LEFT JOIN PARTNER p1 ON p1.LOCATIONID = m.LOCATIONID AND p1.NUM = m.PARTNERNUM
+            LEFT JOIN PARTNER p2 ON p2.LOCATIONID = m.LOCATIONID AND p2.NUM = m.DEFAULTPARTNERNUM
+            WHERE m.MATERIALCODE IN ({cl})""")
+        mat = cur.fetchall()
+        cur.execute(f"""
+            SELECT sp.LOCATIONID AS loc, sp.MATERIALCODE AS code,
+                   MAX(sp.DELIVERYDATE) AS ndk_last
+            FROM STORAGEPARTNER sp
+            JOIN PARTNER p ON p.LOCATIONID = sp.LOCATIONID AND p.NUM = sp.PARTNERNUM
+            WHERE sp.MATERIALCODE IN ({cl}) AND p.NAME LIKE N'%%НДК%%'
+            GROUP BY sp.LOCATIONID, sp.MATERIALCODE""")
+        ndk = {(r["loc"], r["code"]): r["ndk_last"] for r in cur.fetchall()}
+    out = []
+    for r in mat:
+        out.append({
+            "store": r["store"], "code": int(r["code"]), "name": r["name"],
+            "qty": float(r["qty"] or 0),
+            "supplier": (r["partner"] or r["default_partner"] or "").strip(),
+            "default_supplier": (r["default_partner"] or "").strip(),
+            "last_delivery": str(r["last_delivery"]) if r["last_delivery"] else None,
+            "ndk_last_delivery": str(ndk.get((r["loc"], r["code"]))) if ndk.get((r["loc"], r["code"])) else None,
+        })
+    return out

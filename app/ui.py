@@ -417,3 +417,17 @@ def ui_sales(db: Session = Depends(get_db)):
          "from": str(d1), "to": str(d2)}
         for s, a, q, d1, d2 in rows
     ]
+
+
+@router.get("/ui/mistral/supplier-info")
+def mistral_supplier_info(codes: str):
+    """Кой доставя артикулите по обекти. codes = 13407,20830,..."""
+    from . import mistral
+    try:
+        parsed = [int(c) for c in codes.split(",") if c.strip().isdigit()]
+    except ValueError:
+        raise HTTPException(400, "Кодовете трябва да са числа")
+    try:
+        return mistral.supplier_info(parsed)
+    except Exception as e:
+        raise HTTPException(502, f"Мистрал: {type(e).__name__}: {e}")
