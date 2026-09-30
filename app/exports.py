@@ -114,3 +114,30 @@ def export_orders_zip(
                 used[name] = 1
             zf.writestr(name, build_order_workbook(db, order))
     return buf.getvalue()
+
+
+def build_workbook_from_lines(lines) -> bytes:
+    """
+    Прави .xlsx директно от изчислени (не задължително записани) редове -
+    ползва се за износ на преглед (preview), без да се създава заявка в базата.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet 1"
+    ws.append(HEADERS)
+
+    rows = []
+    for ln in lines:
+        sku_val = int(ln.sku) if ln.sku.isdigit() else ln.sku
+        rows.append((sku_val, ln.name, UNIT_LABEL, int(ln.ordered_quantity), None))
+    rows.sort(key=lambda r: (isinstance(r[0], str), r[0]))
+    for r in rows:
+        ws.append(list(r))
+
+    widths = {"A": 12, "B": 55, "C": 8, "D": 8, "E": 14}
+    for col, w in widths.items():
+        ws.column_dimensions[col].width = w
+
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
