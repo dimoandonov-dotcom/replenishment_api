@@ -11,7 +11,7 @@ from io import BytesIO
 import openpyxl
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, insert
 from sqlalchemy.orm import Session
 
 from . import models as m
@@ -618,3 +618,251 @@ async def import_min_max(
     db.commit()
     return {"saved": saved, "skipped_no_values": skipped,
             "unknown_skus": unknown, "invalid_max_below_min": invalid}
+
+
+# ===========================================================================
+# Импорт на пълния файл на доставчика: ценова листа + планограма(и)
+# (формат НДК: листове "ЦЛ", "Планограма", "Планограма Бири")
+# ===========================================================================
+
+_PLANO_SIZES = {"S", "M", "L", "XL", "XXL"}
+
+
+def _num(v):
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(str(v).replace(",", ".").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _store_lookup(db: Session) -> dict[str, int]:
+    lk: dict[str, int] = {}
+    for s in db.execute(select(m.Store)).scalars().all():
+        lk[normalize_store_name(s.name)] = s.id
+    for al in db.execute(select(m.StoreAlias)).scalars().all():
+        lk[al.alias_normalized] = al.store_id
+    return lk
+
+
+def _resolve_store(raw, lk: dict[str, int]) -> int | None:
+    if raw is None:
+        return None
+    n = normalize_store_name(str(raw))
+    if n in lk:
+        return lk[n]
+    # "Д.Лаврентий" / "Д.Трошево" -> Детелина ...
+    n2 = n.replace("Д.", "", 1).strip() if n.startswith("Д.") else n
+    return lk.get(n2)
+
+
+def _sheet_rows(ws, cap: int = 300):
+    """
+    Редовете на лист, но без хилядите празни колони, които Excel
+    понякога "маркира" (напр. до колона XFD) - иначе четенето е ~25 сек.
+    """
+    max_col = min(ws.max_column or 1, cap)
+    return list(ws.iter_rows(values_only=True, max_col=max_col))
+
+
+@router.post("/import/supplier-workbook")
+async def import_supplier_workbook(
+    file: UploadFile = File(...),
+    supplier_id: int = Query(..., description="Доставчик (НДК = 1)"),
+    db: Session = Depends(get_db),
+):
+    """
+    Един файл от доставчика -> ценова листа + планограма.
+
+    - Лист с колони Номер / Артикул / База / Т.О. / Доставна / Корекции:
+      цени и имена на артикулите, както са в листата на доставчика
+      (ползват се в заявката). Нови артикули се създават.
+    - Листове, чието име съдържа "Планограма": 'да' = артикулът се води
+      в магазина. Планограмата на доставчика се заменя изцяло.
+    - Ред с S/M/L/XL под заглавията = категория на магазина.
+    """
+    if not db.get(m.Supplier, supplier_id):
+        raise HTTPException(404, "Няма такъв доставчик")
+    wb = openpyxl.load_workbook(BytesIO(await file.read()), data_only=True)
+
+    arts = {
+        a.sku: a for a in db.execute(select(m.Article)).scalars().all()
+    }
+    report = {
+        "prices_updated": 0, "articles_created": 0,
+        "planogram_rows": 0, "stores_matched": 0,
+        "size_classes_set": 0, "queued_for_minmax": 0,
+        "unmatched_store_columns": [], "planogram_unknown_skus": [],
+        "sheets_used": [],
+    }
+
+    # ---------- ценова листа ----------
+    for ws in wb.worksheets:
+        rows = _sheet_rows(ws)
+        hdr_i = None
+        for i, r in enumerate(rows[:10]):
+            cells = [str(c).strip().upper() for c in r if c]
+            if any(c.startswith("НОМЕР") for c in cells) and any(
+                c.startswith("ДОСТАВНА") for c in cells
+            ):
+                hdr_i = i
+                break
+        if hdr_i is None:
+            continue
+        report["sheets_used"].append(ws.title)
+        hdr = [str(c).strip().upper() if c else "" for c in rows[hdr_i]]
+
+        def col(prefix):
+            for i, h in enumerate(hdr):
+                if h.startswith(prefix):
+                    return i
+            return None
+
+        c_sku, c_name = col("НОМЕР"), col("АРТИКУЛ")
+        c_base, c_to = col("БАЗА"), col("Т.О")
+        c_del, c_note = col("ДОСТАВНА"), col("КОРЕКЦ")
+        category = None
+        for r in rows[hdr_i + 1:]:
+            sku_raw = r[c_sku] if c_sku is not None else None
+            name = r[c_name] if c_name is not None else None
+            if not isinstance(sku_raw, (int, float)):
+                if isinstance(name, str) and name.strip():
+                    category = name.strip()
+                continue
+            sku = str(int(sku_raw))
+            a = arts.get(sku)
+            if a is None:
+                a = m.Article(
+                    sku=sku, name=str(name or sku).strip(),
+                    default_supplier_id=supplier_id, pack_size=1,
+                )
+                db.add(a)
+                db.flush()
+                arts[sku] = a
+                report["articles_created"] += 1
+            a.supplier_name = str(name).strip() if name else a.supplier_name
+            a.base_price = _num(r[c_base]) if c_base is not None else None
+            a.trade_discount = _num(r[c_to]) if c_to is not None else None
+            a.delivery_price = _num(r[c_del]) if c_del is not None else None
+            note = r[c_note] if c_note is not None else None
+            a.price_note = str(note).strip() if note else None
+            if category:
+                a.category = category
+            if a.default_supplier_id is None:
+                a.default_supplier_id = supplier_id
+            report["prices_updated"] += 1
+    db.flush()
+
+    # ---------- планограма ----------
+    lk = _store_lookup(db)
+    placements: set[tuple[int, int]] = set()
+    sizes: dict[int, str] = {}
+    matched_stores: set[int] = set()
+    unknown_skus: set[str] = set()
+    unmatched: set[str] = set()
+    for ws in wb.worksheets:
+        if "ПЛАНОГРАМ" not in ws.title.upper():
+            continue
+        rows = _sheet_rows(ws)
+        hdr_i, col_store = None, {}
+        for i, r in enumerate(rows[:10]):
+            cmap = {}
+            for j, c in enumerate(r):
+                if j < 2 or not c:
+                    continue
+                sid = _resolve_store(c, lk)
+                if sid:
+                    cmap[j] = sid
+            if len(cmap) >= 5:
+                hdr_i, col_store = i, cmap
+                for j, c in enumerate(r):
+                    if j >= 2 and c and j not in cmap:
+                        unmatched.add(str(c).strip())
+                break
+        if hdr_i is None:
+            continue
+        report["sheets_used"].append(ws.title)
+        matched_stores |= set(col_store.values())
+        for r in rows[hdr_i + 1: hdr_i + 3]:
+            vals = {str(c).strip().upper() for c in r[2:] if c}
+            if vals and vals <= _PLANO_SIZES:
+                for j, sid in col_store.items():
+                    if j < len(r) and r[j]:
+                        sizes[sid] = str(r[j]).strip().upper()
+        for r in rows[hdr_i + 1:]:
+            if not r or not isinstance(r[0], (int, float)):
+                continue
+            sku = str(int(r[0]))
+            a = arts.get(sku)
+            if a is None:
+                pname = r[1] if len(r) > 1 else None
+                if not (isinstance(pname, str) and pname.strip()):
+                    unknown_skus.add(sku)
+                    continue
+                # артикул само в планограмата (напр. нова бира) - създаваме го
+                a = m.Article(
+                    sku=sku, name=pname.strip(), supplier_name=pname.strip(),
+                    default_supplier_id=supplier_id, pack_size=1,
+                )
+                db.add(a)
+                db.flush()
+                arts[sku] = a
+                report["articles_created"] += 1
+            for j, sid in col_store.items():
+                if j < len(r) and r[j] and str(r[j]).strip().lower() == "да":
+                    placements.add((sid, a.id))
+
+    if placements:
+        sup_art_ids = [
+            a.id for a in arts.values() if a.default_supplier_id == supplier_id
+        ]
+        db.execute(
+            delete(m.Planogram).where(m.Planogram.article_id.in_(sup_art_ids))
+        )
+        db.execute(
+            insert(m.Planogram),
+            [{"store_id": sid, "article_id": aid} for sid, aid in placements],
+        )
+        db.flush()
+        existing_settings = set(
+            db.execute(
+                select(
+                    m.StoreArticleSetting.store_id,
+                    m.StoreArticleSetting.article_id,
+                )
+            ).all()
+        )
+        queued = set(
+            db.execute(
+                select(
+                    m.SettingsReviewQueue.store_id,
+                    m.SettingsReviewQueue.article_id,
+                )
+            ).all()
+        )
+        active_ids = {a.id for a in arts.values() if a.is_active}
+        new_q = [
+            {"store_id": sid, "article_id": aid,
+             "reason": "По планограма, но липсват min/max"}
+            for sid, aid in placements
+            if aid in active_ids
+            and (sid, aid) not in existing_settings
+            and (sid, aid) not in queued
+        ]
+        if new_q:
+            db.execute(insert(m.SettingsReviewQueue), new_q)
+        report["queued_for_minmax"] = len(new_q)
+
+    for sid, size in sizes.items():
+        st = db.get(m.Store, sid)
+        if st:
+            st.size_class = size
+            report["size_classes_set"] += 1
+
+    db.commit()
+    report["planogram_rows"] = len(placements)
+    report["stores_matched"] = len(matched_stores)
+    report["unmatched_store_columns"] = sorted(unmatched)
+    report["planogram_unknown_skus"] = sorted(unknown_skus)[:50]
+    return report

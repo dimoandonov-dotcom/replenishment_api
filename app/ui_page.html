@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Заявки към доставчици</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink:#1C2430; --paper:#F3F0E8; --raised:#FBF9F4;
+  --line:#D8D2C4; --line-strong:#B8AF9A;
+  --amber:#C96A1F; --amber-soft:#F4E2CC;
+  --teal:#2F6358; --teal-soft:#D8E6E1;
+  --slate:#5B6B7A; --danger:#A8402F; --danger-soft:#F2DAD4;
+  --head:"Space Grotesk",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink:#EDE9DF; --paper:#14191F; --raised:#1B222A;
+    --line:#2C343E; --line-strong:#3C4753;
+    --amber:#E2872E; --amber-soft:#3A2C1B;
+    --teal:#6FB3A2; --teal-soft:#1E2E2A;
+    --slate:#8C99A6; --danger:#D9705C; --danger-soft:#3A221D;
+  }
+}
+* { box-sizing:border-box; }
+html,body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--head); }
+body { padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0); }
+.wrap { max-width:1180px; margin:0 auto; padding:18px 16px 60px; }
+
+/* ---------- шапка и навигация ---------- */
+.top { display:flex; justify-content:space-between; align-items:flex-end; gap:12px;
+  flex-wrap:wrap; border-bottom:2px solid var(--ink); padding-bottom:12px; }
+.brand { font-family:var(--mono); font-size:11.5px; letter-spacing:.1em; color:var(--slate); }
+h1 { margin:4px 0 0; font-size:clamp(22px,4.5vw,30px); font-weight:700; }
+.stamp { font-family:var(--mono); font-size:12px; color:var(--slate); text-align:right; line-height:1.6; }
+.stamp b { color:var(--ink); font-weight:500; }
+nav { display:flex; gap:0; border-bottom:1px solid var(--line-strong); margin:0 0 22px;
+  overflow-x:auto; -webkit-overflow-scrolling:touch; }
+nav a { font-size:14px; font-weight:500; padding:12px 14px 10px; text-decoration:none;
+  color:var(--slate); border-bottom:3px solid transparent; white-space:nowrap; }
+nav a.on { color:var(--ink); border-bottom-color:var(--amber); }
+nav a:focus-visible { outline:2px solid var(--teal); outline-offset:-2px; }
+
+@media (max-width:620px) {
+  .stamp { text-align:left; }
+  #storeSel, #pStore { flex:1 1 170px; min-width:0; }
+  .bar input[type=search] { flex:1 1 100%; min-width:0 !important; }
+}
+/* ---------- общи ---------- */
+section.tab { display:none; }
+section.tab.on { display:block; }
+h2 { font-size:16px; margin:0; font-weight:600; }
+.head { display:flex; justify-content:space-between; align-items:baseline; gap:10px;
+  border-bottom:1px solid var(--line-strong); padding-bottom:8px; margin:26px 0 14px; flex-wrap:wrap; }
+.head:first-child { margin-top:0; }
+.note { font-family:var(--mono); font-size:11.5px; color:var(--slate); }
+.muted { color:var(--slate); }
+.num { text-align:right; font-variant-numeric:tabular-nums; }
+button, select, input[type=text], input[type=search], input[type=number], input[type=file] {
+  font-family:var(--mono); font-size:13px; color:var(--ink);
+  background:var(--raised); border:1px solid var(--line-strong); border-radius:2px; padding:8px 10px;
+}
+button { cursor:pointer; font-weight:500; }
+button:hover:not(:disabled) { border-color:var(--ink); }
+button:disabled { opacity:.4; cursor:default; }
+button.go { background:var(--teal); border-color:var(--teal); color:#fff; }
+button.warm { background:var(--amber); border-color:var(--amber); color:#fff; }
+:focus-visible { outline:2px solid var(--teal); outline-offset:1px; }
+.bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+.msg { font-family:var(--mono); font-size:12px; min-height:16px; }
+.msg.ok { color:var(--teal); } .msg.err { color:var(--danger); }
+.scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; border:1px solid var(--line); background:var(--raised); }
+table { width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12.5px; }
+th { text-align:left; font-weight:500; font-size:11px; color:var(--slate); padding:8px;
+  border-bottom:1px solid var(--line-strong); position:sticky; top:0; background:var(--raised); white-space:nowrap; }
+td { padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+tr:last-child td { border-bottom:none; }
+td.name { font-family:var(--head); font-size:13px; min-width:220px; }
+td.cat { font-family:var(--head); font-size:12px; color:var(--slate); }
+td input[type=number] { width:62px; padding:4px 6px; text-align:right; font-size:12.5px; }
+td input.changed { border-color:var(--amber); background:var(--amber-soft); }
+.low { color:var(--danger); font-weight:600; }
+.tag { display:inline-block; font-family:var(--mono); font-size:10.5px; padding:1px 7px; border-radius:9px;
+  background:var(--teal-soft); color:var(--teal); white-space:nowrap; }
+.tag.warn { background:var(--amber-soft); color:var(--amber); }
+.tag.bad { background:var(--danger-soft); color:var(--danger); }
+.tag.off { background:var(--line); color:var(--slate); }
+.empty { padding:34px 12px; text-align:center; color:var(--slate); font-family:var(--mono); font-size:13px; }
+
+/* ---------- табло ---------- */
+.board { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--line-strong);
+  border:1px solid var(--line-strong); }
+@media (max-width:760px) { .board { grid-template-columns:repeat(2,1fr); } }
+.tile { background:var(--raised); padding:16px 14px; }
+.tile .l { font-family:var(--mono); font-size:11px; color:var(--slate); margin-bottom:8px; }
+.tile .v { font-family:var(--mono); font-size:26px; font-weight:600; line-height:1; font-variant-numeric:tabular-nums; }
+.tile .v.a { color:var(--amber); } .tile .v.t { color:var(--teal); }
+.tile .s { margin-top:7px; font-size:12px; color:var(--slate); }
+.rack { display:flex; flex-direction:column; gap:9px; }
+.rack-row { display:grid; grid-template-columns:minmax(120px,190px) 1fr 86px; gap:10px; align-items:center; cursor:pointer; }
+.rack-row:hover .rack-n { text-decoration:underline; }
+.rack-n { font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rack-t { height:15px; border-bottom:1px solid var(--line-strong);
+  background:repeating-linear-gradient(90deg,var(--line) 0,var(--line) 1px,transparent 1px,transparent 9px); }
+.rack-b { height:100%; background:var(--teal); opacity:.85; }
+.rack-v { font-family:var(--mono); font-size:12.5px; text-align:right; }
+
+/* ---------- заявки ---------- */
+.totals { display:flex; gap:22px; flex-wrap:wrap; font-family:var(--mono); font-size:12.5px;
+  color:var(--slate); margin:0 0 12px; }
+.totals b { color:var(--ink); font-size:15px; font-weight:600; }
+.sticky-save { position:sticky; bottom:env(safe-area-inset-bottom,0); background:var(--paper);
+  padding:10px 0; border-top:1px solid var(--line-strong); margin-top:10px; display:none; }
+.sticky-save.on { display:flex; gap:10px; align-items:center; }
+
+/* ---------- импорт ---------- */
+.imports { display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--line-strong); border:1px solid var(--line-strong); }
+@media (max-width:760px) { .imports { grid-template-columns:1fr; } }
+.imp { background:var(--raised); padding:16px; }
+.imp h3 { margin:0 0 6px; font-size:14px; }
+.imp p { margin:0 0 12px; font-size:12.5px; color:var(--slate); line-height:1.5; }
+.imp .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.imp pre { font-family:var(--mono); font-size:11.5px; white-space:pre-wrap; margin:10px 0 0; color:var(--slate); max-height:160px; overflow:auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="top">
+  <div>
+    <div class="brand">АВТОМАТИЧНИ ЗАЯВКИ КЪМ ДОСТАВЧИЦИ</div>
+    <h1>Контролен пулт</h1>
+  </div>
+  <div class="stamp" id="stamp">Зареждам…</div>
+</div>
+
+<nav id="nav">
+  <a href="#board" data-tab="board">Табло</a>
+  <a href="#orders" data-tab="orders">Заявки по магазин</a>
+  <a href="#assort" data-tab="assort">Асортимент и цени</a>
+  <a href="#plano" data-tab="plano">Планограма</a>
+  <a href="#run" data-tab="run">Пускане и импорт</a>
+</nav>
+
+<!-- ============ ТАБЛО ============ -->
+<section class="tab" id="tab-board">
+  <div class="board" id="kpis"></div>
+  <div class="head"><h2>Магазини в последното пускане</h2><span class="note" id="topNote"></span></div>
+  <div class="rack" id="rack"></div>
+  <div class="head"><h2>История на пусканията</h2><span class="note">последни 10</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Пускане</th><th>Час</th><th class="num">Магазини</th><th class="num">Заявки</th><th class="num">Редове</th><th></th></tr></thead>
+    <tbody id="runsBody"></tbody>
+  </table></div>
+</section>
+
+<!-- ============ ЗАЯВКИ ============ -->
+<section class="tab" id="tab-orders">
+  <div class="bar">
+    <button id="prevStore" aria-label="Предишен магазин">&larr;</button>
+    <select id="storeSel" aria-label="Магазин"></select>
+    <button id="nextStore" aria-label="Следващ магазин">&rarr;</button>
+    <button class="go" id="reloadOrder">Преизчисли</button>
+    <button class="warm" id="xlsOrder">Свали Excel</button>
+    <span class="msg" id="ordMsg"></span>
+  </div>
+  <div class="totals" id="ordTotals"></div>
+  <div class="scroll"><table>
+    <thead><tr>
+      <th>Код</th><th>Артикул</th><th class="num">Наличност</th>
+      <th class="num">Мин</th><th class="num">Макс</th>
+      <th class="num">Поръчка</th><th class="num">Опак.</th>
+      <th class="num">Цена €</th><th class="num">Стойност €</th><th></th>
+    </tr></thead>
+    <tbody id="ordBody"><tr><td colspan="10" class="empty">Избери магазин.</td></tr></tbody>
+  </table></div>
+  <div class="sticky-save" id="saveBar">
+    <button class="go" id="saveOrder">Запази промените</button>
+    <span class="note" id="saveCount"></span>
+    <button id="undoOrder">Отказ</button>
+  </div>
+</section>
+
+<!-- ============ АСОРТИМЕНТ ============ -->
+<section class="tab" id="tab-assort">
+  <div class="bar">
+    <input type="search" id="aSearch" placeholder="Търси по код или име…" style="min-width:240px">
+    <select id="aCat"><option value="">Всички категории</option></select>
+    <select id="aFilter">
+      <option value="">Всички</option>
+      <option value="promo">С активно промо</option>
+      <option value="noprice">Без цена</option>
+      <option value="noplano">Извън планограма</option>
+      <option value="inactive">Спрени</option>
+    </select>
+    <span class="note" id="aCount"></span>
+  </div>
+  <div class="scroll"><table>
+    <thead><tr>
+      <th>Код</th><th>Артикул</th><th>Категория</th><th class="num">Опак.</th>
+      <th class="num">База €</th><th class="num">Т.О.</th><th class="num">Доставна €</th>
+      <th>Промо</th><th class="num">В планограма</th><th class="num">С мин/макс</th>
+    </tr></thead>
+    <tbody id="aBody"></tbody>
+  </table></div>
+</section>
+
+<!-- ============ ПЛАНОГРАМА ============ -->
+<section class="tab" id="tab-plano">
+  <div class="bar">
+    <select id="pStore" aria-label="Магазин"></select>
+    <select id="pFilter">
+      <option value="">Всички</option>
+      <option value="missing_minmax">По планограма, без мин/макс</option>
+      <option value="stopped">Спрени (0–0)</option>
+      <option value="not_in_planogram">Настроени, но извън планограмата</option>
+      <option value="ok">Наред</option>
+    </select>
+    <span class="note" id="pInfo"></span>
+  </div>
+  <div class="totals" id="pCounts"></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Код</th><th>Артикул</th><th>Категория</th><th class="num">Наличност</th>
+      <th class="num">Мин</th><th class="num">Макс</th><th>Състояние</th></tr></thead>
+    <tbody id="pBody"></tbody>
+  </table></div>
+</section>
+
+<!-- ============ ПУСКАНЕ И ИМПОРТ ============ -->
+<section class="tab" id="tab-run">
+  <div class="head"><h2>Пускане на заявки</h2><span class="note">автоматично всеки ден нед–пет в 15:00</span></div>
+  <div class="bar">
+    <button class="go" id="runNow">Пусни заявки сега</button>
+    <label class="note"><input type="checkbox" id="runSched" checked> само за магазините с доставка утре</label>
+    <span class="msg" id="runMsg"></span>
+  </div>
+
+  <div class="head"><h2>Импорт на файлове</h2><span class="note">Excel .xlsx</span></div>
+  <div class="imports">
+    <div class="imp">
+      <h3>Ценова листа и планограма</h3>
+      <p>Файлът на доставчика с листове ЦЛ, Планограма и Планограма Бири. Обновява цените, имената за заявката и кой артикул в кой магазин се води.</p>
+      <div class="row"><input type="file" id="fWb" accept=".xlsx"><button class="go" data-imp="wb">Качи</button></div>
+      <pre id="oWb"></pre>
+    </div>
+    <div class="imp">
+      <h3>Справка наличности</h3>
+      <p>Обект · Мат.№ · Име · К-во. Докато сървърът не подава наличности сам на всеки 30 минути.</p>
+      <div class="row"><input type="file" id="fStock" accept=".xlsx"><button class="go" data-imp="stock">Качи</button></div>
+      <pre id="oStock"></pre>
+    </div>
+    <div class="imp">
+      <h3>Мин / макс за магазин</h3>
+      <p>Файл с колони Мат.№, МИН, МАКС за един магазин.</p>
+      <div class="row"><select id="mmStore"></select><input type="file" id="fMm" accept=".xlsx"><button class="go" data-imp="mm">Качи</button></div>
+      <pre id="oMm"></pre>
+    </div>
+    <div class="imp">
+      <h3>Разфасовки</h3>
+      <p>Код · Име · Стек · Каса · Кашон. Празно = на брой.</p>
+      <div class="row"><input type="file" id="fPk" accept=".xlsx"><button class="go" data-imp="pk">Качи</button></div>
+      <pre id="oPk"></pre>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<script>
+const KEY = new URLSearchParams(location.search).get("key") || "";
+const HDR = { "X-API-Key": KEY };
+const fmtN = n => (n == null || n === "") ? "—" : Number(n).toLocaleString("bg-BG", {maximumFractionDigits: 2});
+const fmtE = n => (n == null) ? "—" : Number(n).toLocaleString("bg-BG", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const $ = id => document.getElementById(id);
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { ...HDR, ...(opts.headers || {}) } });
+  if (!res.ok) throw new Error(res.status + " " + (await res.text()).slice(0, 180));
+  return res.json();
+}
+async function download(path) {
+  const res = await fetch(path, { headers: HDR });
+  if (!res.ok) throw new Error(res.status + " " + (await res.text()).slice(0, 180));
+  const cd = res.headers.get("Content-Disposition") || "";
+  const m = cd.match(/filename\*=UTF-8''([^;]+)/);
+  const name = m ? decodeURIComponent(m[1]) : "zayavka.xlsx";
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+function msg(id, text, ok = true) { const el = $(id); el.textContent = text; el.className = "msg " + (ok ? "ok" : "err"); }
+
+/* ---------- навигация ---------- */
+const loaded = {};
+function show(tab) {
+  document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + tab));
+  document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, run: initRun})[tab]?.(); }
+}
+window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
+
+/* ---------- общи данни ---------- */
+let STORES = [], ARTS = null;
+async function stores() {
+  if (!STORES.length) STORES = (await api("/stores")).filter(s => s.is_active).sort((a, b) => a.id - b.id);
+  return STORES;
+}
+async function arts() {
+  if (!ARTS) { ARTS = {}; (await api("/ui/assortment")).forEach(a => ARTS[a.sku] = a); }
+  return ARTS;
+}
+function fillStoreSelect(sel, list) {
+  sel.innerHTML = list.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
+}
+
+/* ---------- табло ---------- */
+async function loadBoard() {
+  const d = await api("/ui/summary");
+  const sup = d.suppliers.map(s => `${esc(s.name)}: <b>${s.mode === "below_min" ? "под минимума" : "ежедневно допълване"}</b>`).join("<br>");
+  $("stamp").innerHTML = `Обновено <b>${d.generated}</b><br>Наличности от <b>${d.last_stock_at || "—"}</b><br>${sup}`;
+  const lr = d.last_run || {};
+  const tiles = [
+    ["АКТИВНИ МАГАЗИНИ", d.active_stores, "t", ""],
+    ["АРТИКУЛИ", d.articles, "", `${d.priced_articles} с цена`],
+    ["МИН / МАКС НАСТРОЙКИ", fmtN(d.settings), "", `${fmtN(d.planogram_rows)} позиции в планограма`],
+    ["ЧАКАТ МИН / МАКС", d.review, d.review ? "a" : "", "по планограма, без настройка"],
+    ["ПОСЛЕДНИ ЗАЯВКИ", lr.orders ?? 0, "a", lr.at || "няма пускане"],
+    ["РЕДОВЕ", fmtN(lr.lines ?? 0), "a", "поръчани позиции"],
+    ["СТОЙНОСТ", fmtE(lr.value ?? 0), "a", "€ по доставни цени"],
+    ["СИГНАЛИ", d.alerts, d.alerts ? "a" : "", "изчерпани / застояли"],
+  ];
+  $("kpis").innerHTML = tiles.map(([l, v, c, s]) =>
+    `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("");
+
+  const top = d.top_stores;
+  $("topNote").textContent = top.length ? `по стойност · пускане #${lr.id}` : "";
+  const max = Math.max(1, ...top.map(t => t.value));
+  $("rack").innerHTML = top.length ? top.map(t => `
+    <div class="rack-row" data-store="${t.store_id}" title="Отвори заявката">
+      <div class="rack-n">${esc(t.store)}</div>
+      <div class="rack-t"><div class="rack-b" style="width:${(100 * t.value / max).toFixed(1)}%"></div></div>
+      <div class="rack-v">${fmtE(t.value)} €</div>
+    </div>`).join("") : `<div class="empty">Още няма пускане със заявки.</div>`;
+  document.querySelectorAll(".rack-row").forEach(r => r.onclick = () => { location.hash = "orders"; openStore(r.dataset.store); });
+
+  $("runsBody").innerHTML = d.runs.map(r => `<tr>
+      <td>#${r.id}</td><td>${r.at}</td><td class="num">${r.stores ?? "—"}</td>
+      <td class="num">${r.orders ?? 0}</td><td class="num">${fmtN(r.lines ?? 0)}</td>
+      <td class="num">${r.orders ? `<button data-zip="${r.id}">Excel (zip)</button>` : ""}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="empty">Няма пускания.</td></tr>`;
+  document.querySelectorAll("[data-zip]").forEach(b => b.onclick = () =>
+    download(`/orders/export/zip?dispatch_run_id=${b.dataset.zip}`).catch(e => alert(e.message)));
+}
+
+/* ---------- заявки ---------- */
+let ordLines = [], edits = {}, curIdx = 0;
+async function initOrders() {
+  const list = await stores(); fillStoreSelect($("storeSel"), list);
+  $("storeSel").onchange = () => loadOrder();
+  $("prevStore").onclick = () => step(-1);
+  $("nextStore").onclick = () => step(1);
+  $("reloadOrder").onclick = () => loadOrder();
+  $("xlsOrder").onclick = () => download(`/orders/preview/${$("storeSel").value}/export?key=${encodeURIComponent(KEY)}`).catch(e => msg("ordMsg", e.message, false));
+  $("saveOrder").onclick = saveOrder;
+  $("undoOrder").onclick = () => loadOrder();
+  if (pendingStore) { $("storeSel").value = pendingStore; pendingStore = null; }
+  loadOrder();
+}
+let pendingStore = null;
+function openStore(id) {
+  if ($("storeSel").options.length) { $("storeSel").value = id; loadOrder(); } else pendingStore = id;
+}
+function step(d) {
+  const sel = $("storeSel"); const i = sel.selectedIndex + d;
+  if (i >= 0 && i < sel.options.length) { sel.selectedIndex = i; loadOrder(); }
+}
+async function loadOrder() {
+  if (Object.keys(edits).length && !confirm("Има незапазени промени. Да ги откажа?")) return;
+  edits = {}; updateSave();
+  const id = $("storeSel").value;
+  $("ordBody").innerHTML = `<tr><td colspan="10" class="empty">Изчислявам…</td></tr>`;
+  try {
+    const [d, a] = await Promise.all([api(`/orders/preview/${id}?respect_schedule=false`), arts()]);
+    ordLines = d.lines;
+    let value = 0, units = 0;
+    const rows = d.lines.map(l => {
+      const art = a[l.sku] || {};
+      const price = art.effective_price;
+      const val = price != null ? price * l.ordered_quantity : null;
+      if (val) value += val; units += l.ordered_quantity;
+      const promo = art.promo_price != null ? `<span class="tag warn">промо до ${esc(art.promo_until)}</span>` : "";
+      return `<tr data-sku="${esc(l.sku)}">
+        <td>${esc(l.sku)}</td>
+        <td class="name">${esc(art.name || l.name)}</td>
+        <td class="num ${l.current_stock < l.min_stock ? "low" : ""}">${fmtN(l.current_stock)}</td>
+        <td class="num"><input type="number" min="0" step="1" value="${l.min_stock}" data-f="min_stock" aria-label="Мин"></td>
+        <td class="num"><input type="number" min="0" step="1" value="${l.max_stock}" data-f="max_stock" aria-label="Макс"></td>
+        <td class="num"><b>${l.ordered_quantity}</b></td>
+        <td class="num">${l.pack_size > 1 ? l.pack_size : "бр."}</td>
+        <td class="num">${fmtE(price)}</td>
+        <td class="num">${fmtE(val)}</td>
+        <td>${promo}</td></tr>`;
+    });
+    $("ordBody").innerHTML = rows.join("") || `<tr><td colspan="10" class="empty">В този магазин няма артикул под минимума.</td></tr>`;
+    $("ordTotals").innerHTML =
+      `<span>Редове <b>${d.total_lines}</b></span><span>Бройки <b>${fmtN(units)}</b></span>` +
+      `<span>Стойност <b>${fmtE(value)} €</b></span>` +
+      `<span>Над минимума ${d.skipped_above_min}</span><span>Без наличност ${d.skipped_no_stock_data.length}</span>`;
+    document.querySelectorAll("#ordBody input").forEach(inp => inp.oninput = onEdit);
+    msg("ordMsg", "");
+  } catch (e) { msg("ordMsg", e.message, false); $("ordBody").innerHTML = `<tr><td colspan="10" class="empty">Грешка при зареждане.</td></tr>`; }
+}
+function onEdit(e) {
+  const tr = e.target.closest("tr"); const sku = tr.dataset.sku;
+  edits[sku] = {
+    min_stock: parseFloat(tr.querySelector('[data-f="min_stock"]').value),
+    max_stock: parseFloat(tr.querySelector('[data-f="max_stock"]').value),
+  };
+  e.target.classList.add("changed"); updateSave();
+}
+function updateSave() {
+  const n = Object.keys(edits).length;
+  $("saveBar").classList.toggle("on", n > 0);
+  $("saveCount").textContent = n ? `${n} променени артикула` : "";
+}
+async function saveOrder() {
+  const store_id = parseInt($("storeSel").value);
+  const bad = Object.entries(edits).filter(([, v]) => v.max_stock < v.min_stock);
+  if (bad.length) { msg("ordMsg", `Макс е под мин при ${bad.map(b => b[0]).join(", ")}`, false); return; }
+  const body = Object.entries(edits).map(([sku, v]) => ({ store_id, sku, ...v }));
+  try {
+    const r = await api("/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    edits = {}; updateSave();
+    await loadOrder();
+    msg("ordMsg", `Запазени ${r.updated} промени.`);
+  } catch (e) { msg("ordMsg", e.message, false); }
+}
+
+/* ---------- асортимент ---------- */
+let ALIST = [];
+async function loadAssort() {
+  ALIST = Object.values(await arts());
+  $("aCat").innerHTML = `<option value="">Всички категории</option>`;
+  const cats = [...new Set(ALIST.map(a => a.category).filter(Boolean))].sort();
+  $("aCat").innerHTML += cats.map(c => `<option>${esc(c)}</option>`).join("");
+  ["aSearch", "aCat", "aFilter"].forEach(id => $(id).oninput = renderAssort);
+  renderAssort();
+}
+function renderAssort() {
+  const q = $("aSearch").value.trim().toUpperCase(), cat = $("aCat").value, f = $("aFilter").value;
+  const rows = ALIST.filter(a =>
+    (!q || a.sku.includes(q) || (a.name || "").toUpperCase().includes(q)) &&
+    (!cat || a.category === cat) &&
+    (!f || (f === "promo" && a.promo_price != null) || (f === "noprice" && a.delivery_price == null) ||
+      (f === "noplano" && !a.planogram_stores && a.is_active) || (f === "inactive" && !a.is_active)));
+  $("aCount").textContent = `${rows.length} от ${ALIST.length}`;
+  $("aBody").innerHTML = rows.slice(0, 600).map(a => `<tr>
+    <td>${esc(a.sku)}</td>
+    <td class="name">${esc(a.name)} ${a.is_active ? "" : '<span class="tag off">спрян</span>'}</td>
+    <td class="cat">${esc(a.category || "")}</td>
+    <td class="num">${a.pack_size > 1 ? a.pack_size + " " + esc((a.pack_type || "").toLowerCase()) : "бр."}</td>
+    <td class="num">${fmtE(a.base_price)}</td>
+    <td class="num">${a.trade_discount ? (a.trade_discount * 100).toFixed(0) + "%" : "—"}</td>
+    <td class="num"><b>${fmtE(a.delivery_price)}</b></td>
+    <td>${a.promo_price != null ? `<span class="tag warn">${fmtE(a.promo_price)} € до ${esc(a.promo_until)}</span>` : (a.price_note ? `<span class="muted" style="font-size:11px" title="${esc(a.price_note)}">изтекли</span>` : "")}</td>
+    <td class="num">${a.planogram_stores || "—"}</td>
+    <td class="num">${a.active_settings || "—"}</td></tr>`).join("")
+    || `<tr><td colspan="10" class="empty">Няма артикули по този филтър.</td></tr>`;
+}
+
+/* ---------- планограма ---------- */
+let PDATA = null;
+const PSTAT = { ok: ["наред", ""], missing_minmax: ["без мин/макс", "warn"], stopped: ["спрян 0–0", "off"], not_in_planogram: ["извън планограма", "bad"] };
+async function initPlano() {
+  fillStoreSelect($("pStore"), await stores());
+  $("pStore").onchange = loadPlano; $("pFilter").onchange = renderPlano;
+  loadPlano();
+}
+async function loadPlano() {
+  $("pBody").innerHTML = `<tr><td colspan="7" class="empty">Зареждам…</td></tr>`;
+  PDATA = await api(`/ui/planogram/${$("pStore").value}`);
+  const s = PDATA.store;
+  $("pInfo").textContent = [s.size_class ? `категория ${s.size_class}` : "", s.address || ""].filter(Boolean).join(" · ");
+  const c = PDATA.counts;
+  $("pCounts").innerHTML = Object.entries(PSTAT).map(([k, [l]]) => `<span>${l} <b>${c[k] || 0}</b></span>`).join("");
+  renderPlano();
+}
+function renderPlano() {
+  const f = $("pFilter").value;
+  const rows = PDATA.rows.filter(r => !f || r.status === f);
+  $("pBody").innerHTML = rows.map(r => { const [l, cls] = PSTAT[r.status];
+    return `<tr><td>${esc(r.sku)}</td><td class="name">${esc(r.name)}</td><td class="cat">${esc(r.category || "")}</td>
+      <td class="num">${fmtN(r.stock)}</td><td class="num">${fmtN(r.min)}</td><td class="num">${fmtN(r.max)}</td>
+      <td><span class="tag ${cls}">${l}</span></td></tr>`; }).join("")
+    || `<tr><td colspan="7" class="empty">Няма артикули в тази група.</td></tr>`;
+}
+
+/* ---------- пускане и импорт ---------- */
+async function initRun() {
+  fillStoreSelect($("mmStore"), await stores());
+  $("runNow").onclick = async () => {
+    if (!confirm("Да пусна заявките сега? Ще се запишат като нови заявки.")) return;
+    $("runNow").disabled = true; msg("runMsg", "Изчислявам…");
+    try {
+      const r = await api("/orders/dispatch", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ respect_schedule: $("runSched").checked }) });
+      msg("runMsg", `Пускане #${r.dispatch_run_id}: ${r.orders_created} заявки, ${r.order_lines_created} реда.`);
+      if (r.orders_created) await download(`/orders/export/zip?dispatch_run_id=${r.dispatch_run_id}`);
+      loaded.board = false;
+    } catch (e) { msg("runMsg", e.message, false); }
+    $("runNow").disabled = false;
+  };
+  const cfg = {
+    wb: ["fWb", "oWb", () => "/import/supplier-workbook?supplier_id=1"],
+    stock: ["fStock", "oStock", () => "/import/stock-report"],
+    mm: ["fMm", "oMm", () => `/import/min-max?store_id=${$("mmStore").value}`],
+    pk: ["fPk", "oPk", () => "/import/pack-sizes"],
+  };
+  document.querySelectorAll("[data-imp]").forEach(b => b.onclick = async () => {
+    const [fi, out, url] = cfg[b.dataset.imp];
+    const f = $(fi).files[0]; if (!f) { $(out).textContent = "Избери файл."; return; }
+    const fd = new FormData(); fd.append("file", f);
+    b.disabled = true; $(out).textContent = "Качвам…";
+    try {
+      const r = await api(url(), { method: "POST", body: fd });
+      $(out).textContent = JSON.stringify(r, null, 2);
+      ARTS = null; loaded.assort = false; loaded.board = false;
+    } catch (e) { $(out).textContent = "Грешка: " + e.message; }
+    b.disabled = false;
+  });
+}
+
+/* ---------- старт ---------- */
+document.querySelectorAll("nav a").forEach(a => a.onclick = () => {
+  if (a.dataset.tab === "board") loaded.board = false;
+  if (a.dataset.tab === "assort" && !ARTS) loaded.assort = false;
+});
+show((location.hash || "#board").slice(1));
+if ((location.hash || "#board") !== "#board") api("/ui/summary").then(d => $("stamp").innerHTML = `Обновено <b>${d.generated}</b>`).catch(() => {});
+</script>
+</body>
+</html>

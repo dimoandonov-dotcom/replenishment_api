@@ -42,6 +42,9 @@ class Store(Base):
     mistral_db_path: Mapped[str | None] = mapped_column(
         Text
     )
+    size_class: Mapped[str | None] = mapped_column(
+        Text
+    )
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True
     )
@@ -152,6 +155,21 @@ class Article(Base):
         Text
     )
     category: Mapped[str | None] = mapped_column(
+        Text
+    )
+    supplier_name: Mapped[str | None] = mapped_column(
+        Text
+    )
+    base_price: Mapped[float | None] = mapped_column(
+        Numeric(12, 4)
+    )
+    trade_discount: Mapped[float | None] = mapped_column(
+        Numeric(8, 4)
+    )
+    delivery_price: Mapped[float | None] = mapped_column(
+        Numeric(12, 4)
+    )
+    price_note: Mapped[str | None] = mapped_column(
         Text
     )
     is_active: Mapped[bool] = mapped_column(
@@ -392,4 +410,16 @@ class StoreAlias(Base):
     )
     alias_normalized: Mapped[str] = mapped_column(
         Text, unique=True
+    )
+
+
+class Planogram(Base):
+    """Кой артикул се води в кой магазин (по планограмата на доставчика)."""
+
+    __tablename__ = "planogram"
+    store_id: Mapped[int] = mapped_column(
+        ForeignKey("stores.id", ondelete="CASCADE"), primary_key=True
+    )
+    article_id: Mapped[int] = mapped_column(
+        ForeignKey("articles.id", ondelete="CASCADE"), primary_key=True
     )

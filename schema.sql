@@ -4,6 +4,7 @@ CREATE TABLE stores (
     address         TEXT,
     mistral_host    TEXT,
     mistral_db_path TEXT,
+    size_class      TEXT,
     is_active       BOOLEAN NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -47,6 +48,11 @@ CREATE TABLE articles (
     pack_size       INTEGER NOT NULL DEFAULT 1,
     pack_type       TEXT,
     category        TEXT,
+    supplier_name   TEXT,
+    base_price      NUMERIC(12,4),
+    trade_discount  NUMERIC(8,4),
+    delivery_price  NUMERIC(12,4),
+    price_note      TEXT,
     is_active       BOOLEAN NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -136,4 +142,9 @@ CREATE TABLE store_aliases (
     id                  SERIAL PRIMARY KEY,
     store_id            INTEGER NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
     alias_normalized    TEXT NOT NULL UNIQUE
+);
+CREATE TABLE planogram (
+    store_id   INTEGER NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+    article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    PRIMARY KEY (store_id, article_id)
 );

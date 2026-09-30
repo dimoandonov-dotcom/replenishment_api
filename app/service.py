@@ -68,12 +68,31 @@ def load_settings(
         )
     )
 
+    # Планограма: ако доставчикът има заредена планограма, поръчваме
+    # САМО артикулите, които по планограма се водят в този магазин.
+    store_plano = set(
+        db.execute(
+            select(m.Planogram.article_id).where(
+                m.Planogram.store_id == store_id
+            )
+        ).scalars().all()
+    )
+    plano_suppliers = set(
+        db.execute(
+            select(m.Article.default_supplier_id)
+            .join(m.Planogram, m.Planogram.article_id == m.Article.id)
+            .distinct()
+        ).scalars().all()
+    )
+
     out: list[ArticleSetting] = []
     for setting, article in db.execute(stmt).all():
         sup_id = setting.supplier_id or article.default_supplier_id
         if sup_id is None:
             continue
         if supplier_id is not None and sup_id != supplier_id:
+            continue
+        if sup_id in plano_suppliers and article.id not in store_plano:
             continue
         out.append(
             ArticleSetting(

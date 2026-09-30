@@ -19,7 +19,10 @@ from sqlalchemy.orm import Session
 
 from . import models as m
 
-HEADERS = ["ArtNomer", "Artikul", "MerEd", "Kol", "Zabelejka"]
+# Бланка по образец от НДК (АНДЖИ-ГЛАДСТОН 10.xlsx): 4 колони.
+# Името на артикула е както е в ценовата листа на доставчика
+# (supplier_name), ако е заредено - иначе нашето име.
+HEADERS = ["ArtNomer", "Artikul", "MerEd", "Kol"]
 UNIT_LABEL = "броя"
 
 
@@ -41,38 +44,45 @@ def order_filename(store: m.Store) -> str:
     return f"{base}.xlsx"
 
 
-def build_order_workbook(db: Session, order: m.PurchaseOrder) -> bytes:
+def _write_workbook(rows) -> bytes:
+    """rows: [(sku, name, qty)] -> .xlsx по бланката."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Sheet 1"
     ws.append(HEADERS)
+    out = []
+    for sku, name, qty in rows:
+        sku_val = int(sku) if str(sku).isdigit() else sku
+        out.append((sku_val, name, UNIT_LABEL, int(qty)))
+    out.sort(key=lambda r: (isinstance(r[0], str), r[0]))
+    for r in out:
+        ws.append(list(r))
+    widths = {"A": 12, "B": 55, "C": 8, "D": 8}
+    for col, w in widths.items():
+        ws.column_dimensions[col].width = w
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
+
+def _display_name(a) -> str:
+    return (a.supplier_name or a.name or "").strip()
+
+
+def build_order_workbook(db: Session, order: m.PurchaseOrder) -> bytes:
     art_ids = [l.article_id for l in order.lines]
     arts = {
         a.id: a for a in db.execute(
             select(m.Article).where(m.Article.id.in_(art_ids))
         ).scalars().all()
     }
-
     rows = []
     for line in order.lines:
         a = arts.get(line.article_id)
-        if a is None:
+        if a is None or int(line.ordered_quantity) <= 0:
             continue
-        rows.append((int(a.sku) if a.sku.isdigit() else a.sku,
-                     a.name, UNIT_LABEL, int(line.ordered_quantity), None))
-
-    rows.sort(key=lambda r: (isinstance(r[0], str), r[0]))
-    for r in rows:
-        ws.append(list(r))
-
-    widths = {"A": 12, "B": 55, "C": 8, "D": 8, "E": 14}
-    for col, w in widths.items():
-        ws.column_dimensions[col].width = w
-
-    buf = BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
+        rows.append((a.sku, _display_name(a), line.ordered_quantity))
+    return _write_workbook(rows)
 
 
 def export_order(db: Session, order_id: int) -> tuple[str, bytes]:
@@ -116,28 +126,20 @@ def export_orders_zip(
     return buf.getvalue()
 
 
-def build_workbook_from_lines(lines) -> bytes:
+def build_workbook_from_lines(lines, db: Session | None = None) -> bytes:
     """
-    Прави .xlsx директно от изчислени (не задължително записани) редове -
-    ползва се за износ на преглед (preview), без да се създава заявка в базата.
+    .xlsx директно от изчислени (не задължително записани) редове -
+    за износ на преглед, без да се създава заявка в базата.
     """
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Sheet 1"
-    ws.append(HEADERS)
-
-    rows = []
-    for ln in lines:
-        sku_val = int(ln.sku) if ln.sku.isdigit() else ln.sku
-        rows.append((sku_val, ln.name, UNIT_LABEL, int(ln.ordered_quantity), None))
-    rows.sort(key=lambda r: (isinstance(r[0], str), r[0]))
-    for r in rows:
-        ws.append(list(r))
-
-    widths = {"A": 12, "B": 55, "C": 8, "D": 8, "E": 14}
-    for col, w in widths.items():
-        ws.column_dimensions[col].width = w
-
-    buf = BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
+    names = {}
+    if db is not None and lines:
+        skus = [ln.sku for ln in lines]
+        for a in db.execute(
+            select(m.Article).where(m.Article.sku.in_(skus))
+        ).scalars().all():
+            names[a.sku] = _display_name(a)
+    rows = [
+        (ln.sku, names.get(ln.sku, ln.name), ln.ordered_quantity)
+        for ln in lines if int(ln.ordered_quantity) > 0
+    ]
+    return _write_workbook(rows)
