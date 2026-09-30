@@ -22,6 +22,7 @@ router = APIRouter(tags=["Администриране"])
 
 
 class StoreIn(BaseModel):
+    id: int | None = None
     name: str
     address: str | None = None
     is_active: bool = True
@@ -41,7 +42,12 @@ def _store_out(s: m.Store) -> dict:
 def create_store(payload: StoreIn, db: Session = Depends(get_db)):
     if db.execute(select(m.Store).where(m.Store.name == payload.name)).scalar_one_or_none():
         raise HTTPException(409, "Вече има магазин с това име")
-    next_id = (db.execute(select(func.max(m.Store.id))).scalar() or 0) + 1
+    if payload.id is not None:
+        if db.get(m.Store, payload.id):
+            raise HTTPException(409, f"Вече има магазин с id {payload.id}")
+        next_id = payload.id
+    else:
+        next_id = (db.execute(select(func.max(m.Store.id))).scalar() or 0) + 1
     s = m.Store(id=next_id, name=payload.name, address=payload.address,
                 is_active=payload.is_active)
     db.add(s)
