@@ -761,6 +761,7 @@ async def import_supplier_workbook(
     matched_stores: set[int] = set()
     unknown_skus: set[str] = set()
     unmatched: set[str] = set()
+    listed_ids: set[int] = set()  # артикули, които присъстват в качените листове
     for ws in wb.worksheets:
         if "ПЛАНОГРАМ" not in ws.title.upper():
             continue
@@ -809,21 +810,23 @@ async def import_supplier_workbook(
                 db.flush()
                 arts[sku] = a
                 report["articles_created"] += 1
+            listed_ids.add(a.id)
             for j, sid in col_store.items():
                 if j < len(r) and r[j] and str(r[j]).strip().lower() == "да":
                     placements.add((sid, a.id))
 
-    if placements:
-        sup_art_ids = [
-            a.id for a in arts.values() if a.default_supplier_id == supplier_id
-        ]
+    if listed_ids:
+        # Заменяме планограмата САМО за артикулите от качения файл -
+        # ако е качен само бирен лист, вината/спиртните остават непокътнати.
         db.execute(
-            delete(m.Planogram).where(m.Planogram.article_id.in_(sup_art_ids))
+            delete(m.Planogram).where(m.Planogram.article_id.in_(listed_ids))
         )
-        db.execute(
-            insert(m.Planogram),
-            [{"store_id": sid, "article_id": aid} for sid, aid in placements],
-        )
+        if placements:
+            db.execute(
+                insert(m.Planogram),
+                [{"store_id": sid, "article_id": aid}
+                 for sid, aid in placements],
+            )
         db.flush()
         existing_settings = set(
             db.execute(
@@ -862,6 +865,7 @@ async def import_supplier_workbook(
 
     db.commit()
     report["planogram_rows"] = len(placements)
+    report["planogram_articles_in_file"] = len(listed_ids)
     report["stores_matched"] = len(matched_stores)
     report["unmatched_store_columns"] = sorted(unmatched)
     report["planogram_unknown_skus"] = sorted(unknown_skus)[:50]
