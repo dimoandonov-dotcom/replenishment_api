@@ -390,3 +390,30 @@ def mistral_sample(table: str, n: int = 5):
         raise HTTPException(404, str(e))
     except Exception as e:
         raise HTTPException(502, f"Мистрал: {type(e).__name__}: {e}")
+
+
+@router.post("/sales/sync-mistral")
+def sales_sync_mistral(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db)):
+    """Продажби от касовите бонове в Мистрал за последните N дни -> sales_history."""
+    from . import mistral
+    try:
+        return mistral.sync_sales(db, days)
+    except Exception as e:
+        raise HTTPException(502, f"Мистрал: {type(e).__name__}: {e}")
+
+
+@router.get("/ui/sales")
+def ui_sales(db: Session = Depends(get_db)):
+    """Продажби по магазин и артикул за заредения период (за справки)."""
+    rows = db.execute(
+        select(
+            m.SalesHistory.store_id, m.SalesHistory.article_id,
+            func.sum(m.SalesHistory.quantity_sold),
+            func.min(m.SalesHistory.sale_date), func.max(m.SalesHistory.sale_date),
+        ).group_by(m.SalesHistory.store_id, m.SalesHistory.article_id)
+    ).all()
+    return [
+        {"store_id": s, "article_id": a, "qty": float(q or 0),
+         "from": str(d1), "to": str(d2)}
+        for s, a, q, d1, d2 in rows
+    ]

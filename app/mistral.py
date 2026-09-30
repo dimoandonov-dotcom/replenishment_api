@@ -178,3 +178,95 @@ def sample_table(table: str, n: int = 5) -> dict:
         rows = [{k: (str(v) if v is not None else None) for k, v in r.items()}
                 for r in cur.fetchall()]
     return {"table": safe, "columns": cols, "rows": rows}
+
+
+def sync_sales(db, days: int = 14) -> dict:
+    """
+    Продажби от касовите бонове (SALE + SALECONTENT) за последните `days`
+    пълни дни, по магазин + артикул + ден -> sales_history (презаписва
+    периода). Върнатите/сторнирани бонове идват с отрицателно количество
+    и се нетират автоматично.
+    """
+    from datetime import date, datetime, timedelta, timezone
+    from sqlalchemy import delete, insert, select
+    from . import models as m
+    from .imports import normalize_store_name
+
+    lk: dict[str, int] = {}
+    for s in db.execute(select(m.Store)).scalars().all():
+        lk[normalize_store_name(s.name)] = s.id
+    for al in db.execute(select(m.StoreAlias)).scalars().all():
+        lk[al.alias_normalized] = al.store_id
+    arts = {
+        int(a.sku): a.id for a in db.execute(select(m.Article)).scalars().all()
+        if a.sku.isdigit()
+    }
+    sofia = timezone(timedelta(hours=3))
+    today = datetime.now(sofia).date()
+    d_from = today - timedelta(days=days)
+    started = datetime.now(timezone.utc)
+
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT ID, NAME FROM LOCATION")
+        loc_map = {}
+        for r in cur.fetchall():
+            n = normalize_store_name(r["NAME"])
+            sid = lk.get(n) or lk.get(n.replace("Д.", "", 1).strip())
+            if sid is not None:
+                loc_map[r["ID"]] = sid
+        codes = ",".join(str(c) for c in arts)
+        locs = ",".join(str(l) for l in loc_map)
+        cur.execute(
+            f"""
+            SELECT c.LOCATIONID AS loc, CAST(s.SALEDATE AS date) AS d,
+                   c.MATERIALCODE AS code, SUM(c.QTY) AS qty, COUNT(*) AS lines,
+                   SUM(CASE WHEN c.QTY < 0 THEN 1 ELSE 0 END) AS neg_lines
+            FROM SALE s
+            JOIN SALECONTENT c ON c.LOCATIONID = s.LOCATIONID AND c.NUM = s.NUM
+            WHERE s.SALEDATE >= %s AND s.SALEDATE < %s
+              AND s.LOCATIONID IN ({locs})
+              AND c.MATERIALCODE IN ({codes})
+            GROUP BY c.LOCATIONID, CAST(s.SALEDATE AS date), c.MATERIALCODE
+            """,
+            (d_from.isoformat(), today.isoformat()),
+        )
+        rows = cur.fetchall()
+        cur.execute(
+            f"SELECT s.OPERATIONTYPE AS op, s.DOCUMENTTYPEID AS dt, COUNT(*) AS n "
+            f"FROM SALE s WHERE s.SALEDATE >= %s AND s.SALEDATE < %s "
+            f"AND s.LOCATIONID IN ({locs}) GROUP BY s.OPERATIONTYPE, s.DOCUMENTTYPEID",
+            (d_from.isoformat(), today.isoformat()),
+        )
+        op_types = [{k: str(v) for k, v in r.items()} for r in cur.fetchall()]
+
+    agg: dict[tuple, float] = {}
+    neg_lines = 0
+    for r in rows:
+        sid = loc_map.get(r["loc"])
+        aid = arts.get(int(r["code"]))
+        if sid is None or aid is None:
+            continue
+        d = r["d"] if isinstance(r["d"], date) else date.fromisoformat(str(r["d"])[:10])
+        key = (sid, aid, d)
+        agg[key] = agg.get(key, 0.0) + float(r["qty"] or 0)
+        neg_lines += int(r["neg_lines"] or 0)
+
+    db.execute(delete(m.SalesHistory).where(
+        m.SalesHistory.sale_date >= d_from, m.SalesHistory.sale_date < today))
+    if agg:
+        db.execute(insert(m.SalesHistory), [
+            {"store_id": s, "article_id": a, "sale_date": d, "quantity_sold": q}
+            for (s, a, d), q in agg.items()
+        ])
+    db.commit()
+    return {
+        "from": d_from.isoformat(), "to": (today - timedelta(days=1)).isoformat(),
+        "rows": len(agg),
+        "units": round(sum(agg.values()), 1),
+        "stores": len({k[0] for k in agg}),
+        "articles": len({k[1] for k in agg}),
+        "return_lines": neg_lines,
+        "operation_types": op_types,
+        "seconds": round((datetime.now(timezone.utc) - started).total_seconds(), 1),
+    }
