@@ -134,6 +134,20 @@ td input.changed { border-color:var(--amber); background:var(--amber-soft); }
 .imp pre { font-family:var(--mono); font-size:11.5px; white-space:pre-wrap; margin:10px 0 0; color:var(--slate); max-height:160px; overflow:auto; }
 </style>
 
+<script>
+window.logoOk = function (img) {
+  var box = img.parentNode; if (!box || box.classList.contains("has-logo")) return;
+  box.classList.add("has-logo");
+  var sh = document.createElement("span"); sh.className = "shine"; box.appendChild(sh);
+  // маската по формата на буквите - от самата заредена картинка (надеждно във всички браузъри)
+  try {
+    var c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
+    c.getContext("2d").drawImage(img, 0, 0);
+    var u = "url(" + c.toDataURL("image/png") + ")";
+    sh.style.webkitMaskImage = u; sh.style.maskImage = u;
+  } catch (e) { sh.remove(); }
+};
+</script>
 <style id="theme300">
 /* ================= FAMILY 300 · визия ================= */
 :root {
@@ -181,6 +195,20 @@ h1 .script { font-family:var(--script); font-weight:700; color:var(--fire1); fon
 .sparks { position:absolute; right:-10px; top:-18px; width:260px; height:160px; opacity:.55; pointer-events:none; }
 .sparks line { stroke:var(--fire1); stroke-width:3; stroke-linecap:round; stroke-dasharray:18; animation:spark 2.8s ease-in-out infinite; }
 .sparks line:nth-child(2n){ stroke:#F6C28B; animation-delay:.4s } .sparks line:nth-child(3n){ animation-delay:.9s }
+
+/* ---------- истинското лого + отблясък ---------- */
+.logo300.has-logo { display:block; background:none; box-shadow:none; border-radius:0; overflow:visible; width:auto; height:auto; position:relative; line-height:0; }
+.logo300.has-logo img { height:74px; width:auto; background:none; display:block;
+  filter:drop-shadow(0 3px 12px rgba(244,125,38,.45)); animation:glow 3.6s ease-in-out infinite; }
+.logo300.big.has-logo { margin:0 0 14px; } .logo300.big.has-logo img { height:118px; }
+.logo300 .shine { position:absolute; inset:0; pointer-events:none;
+  -webkit-mask-position:center; mask-position:center; -webkit-mask-size:100% 100%; mask-size:100% 100%;
+  -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat;
+  background:linear-gradient(105deg, transparent 38%, rgba(255,255,255,.0) 42%, rgba(255,255,255,.95) 49%, rgba(255,236,210,.75) 52%, rgba(255,255,255,0) 58%, transparent 62%);
+  background-size:320% 100%; background-position:130% 0; animation:shine 3.6s cubic-bezier(.45,.05,.3,1) infinite; }
+@keyframes shine { 0% { background-position:130% 0 } 60%,100% { background-position:-30% 0 } }
+@keyframes glow { 0%,100% { filter:drop-shadow(0 3px 10px rgba(244,125,38,.35)) } 55% { filter:drop-shadow(0 3px 18px rgba(255,170,90,.7)) } }
+@media (max-width:620px) { .logo300.has-logo img { height:58px; } .logo300.big.has-logo img { height:96px; } }
 
 /* ---------- навигация: цветни хапчета ---------- */
 nav { border:none; gap:8px; margin:18px 0 22px; padding:4px 2px 8px; }
@@ -256,7 +284,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
 @keyframes shimmer { from { background-position:200% 0 } to { background-position:-200% 0 } }
 @keyframes spark { 0%,100% { stroke-dashoffset:18; opacity:.2 } 50% { stroke-dashoffset:0; opacity:1 } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation:none !important; transition:none !important; } }
-@media (max-width:620px) { .top { border-radius:0 0 20px 20px; padding:18px 18px 16px; } .logo300 { width:52px; height:52px; border-radius:15px; } .sparks { width:180px; } }
+@media (max-width:620px) { .top { border-radius:0 0 20px 20px; padding:18px 18px 16px; } .logo300:not(.has-logo) { width:52px; height:52px; border-radius:15px; } .sparks { width:180px; } }
 </style>
 </head>
 <body>
@@ -266,9 +294,9 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
 <div class="top">
   <svg class="sparks" viewBox="0 0 260 160" aria-hidden="true"><line x1="200" y1="80" x2="250" y2="60"/><line x1="200" y1="80" x2="240" y2="120"/><line x1="200" y1="80" x2="190" y2="20"/><line x1="200" y1="80" x2="150" y2="40"/><line x1="200" y1="80" x2="150" y2="125"/><line x1="200" y1="80" x2="205" y2="145"/><line x1="200" y1="80" x2="235" y2="25"/></svg>
   <div class="brandrow">
-    <div class="logo300" id="logo300"><img src="/brand/logo" alt="300" onerror="this.remove();document.getElementById('logo300').insertAdjacentHTML('beforeend','<span>300</span>')"></div>
+    <div class="logo300" id="logo300"><img src="/brand/logo" alt="Триста · верига супермаркети" onload="logoOk(this)" onerror="this.remove();document.getElementById('logo300').insertAdjacentHTML('beforeend','<span>300</span>')"></div>
     <div><div class="brand">MINMAX AI · АВТОМАТИЧНИ ЗАЯВКИ</div>
-    <h1>Контролен пулт<span class="script">Магазини 300</span></h1></div>
+    <h1>Контролен пулт</h1></div>
   </div>
   <div class="stamp"><div id="stamp">Зареждам…</div><button class="logout" onclick="logout()">Изход</button></div>
 </div>
@@ -921,7 +949,7 @@ function showLogin(err) {
   box.className = "login";
   box.innerHTML = `
     <form id="loginForm">
-      <div class="logo300" id="logoL"><img src="/brand/logo" alt="300" onerror="this.parentNode.innerHTML='<span>300</span>'"></div>
+      <div class="logo300 big" id="logoL"><img src="/brand/logo" alt="Триста · верига супермаркети" onload="logoOk(this)" onerror="this.parentNode.innerHTML='<span>300</span>'"></div>
       <div class="brand">MINMAX AI · МАГАЗИНИ 300</div>
       <h1>Вход</h1>
       <label for="uIn">Потребител</label>
