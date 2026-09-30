@@ -24,36 +24,50 @@ app = FastAPI(
     version="1.0.0",
 )
 
+import hmac as _hmac
+import hashlib as _hashlib
 import os as _os
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+# Достъп:
+#  - хора: потребител + парола (APP_USER / APP_PASSWORD) -> бисквитка за сесия
+#  - машини (cron, скриптове): header X-API-Key (API_KEY)
 _API_KEY = _os.getenv("API_KEY", "").strip()
-_OPEN_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc", "/dashboard", "/orders-view"}
+APP_USER = _os.getenv("APP_USER", "").strip()
+APP_PASSWORD = _os.getenv("APP_PASSWORD", "").strip()
+SESSION_COOKIE = "minmax_session"
+_OPEN_PATHS = {
+    "/", "/health", "/docs", "/openapi.json", "/redoc",
+    "/dashboard", "/orders-view", "/ui/login", "/ui/logout",
+}
 
 
-def _path_uses_own_key_check(path: str) -> bool:
-    """Пътища, които сами проверяват ?key=... (отварят се директно в
-    браузъра, не могат да пращат X-API-Key header)."""
-    if path in _OPEN_PATHS:
+def session_token() -> str:
+    """Подпис на сесията - сменя се автоматично при смяна на паролата."""
+    secret = (_API_KEY + "|" + APP_PASSWORD).encode()
+    return _hmac.new(secret, ("session:" + APP_USER).encode(), _hashlib.sha256).hexdigest()
+
+
+def is_authenticated(request: Request) -> bool:
+    if _API_KEY and _hmac.compare_digest(request.headers.get("X-API-Key", ""), _API_KEY):
         return True
-    if path.startswith("/orders/preview/") and path.endswith("/export"):
+    cookie = request.cookies.get(SESSION_COOKIE, "")
+    if APP_USER and APP_PASSWORD and cookie and _hmac.compare_digest(cookie, session_token()):
         return True
     return False
 
 
 @app.middleware("http")
-async def _require_api_key(request: Request, call_next):
-    if _path_uses_own_key_check(request.url.path):
+async def _require_auth(request: Request, call_next):
+    if request.url.path in _OPEN_PATHS:
         return await call_next(request)
-    if _API_KEY:
-        if request.headers.get("X-API-Key", "") != _API_KEY:
-            return JSONResponse(status_code=401, content={"detail": "Невалиден или липсващ X-API-Key"})
-    else:
+    if not _API_KEY and not APP_PASSWORD:
         client = request.client.host if request.client else ""
-        if client not in ("127.0.0.1", "::1", "localhost", "testclient"):
-            return JSONResponse(status_code=403, content={
-                "detail": "API_KEY не е конфигуриран - достъп само от localhost"})
+        if client in ("127.0.0.1", "::1", "localhost", "testclient"):
+            return await call_next(request)
+    if not is_authenticated(request):
+        return JSONResponse(status_code=401, content={"detail": "Нужен е вход"})
     return await call_next(request)
 
 

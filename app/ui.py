@@ -3,18 +3,20 @@
 табло, заявки по магазин с корекции и Excel, асортимент и цени,
 планограма, пускане на заявки и импорт на файлове.
 
-Страницата "/" се отваря с ?key=<API_KEY>; JS-ът после вика
-/ui/* и останалите endpoints с X-API-Key header.
+Вход с потребител и парола (APP_USER / APP_PASSWORD) -> бисквитка за
+сесия. Машините (cron) ползват X-API-Key.
 """
 from __future__ import annotations
 
+import hmac
 import os
 import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from urllib.parse import quote
@@ -81,14 +83,43 @@ def app_page():
     return HTMLResponse(_PAGE.read_text(encoding="utf-8"))
 
 
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/ui/login", include_in_schema=False)
+def ui_login(payload: LoginIn, request: Request):
+    from . import main as _main
+    ok_user = hmac.compare_digest(payload.username.strip().lower(), _main.APP_USER.lower())
+    ok_pass = hmac.compare_digest(payload.password, _main.APP_PASSWORD)
+    if not (_main.APP_USER and _main.APP_PASSWORD and ok_user and ok_pass):
+        raise HTTPException(401, "Грешен потребител или парола")
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie(
+        _main.SESSION_COOKIE, _main.session_token(),
+        max_age=60 * 60 * 24 * 365, httponly=True, samesite="lax",
+        secure=request.headers.get("x-forwarded-proto", request.url.scheme) == "https",
+    )
+    return resp
+
+
+@router.post("/ui/logout", include_in_schema=False)
+def ui_logout():
+    from . import main as _main
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(_main.SESSION_COOKIE)
+    return resp
+
+
 @router.get("/dashboard", include_in_schema=False)
-def old_dashboard(key: str = ""):
-    return RedirectResponse(f"/?key={quote(key)}")
+def old_dashboard():
+    return RedirectResponse("/")
 
 
 @router.get("/orders-view", include_in_schema=False)
-def old_orders_view(key: str = ""):
-    return RedirectResponse(f"/?key={quote(key)}#orders")
+def old_orders_view():
+    return RedirectResponse("/#orders")
 
 
 # ---------------------------------------------------------------------------
@@ -288,19 +319,16 @@ def ui_planogram(store_id: int, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------------------
-# Excel за преглед на заявка (отваря се и директно с ?key=)
+# Excel за преглед на заявка
 # ---------------------------------------------------------------------------
 
 @router.get("/orders/preview/{store_id}/export")
 def export_preview(
     store_id: int,
-    key: str = "",
     order_date: date | None = None,
     respect_schedule: bool = False,
     db: Session = Depends(get_db),
 ):
-    if not _key_ok(key):
-        raise HTTPException(401, "Невалиден или липсващ ключ")
     store = db.get(m.Store, store_id)
     if not store:
         raise HTTPException(404, f"Няма магазин с id {store_id}")

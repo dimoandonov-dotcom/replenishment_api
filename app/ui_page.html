@@ -278,14 +278,7 @@ td input.changed { border-color:var(--amber); background:var(--amber-soft); }
 </div>
 
 <script>
-/* ---------- ключ: въвежда се веднъж, браузърът го помни ---------- */
-const _urlKey = new URLSearchParams(location.search).get("key");
-if (_urlKey) {
-  try { localStorage.setItem("minmax_key", _urlKey); } catch (e) {}
-  history.replaceState(null, "", location.pathname + location.hash);
-}
-let KEY = _urlKey || (() => { try { return localStorage.getItem("minmax_key") || ""; } catch (e) { return ""; } })();
-const HDR = { "X-API-Key": KEY };
+const HDR = {};  /* вход с потребител и парола - сесията е в бисквитка */
 const fmtN = n => (n == null || n === "") ? "—" : Number(n).toLocaleString("bg-BG", {maximumFractionDigits: 2});
 const fmtE = n => (n == null) ? "—" : Number(n).toLocaleString("bg-BG", {minimumFractionDigits: 2, maximumFractionDigits: 2});
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -293,6 +286,7 @@ const $ = id => document.getElementById(id);
 
 async function api(path, opts = {}) {
   const res = await fetch(path, { ...opts, headers: { ...HDR, ...(opts.headers || {}) } });
+  if (res.status === 401) { showLogin("Сесията изтече. Влез отново."); throw new Error("Нужен е вход"); }
   if (!res.ok) throw new Error(res.status + " " + (await res.text()).slice(0, 180));
   return res.json();
 }
@@ -380,7 +374,7 @@ async function initOrders() {
   $("prevStore").onclick = () => step(-1);
   $("nextStore").onclick = () => step(1);
   $("reloadOrder").onclick = () => loadOrder();
-  $("xlsOrder").onclick = () => download(`/orders/preview/${$("storeSel").value}/export?key=${encodeURIComponent(KEY)}`).catch(e => msg("ordMsg", e.message, false));
+  $("xlsOrder").onclick = () => download(`/orders/preview/${$("storeSel").value}/export`).catch(e => msg("ordMsg", e.message, false));
   $("saveOrder").onclick = saveOrder;
   $("undoOrder").onclick = () => loadOrder();
   if (pendingStore) { $("storeSel").value = pendingStore; pendingStore = null; }
@@ -552,6 +546,7 @@ async function initRun() {
 
 /* ---------- вход ---------- */
 function showLogin(err) {
+  if (document.querySelector(".login")) return;
   document.querySelector(".wrap").style.display = "none";
   const box = document.createElement("div");
   box.className = "login";
@@ -559,33 +554,34 @@ function showLogin(err) {
     <form id="loginForm">
       <div class="brand">MINMAX AI</div>
       <h1>Вход</h1>
-      <label for="keyInput">Ключ за достъп</label>
-      <input type="password" id="keyInput" autocomplete="current-password" required>
+      <label for="uIn">Потребител</label>
+      <input type="text" id="uIn" autocomplete="username" autocapitalize="none" required>
+      <label for="pIn">Парола</label>
+      <input type="password" id="pIn" autocomplete="current-password" required>
       <button class="go" type="submit">Влез</button>
       <div class="msg err">${err || ""}</div>
-      <p class="note">Въвежда се веднъж — браузърът го запомня.</p>
     </form>`;
   document.body.appendChild(box);
-  $("keyInput").focus();
+  $("uIn").focus();
   $("loginForm").onsubmit = async ev => {
     ev.preventDefault();
-    const k = $("keyInput").value.trim();
-    let ok = false;
-    try { ok = /^[\x20-\x7E]+$/.test(k) && (await fetch("/ui/summary", { headers: { "X-API-Key": k } })).ok; } catch (e) {}
-    if (ok) { try { localStorage.setItem("minmax_key", k); } catch (e) {} location.reload(); }
-    else box.querySelector(".msg").textContent = "Грешен ключ. Провери и дали клавиатурата е на латиница.";
+    const r = await fetch("/ui/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: $("uIn").value, password: $("pIn").value }) });
+    if (r.ok) location.reload();
+    else box.querySelector(".msg").textContent = "Грешен потребител или парола.";
   };
 }
-function logout() { try { localStorage.removeItem("minmax_key"); } catch (e) {} location.reload(); }
+async function logout() { await fetch("/ui/logout", { method: "POST" }); location.reload(); }
 
 /* ---------- старт ---------- */
 document.querySelectorAll("nav a").forEach(a => a.onclick = () => {
   if (a.dataset.tab === "board") loaded.board = false;
   if (a.dataset.tab === "assort" && !ARTS) loaded.assort = false;
 });
-if (!KEY) { showLogin(); throw new Error("stop"); }
-fetch("/ui/summary", { headers: HDR }).then(r => { if (r.status === 401) { try { localStorage.removeItem("minmax_key"); } catch (e) {} showLogin("Ключът е невалиден или е сменен."); } });
-show((location.hash || "#board").slice(1));
+fetch("/ui/summary").then(r => {
+  if (r.status === 401) { showLogin(); return; }
+  show((location.hash || "#board").slice(1));
+});
 if ((location.hash || "#board") !== "#board") api("/ui/summary").then(d => $("stamp").innerHTML = `Обновено <b>${d.generated}</b>`).catch(() => {});
 </script>
 </body>
