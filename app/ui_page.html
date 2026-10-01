@@ -141,8 +141,9 @@ window.logoOk = function (img) {
   var sh = document.createElement("span"); sh.className = "shine"; box.appendChild(sh);
   // маската по формата на буквите - от самата заредена картинка (надеждно във всички браузъри)
   try {
-    var c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
-    c.getContext("2d").drawImage(img, 0, 0);
+    var k = Math.min(1, 240 / (img.naturalWidth || 240));
+    var c = document.createElement("canvas"); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
     var u = "url(" + c.toDataURL("image/png") + ")";
     sh.style.webkitMaskImage = u; sh.style.maskImage = u;
   } catch (e) { sh.remove(); }
@@ -170,7 +171,7 @@ window.logoOk = function (img) {
     --danger:#EF7A67; --danger-soft:#3E2420; --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.35); }
 }
 body { background:var(--paper); }
-body::before { content:""; position:fixed; inset:0; pointer-events:none; z-index:-1;
+body::before { content:""; position:absolute; inset:0 0 auto 0; height:700px; pointer-events:none; z-index:-1;
   background:radial-gradient(900px 400px at 110% -10%, rgba(217,98,28,.10), transparent 60%),
              radial-gradient(700px 360px at -10% 110%, rgba(31,138,91,.07), transparent 60%); }
 .wrap { max-width:1240px; padding:0 18px 70px; }
@@ -199,14 +200,15 @@ h1 .script { font-family:var(--script); font-weight:700; color:var(--fire1); fon
 /* ---------- истинското лого + отблясък ---------- */
 .logo300.has-logo { display:block; background:none; box-shadow:none; border-radius:0; overflow:visible; width:auto; height:auto; position:relative; line-height:0; }
 .logo300.has-logo img { height:74px; width:auto; background:none; display:block;
-  filter:drop-shadow(0 3px 12px rgba(244,125,38,.45)); animation:glow 3.6s ease-in-out infinite; }
+  filter:drop-shadow(0 3px 12px rgba(244,125,38,.45)); }
 .logo300.big.has-logo { margin:0 0 14px; } .logo300.big.has-logo img { height:118px; }
-.logo300 .shine { position:absolute; inset:0; pointer-events:none;
+.logo300 .shine { position:absolute; inset:0; pointer-events:none; overflow:hidden;
   -webkit-mask-position:center; mask-position:center; -webkit-mask-size:100% 100%; mask-size:100% 100%;
-  -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat;
-  background:linear-gradient(105deg, transparent 38%, rgba(255,255,255,.0) 42%, rgba(255,255,255,.95) 49%, rgba(255,236,210,.75) 52%, rgba(255,255,255,0) 58%, transparent 62%);
-  background-size:320% 100%; background-position:130% 0; animation:shine 3.6s cubic-bezier(.45,.05,.3,1) infinite; }
-@keyframes shine { 0% { background-position:130% 0 } 60%,100% { background-position:-30% 0 } }
+  -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat; }
+.logo300 .shine::before { content:""; position:absolute; top:-20%; bottom:-20%; left:0; width:40%;
+  background:linear-gradient(105deg, transparent 0%, rgba(255,255,255,.95) 45%, rgba(255,236,210,.7) 55%, transparent 100%);
+  transform:translateX(-160%) skewX(-12deg); animation:shine 3.6s cubic-bezier(.45,.05,.3,1) infinite; will-change:transform; }
+@keyframes shine { 0% { transform:translateX(-160%) skewX(-12deg) } 60%,100% { transform:translateX(320%) skewX(-12deg) } }
 @keyframes glow { 0%,100% { filter:drop-shadow(0 3px 10px rgba(244,125,38,.35)) } 55% { filter:drop-shadow(0 3px 18px rgba(255,170,90,.7)) } }
 @media (max-width:620px) { .logo300.has-logo img { height:58px; } .logo300.big.has-logo img { height:96px; } }
 
@@ -247,8 +249,7 @@ select, input[type=text], input[type=search], input[type=password], input[type=n
 .tile .v { font-family:var(--head); font-weight:800; letter-spacing:-.5px; }
 .scroll { border-radius:var(--r); border:1px solid var(--line); box-shadow:var(--shadow); }
 th { background:var(--raised); }
-tbody tr { animation:rowIn .35s both; }
-tbody tr:nth-child(-n+12) { animation-delay:calc(var(--i,0) * 1ms); }
+tbody tr:nth-child(-n+25) { animation:rowIn .35s both; }
 tr:hover td { background:color-mix(in srgb,var(--amber) 6%,var(--raised)); }
 .tag { border-radius:999px; font-weight:600; }
 .head h2 { font-weight:800; letter-spacing:-.3px; }
@@ -668,7 +669,7 @@ async function loadAssort() {
   $("aCat").innerHTML = `<option value="">Всички категории</option>`;
   const cats = [...new Set(ALIST.map(a => a.category).filter(Boolean))].sort();
   $("aCat").innerHTML += cats.map(c => `<option>${esc(c)}</option>`).join("");
-  ["aSearch", "aCat", "aFilter"].forEach(id => $(id).oninput = renderAssort);
+  ["aSearch", "aCat", "aFilter"].forEach(id => $(id).oninput = () => { window._aLim = 150; renderAssort(); });
   renderAssort();
 }
 function renderAssort() {
@@ -679,7 +680,8 @@ function renderAssort() {
     (!f || (f === "promo" && a.promo_price != null) || (f === "noprice" && a.delivery_price == null) ||
       (f === "noplano" && !a.planogram_stores && a.is_active) || (f === "inactive" && !a.is_active)));
   $("aCount").textContent = `${rows.length} от ${ALIST.length}`;
-  $("aBody").innerHTML = rows.slice(0, 600).map(a => `<tr>
+  const lim = window._aLim || 150;
+  $("aBody").innerHTML = rows.slice(0, lim).map(a => `<tr>
     <td>${esc(a.sku)}</td>
     <td class="name">${esc(a.name)} ${a.is_active ? "" : '<span class="tag off">спрян</span>'}</td>
     <td class="cat">${esc(a.category || "")}</td>
@@ -691,6 +693,10 @@ function renderAssort() {
     <td class="num">${a.planogram_stores || "—"}</td>
     <td class="num">${a.active_settings || "—"}</td></tr>`).join("")
     || `<tr><td colspan="10" class="empty">Няма артикули по този филтър.</td></tr>`;
+  if (rows.length > lim) {
+    $("aBody").insertAdjacentHTML("beforeend", `<tr><td colspan="10" style="text-align:center;padding:14px"><button id="aMore">Покажи още (${rows.length - lim})</button></td></tr>`);
+    $("aMore").onclick = () => { window._aLim = lim + 150; renderAssort(); };
+  }
 }
 
 /* ---------- планограма ---------- */
