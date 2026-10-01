@@ -226,7 +226,8 @@ button.danger, .modal button.danger { color:#fff; border:none; background:linear
 @keyframes fadeIn { from { opacity:0 } to { opacity:1 } }
 
 /* ---------- навигация: цветни хапчета ---------- */
-nav { border:none; gap:8px; margin:18px 0 22px; padding:4px 2px 8px; }
+nav { border:none; gap:8px; margin:18px 0 22px; padding:4px 2px 8px; flex-wrap:wrap; overflow:visible !important; }
+@media (max-width:620px) { nav a { padding:8px 12px 8px 10px; font-size:13px; } }
 nav a { border:none !important; border-radius:999px; padding:10px 16px 10px 14px; background:var(--raised); color:var(--ink);
   box-shadow:var(--shadow); font-weight:600; font-size:14px; display:flex; align-items:center; gap:8px;
   transition:transform .18s, background .25s, color .25s, box-shadow .25s; }
@@ -330,6 +331,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
 <!-- ============ ТАБЛО ============ -->
 <section class="tab" id="tab-board">
   <div class="board" id="kpis"></div>
+  <div id="nordCard"></div>
   <div class="head"><h2>Магазини в последното пускане</h2><span class="note" id="topNote"></span></div>
   <div class="rack" id="rack"></div>
   <div class="head"><h2>История на пусканията</h2><span class="note">последни 10</span></div>
@@ -571,7 +573,23 @@ function fillStoreSelect(sel, list) {
 }
 
 /* ---------- табло ---------- */
+
+async function loadNordCard() {
+  const el = document.getElementById("nordCard"); if (!el) return;
+  try {
+    const d = await api("/ui/not-ordered"), t = d.totals || {};
+    const top = (d.stores || []).slice(0, 3).map(r => `${esc(r.store)} <b>${r.selling}</b>`).join(" · ");
+    el.innerHTML = `<div class="imp" style="margin:18px 0 6px;border-left:6px solid #B8451A;display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+      <div style="flex:1 1 320px"><h3 style="margin:0 0 6px">⛔ Не се поръчват</h3>
+        <p style="margin:0;line-height:1.6"><b style="font-size:20px;color:#B8451A">${fmtN(t.selling || 0)}</b> позиции магазин × артикул <b>се продават, а не се поръчват</b>
+        (спрени 0-0 ${fmtN(t.stopped || 0)} · извън планограмата ${fmtN(t.not_in_plano || 0)} · отбелязани ${fmtN(t.no_order || 0)}).<br>
+        <span class="note">Най-много: ${top || "—"}</span></p></div>
+      <button class="go" onclick="location.hash='#nord'">Отвори раздела →</button></div>`;
+  } catch (e) { el.innerHTML = ""; }
+}
+
 async function loadBoard() {
+  loadNordCard();
   const d = await api("/ui/summary");
   const sup = d.suppliers.map(s => `${esc(s.name)}: <b>${s.mode === "below_min" ? "под минимума" : "ежедневно допълване"}</b>`).join("<br>");
   $("stamp").innerHTML = `Обновено <b>${d.generated}</b><br>Наличности от <b>${d.last_stock_at || "—"}</b><br>${sup}`;
