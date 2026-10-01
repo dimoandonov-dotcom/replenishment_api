@@ -86,7 +86,7 @@ def store_rows(db: Session, store_id: int, arts=None, sales=None, plano_all=None
             "stock": stock.get(aid), "no_order_reason": a.no_order_reason, "no_order_by": a.no_order_by,
             "suggest_min": mn if sold > 0 else None, "suggest_max": mx if sold > 0 else None,
         })
-    rows.sort(key=lambda r: (-r["sold_14d"], r["reason"], r["name"] or ""))
+    rows.sort(key=lambda r: (r["reason"] == "inactive", -r["sold_14d"], r["reason"], r["name"] or ""))
     return rows
 
 
@@ -106,7 +106,7 @@ def summary(db: Session) -> dict:
         for r in rows:
             c[r["reason"]] += 1
             tot[r["reason"]] += 1
-            if r["sold_14d"] > 0:
+            if r["sold_14d"] > 0 and r["reason"] != "inactive":  # чуждите доставчици не са проблем на НДК
                 selling += 1
         tot["selling"] += selling
         out.append({"store_id": st.id, "store": st.name, "total": len(rows),
