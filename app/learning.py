@@ -143,15 +143,20 @@ def run(db: Session, apply: bool = True) -> dict:
             if s is not None and s.auto_adjust is False:
                 counts["заключени"] += 1
                 continue
-            if s is not None and float(s.max_stock) == 0:
-                continue  # спрян 0-0 - решение на човек
             sold = sales.get((store.id, aid), 0.0)
+            if s is not None and float(s.max_stock) == 0:
+                if sold < 14:
+                    continue  # спрян 0-0 остава, докато не продава поне 1 бр./ден
+                # продава ≥1 бр./ден -> пуска се отново по формулата (решение, одобрено от Димо)
             if s is None and sold <= 0:
                 continue  # никога непродаван и без настройка - не го пускаме
 
             cls, mn_t, mx_t = formula(sold)
             reason = f"продажби {sold:g} бр./14 дни, клас {cls}"
             urgent = False
+            if s is not None and float(s.max_stock) == 0:
+                reason = f"пуснат отново: продава {sold:g} бр./14 дни (≥1/ден), клас {cls}"
+                urgent = True
             q = stock.get(aid)
             if q is not None and q <= 0 and sold > 0:
                 mn_t, mx_t = math.ceil(mn_t * STOCKOUT_BOOST), math.ceil(mx_t * STOCKOUT_BOOST)
