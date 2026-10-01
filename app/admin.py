@@ -810,7 +810,6 @@ async def import_supplier_workbook(
             if not r or not isinstance(r[0], (int, float)):
                 continue
             sku = str(int(r[0]))
-            row_red = _is_red(ws.cell(row=ri, column=2))  # цял ред в червено = изваден артикул
             a = arts.get(sku)
             if a is None:
                 pname = r[1] if len(r) > 1 else None
@@ -827,14 +826,9 @@ async def import_supplier_workbook(
                 arts[sku] = a
                 report["articles_created"] += 1
             listed_ids.add(a.id)
-            if row_red:
-                report["red_rows_skipped"] = report.get("red_rows_skipped", 0) + 1
-                continue
+            # всяко "да" се зарежда, независимо от цвета (решение на Димо, 01.10)
             for j, sid in col_store.items():
                 if j < len(r) and r[j] and str(r[j]).strip().lower() == "да":
-                    if _is_red(ws.cell(row=ri, column=j + 1)):
-                        report["red_cells_skipped"] = report.get("red_cells_skipped", 0) + 1
-                        continue
                     placements.add((sid, a.id))
 
     if listed_ids:
