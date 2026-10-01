@@ -705,3 +705,22 @@ def ui_refresh_status(db: Session = Depends(get_db)):
     from . import refresher
     last = db.execute(select(func.max(m.StockSnapshot.captured_at))).scalar()
     return {"stock_at": _fmt(last), **refresher.status()}
+
+
+# ---------------------------------------------------------------------------
+# „Не се поръчват" по обекти
+# ---------------------------------------------------------------------------
+
+@router.get("/ui/not-ordered")
+def ui_not_ordered(db: Session = Depends(get_db)):
+    from . import notordered
+    return notordered.summary(db)
+
+
+@router.get("/ui/not-ordered/{store_id}")
+def ui_not_ordered_store(store_id: int, db: Session = Depends(get_db)):
+    from . import notordered
+    st = db.get(m.Store, store_id)
+    if not st:
+        raise HTTPException(404, "Няма такъв магазин")
+    return {"store": st.name, "reasons": notordered.REASONS, "rows": notordered.store_rows(db, store_id)}

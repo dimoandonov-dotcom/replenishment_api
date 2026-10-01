@@ -235,7 +235,7 @@ nav a:hover { transform:translateY(-2px); }
 nav a.on { background:var(--c,var(--amber)); color:#fff; box-shadow:0 8px 20px color-mix(in srgb,var(--c,var(--amber)) 40%,transparent); }
 nav a.on::before { background:#fff; box-shadow:0 0 0 3px rgba(255,255,255,.35); }
 nav a[data-tab="board"]{--c:#D9621C} nav a[data-tab="orders"]{--c:#2F7DD1} nav a[data-tab="assort"]{--c:#E9A23B}
-nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563}
+nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A}
 
 /* ---------- бутони ---------- */
 button { border-radius:10px; border:1px solid var(--line-strong); background:var(--raised); font-family:var(--head); font-weight:700;
@@ -321,6 +321,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <a href="#orders" data-tab="orders">Заявки по магазин</a>
   <a href="#assort" data-tab="assort">Асортимент и цени</a>
   <a href="#plano" data-tab="plano">Планограма</a>
+  <a href="#nord" data-tab="nord">Не се поръчват</a>
   <a href="#cmp" data-tab="cmp">Сравнение</a>
   <a href="#learn" data-tab="learn">Обучение</a>
   <a href="#run" data-tab="run">Пускане и импорт</a>
@@ -412,6 +413,19 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
       <th class="num">Мин</th><th class="num">Макс</th><th>Състояние</th></tr></thead>
     <tbody id="pBody"></tbody>
   </table></div>
+</section>
+
+<!-- ============ НЕ СЕ ПОРЪЧВАТ ============ -->
+<section class="tab" id="tab-nord">
+  <p class="note" style="margin:0 0 14px;line-height:1.6">Всичко, което при сегашните настройки <b>никога няма да влезе в заявка</b>, по магазини и по причина.
+  Отгоре са магазините с най-много артикули, които <b>се продават, но не се поръчват</b>. „Над минимума“ не е тук — то е нормално.</p>
+  <div class="board" id="nKpis"></div>
+  <div class="head"><h2>По магазини</h2><span class="note">цъкни на магазин</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Магазин</th><th class="num">Продават се, а не се поръчват</th><th class="num">🚫 Не се поръчва</th><th class="num">⛔ Спрян 0-0</th><th class="num">❔ Без мин/макс</th><th class="num">📋 Извън планограма</th><th class="num">💤 Изваден</th><th class="num">Общо</th></tr></thead>
+    <tbody id="nBody"></tbody>
+  </table></div>
+  <div id="nDetail"></div>
 </section>
 
 <!-- ============ СРАВНЕНИЕ ============ -->
@@ -538,7 +552,7 @@ const loaded = {};
 function show(tab) {
   document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + tab));
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -804,6 +818,65 @@ function renderPlano() {
     || `<tr><td colspan="7" class="empty">Няма артикули в тази група.</td></tr>`;
 }
 
+
+/* ---------- не се поръчват ---------- */
+async function loadNord() {
+  const d = await api("/ui/not-ordered"), t = d.totals || {};
+  const tiles = [["ПРОДАВАТ СЕ, А НЕ СЕ ПОРЪЧВАТ", fmtN(t.selling || 0), "a", "позиции магазин × артикул"],
+    ["🚫 НЕ СЕ ПОРЪЧВА", fmtN(t.no_order || 0), "", "отбелязани в асортимента"], ["⛔ СПРЕНИ 0-0", fmtN(t.stopped || 0), "", "Viber правила / ръчно"],
+    ["❔ БЕЗ МИН/МАКС", fmtN(t.no_minmax || 0), "", "по планограма"], ["📋 ИЗВЪН ПЛАНОГРАМАТА", fmtN(t.not_in_plano || 0), "", "но се продават"],
+    ["💤 ИЗВАДЕНИ ОТ НДК", fmtN(t.inactive || 0), "", "друг доставчик / спрени"]];
+  $("nKpis").innerHTML = tiles.map(([l, v, c, s]) => `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("");
+  $("nBody").innerHTML = d.stores.map(r => `<tr data-s="${r.store_id}" style="cursor:pointer"><td class="name">${esc(r.store)}</td>
+    <td class="num ${r.selling ? "low" : ""}"><b>${r.selling}</b></td><td class="num">${r.no_order}</td><td class="num">${r.stopped}</td>
+    <td class="num">${r.no_minmax}</td><td class="num">${r.not_in_plano}</td><td class="num">${r.inactive}</td><td class="num">${r.total}</td></tr>`).join("");
+  document.querySelectorAll("#nBody tr[data-s]").forEach(tr => tr.onclick = () => showNord(+tr.dataset.s));
+}
+let NSTORE = null;
+async function showNord(storeId, keepFilter) {
+  NSTORE = storeId;
+  const d = await api(`/ui/not-ordered/${storeId}`); await arts();
+  const f = keepFilter ? ($("nFilter") || {}).value || "" : "";
+  const opts = Object.entries(d.reasons).map(([k, v]) => `<option value="${k}" ${f === k ? "selected" : ""}>${v} (${d.rows.filter(r => r.reason === k).length})</option>`).join("");
+  const rows = d.rows.filter(r => !f || r.reason === f);
+  $("nDetail").innerHTML = `<div class="head"><h2>${esc(d.store)}</h2><span class="note">${d.rows.length} позиции · ${d.rows.filter(r => r.sold_14d > 0).length} се продават</span></div>
+  <div class="bar"><select id="nFilter"><option value="">Всички причини</option>${opts}</select></div>
+  <div class="scroll"><table><thead><tr><th>Код</th><th>Артикул</th><th>Причина</th><th class="num">Продажби 14 дни</th><th class="num">На ден</th><th class="num">Наличност</th><th class="num">Мин</th><th class="num">Макс</th><th>Действие</th></tr></thead><tbody>
+  ${rows.map(r => {
+    const editable = ["no_minmax", "stopped", "not_in_plano"].includes(r.reason);
+    const act = r.reason === "no_order" ? `<button class="mini go" data-ret="${esc(r.sku)}">Върни</button>`
+      : r.reason === "inactive" ? `<span class="muted" style="font-size:12px">друг доставчик</span>`
+      : `<button class="mini go" data-start="${esc(r.sku)}" data-plano="${r.in_planogram ? 1 : 0}">${r.reason === "not_in_plano" ? "Добави и пусни" : "Пусни"}</button>`;
+    return `<tr data-sku="${esc(r.sku)}"><td>${esc(r.sku)}</td><td class="name">${esc(r.name)}</td>
+      <td><span class="tag ${r.sold_14d > 0 ? "bad" : "off"}" title="${esc(r.no_order_reason || "")}">${esc(r.reason_label)}</span></td>
+      <td class="num ${r.sold_14d > 0 ? "low" : ""}">${fmtN(r.sold_14d)}</td><td class="num">${fmtN(r.per_day)}</td><td class="num">${fmtN(r.stock)}</td>
+      <td class="num">${editable ? `<input type="number" min="0" step="1" value="${r.suggest_min ?? 1}" data-f="mn">` : "—"}</td>
+      <td class="num">${editable ? `<input type="number" min="0" step="1" value="${r.suggest_max ?? 1}" data-f="mx">` : "—"}</td>
+      <td>${act}</td></tr>`; }).join("") || `<tr><td colspan="9" class="empty">Няма артикули по тази причина.</td></tr>`}
+  </tbody></table></div>
+  <p class="note" style="margin-top:8px">Мин/макс в полетата са предложение по продажбите за 14 дни — промени ги, ако искаш. При „Пусни“ се записват като твоя корекция 🔒.</p>`;
+  $("nFilter").onchange = () => showNord(storeId, true);
+  document.querySelectorAll("[data-ret]").forEach(b => b.onclick = async () => { await askNoOrder(b.dataset.ret, false); showNord(storeId, true); loadNord(); });
+  document.querySelectorAll("[data-start]").forEach(b => b.onclick = async () => {
+    const tr = b.closest("tr"), sku = b.dataset.start, a = ARTS[sku] || { name: sku };
+    const mn = +tr.querySelector('[data-f="mn"]').value, mx = +tr.querySelector('[data-f="mx"]').value;
+    if (mx < mn || mx <= 0) { toast("Макс трябва да е над 0 и не по-малък от мин.", false); return; }
+    const addPlano = b.dataset.plano === "0";
+    const ok = await confirmBox({ title: "▶️ Пускане за поръчка",
+      html: `Да пусна ли <b>${esc(a.name)}</b> (код ${esc(sku)}) за поръчка в <b>${esc(d.store)}</b> с мин <b>${mn}</b> / макс <b>${mx}</b>?` +
+            (addPlano ? "<br><br>Артикулът ще бъде <b>добавен в планограмата</b> на този магазин." : ""),
+      okText: "Да, пусни го", okClass: "go" });
+    if (!ok) return;
+    try {
+      if (addPlano) await api("/planogram/add", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify([{ store_id: storeId, sku }]) });
+      await api("/settings?source=manual&reason=" + encodeURIComponent("пуснат от „Не се поръчват“"), { method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify([{ store_id: storeId, sku, min_stock: mn, max_stock: mx }]) });
+      toast(`„${a.name}“ вече се поръчва в ${d.store}.`); showNord(storeId, true); loadNord();
+    } catch (e) { toast(e.message, false); }
+  });
+  $("nDetail").scrollIntoView({ behavior: "smooth" });
+}
+
 /* ---------- сравнение ---------- */
 function initCmp() {
   $("cDays").onchange = loadCmp;
@@ -1038,6 +1111,7 @@ async function autoRefresh(force = false) {
     if (tab === "board") await loadBoard();
     else if (tab === "orders" && !Object.keys(edits).length) await loadOrder();   // не губим незаписани корекции
     else if (tab === "cmp") await loadCmp();
+    else if (tab === "nord") { await loadNord(); if (NSTORE) await showNord(NSTORE, true); }
     else if (tab === "learn") await loadLearn();
     else if (tab === "plano" && PDATA) await loadPlano();
     lastRefresh = Date.now(); updateFresh();
