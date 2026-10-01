@@ -717,6 +717,13 @@ def ui_not_ordered(db: Session = Depends(get_db)):
     return notordered.summary(db)
 
 
+@router.get("/ui/not-ordered/list")
+def ui_not_ordered_list(reason: str | None = None, selling: bool = False, db: Session = Depends(get_db)):
+    from . import notordered
+    rows = notordered.all_rows(db, reason or None, selling)
+    return {"count": len(rows), "rows": rows, "reasons": notordered.REASONS}
+
+
 @router.get("/ui/not-ordered/{store_id}")
 def ui_not_ordered_store(store_id: int, db: Session = Depends(get_db)):
     from . import notordered

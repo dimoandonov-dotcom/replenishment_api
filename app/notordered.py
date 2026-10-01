@@ -113,3 +113,24 @@ def summary(db: Session) -> dict:
                     "selling": selling, **{k: c[k] for k in REASONS}})
     out.sort(key=lambda r: (-r["selling"], -r["total"]))
     return {"reasons": REASONS, "totals": dict(tot), "stores": out}
+
+
+def all_rows(db: Session, reason: str | None = None, selling: bool = False) -> list[dict]:
+    """Всички позиции по всички магазини (за картите горе): по причина и/или само продаващи се."""
+    arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
+    sales = _sales14(db)
+    plano_all, settings_all = defaultdict(set), defaultdict(dict)
+    for sid, aid in db.execute(select(m.Planogram.store_id, m.Planogram.article_id)).all():
+        plano_all[sid].add(aid)
+    for s in db.execute(select(m.StoreArticleSetting)).scalars().all():
+        settings_all[s.store_id][s.article_id] = s
+    out = []
+    for st in db.execute(select(m.Store).where(m.Store.is_active.is_(True))).scalars().all():
+        for r in store_rows(db, st.id, arts, sales, plano_all, settings_all):
+            if reason and r["reason"] != reason:
+                continue
+            if selling and (r["sold_14d"] <= 0 or r["reason"] == "inactive"):
+                continue
+            out.append({"store_id": st.id, "store": st.name, **r})
+    out.sort(key=lambda r: (-r["sold_14d"], r["store"], r["name"] or ""))
+    return out

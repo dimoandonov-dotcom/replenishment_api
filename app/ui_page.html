@@ -422,12 +422,12 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <p class="note" style="margin:0 0 14px;line-height:1.6">Всичко, което при сегашните настройки <b>никога няма да влезе в заявка</b>, по магазини и по причина.
   Отгоре са магазините с най-много артикули, които <b>се продават, но не се поръчват</b>. „Над минимума“ не е тук — то е нормално.</p>
   <div class="board" id="nKpis"></div>
+  <div id="nDetail"></div>
   <div class="head"><h2>По магазини</h2><span class="note">цъкни на магазин</span></div>
   <div class="scroll"><table>
     <thead><tr><th>Магазин</th><th class="num">Продават се, а не се поръчват</th><th class="num">🚫 Не се поръчва</th><th class="num">⛔ Спрян 0-0</th><th class="num">❔ Без мин/макс</th><th class="num">📋 Извън планограма</th><th class="num">💤 Изваден</th><th class="num">Общо</th></tr></thead>
     <tbody id="nBody"></tbody>
   </table></div>
-  <div id="nDetail"></div>
 </section>
 
 <!-- ============ СРАВНЕНИЕ ============ -->
@@ -584,7 +584,7 @@ async function loadNordCard() {
         <p style="margin:0;line-height:1.6"><b style="font-size:20px;color:#B8451A">${fmtN(t.selling || 0)}</b> позиции магазин × артикул <b>се продават, а не се поръчват</b>
         (спрени 0-0 ${fmtN(t.stopped || 0)} · извън планограмата ${fmtN(t.not_in_plano || 0)} · отбелязани ${fmtN(t.no_order || 0)}).<br>
         <span class="note">Най-много: ${top || "—"}</span></p></div>
-      <button class="go" onclick="location.hash='#nord'">Отвори раздела →</button></div>`;
+      <button class="go" onclick="location.hash='#nord';setTimeout(()=>showNordList('selling'),600)">Виж ${fmtN(t.selling || 0)}-те →</button></div>`;
   } catch (e) { el.innerHTML = ""; }
 }
 
@@ -840,11 +840,12 @@ function renderPlano() {
 /* ---------- не се поръчват ---------- */
 async function loadNord() {
   const d = await api("/ui/not-ordered"), t = d.totals || {};
-  const tiles = [["ПРОДАВАТ СЕ, А НЕ СЕ ПОРЪЧВАТ", fmtN(t.selling || 0), "a", "позиции магазин × артикул"],
-    ["🚫 НЕ СЕ ПОРЪЧВА", fmtN(t.no_order || 0), "", "отбелязани в асортимента"], ["⛔ СПРЕНИ 0-0", fmtN(t.stopped || 0), "", "Viber правила / ръчно"],
-    ["❔ БЕЗ МИН/МАКС", fmtN(t.no_minmax || 0), "", "по планограма"], ["📋 ИЗВЪН ПЛАНОГРАМАТА", fmtN(t.not_in_plano || 0), "", "но се продават"],
-    ["💤 ИЗВАДЕНИ ОТ НДК", fmtN(t.inactive || 0), "", "друг доставчик / спрени"]];
-  $("nKpis").innerHTML = tiles.map(([l, v, c, s]) => `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("");
+  const tiles = [["ПРОДАВАТ СЕ, А НЕ СЕ ПОРЪЧВАТ", fmtN(t.selling || 0), "a", "позиции магазин × артикул", "selling"],
+    ["🚫 НЕ СЕ ПОРЪЧВА", fmtN(t.no_order || 0), "", "отбелязани в асортимента", "no_order"], ["⛔ СПРЕНИ 0-0", fmtN(t.stopped || 0), "", "Viber правила / ръчно", "stopped"],
+    ["❔ БЕЗ МИН/МАКС", fmtN(t.no_minmax || 0), "", "по планограма", "no_minmax"], ["📋 ИЗВЪН ПЛАНОГРАМАТА", fmtN(t.not_in_plano || 0), "", "но се продават", "not_in_plano"],
+    ["💤 ИЗВАДЕНИ ОТ НДК", fmtN(t.inactive || 0), "", "друг доставчик / спрени", "inactive"]];
+  $("nKpis").innerHTML = tiles.map(([l, v, c, s, k]) => `<div class="tile" data-k="${k}" style="cursor:pointer" title="Покажи списъка"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s} · <u>виж →</u></div></div>`).join("");
+  document.querySelectorAll("#nKpis .tile[data-k]").forEach(el => el.onclick = () => showNordList(el.dataset.k));
   $("nBody").innerHTML = d.stores.map(r => `<tr data-s="${r.store_id}" style="cursor:pointer"><td class="name">${esc(r.store)}</td>
     <td class="num ${r.selling ? "low" : ""}"><b>${r.selling}</b></td><td class="num">${r.no_order}</td><td class="num">${r.stopped}</td>
     <td class="num">${r.no_minmax}</td><td class="num">${r.not_in_plano}</td><td class="num">${r.inactive}</td><td class="num">${r.total}</td></tr>`).join("");
@@ -893,6 +894,65 @@ async function showNord(storeId, keepFilter) {
     } catch (e) { toast(e.message, false); }
   });
   $("nDetail").scrollIntoView({ behavior: "smooth" });
+}
+
+
+/* ---------- списък по карта (всички магазини) ---------- */
+let NLIST = { rows: [], lim: 200, key: "" };
+async function startPosition(storeId, storeName, sku, mn, mx, addPlano, after) {
+  const a = (ARTS || {})[sku] || { name: sku };
+  if (mx < mn || mx <= 0) { toast("Макс трябва да е над 0 и не по-малък от мин.", false); return; }
+  const ok = await confirmBox({ title: "▶️ Пускане за поръчка",
+    html: `Да пусна ли <b>${esc(a.name)}</b> (код ${esc(sku)}) за поръчка в <b>${esc(storeName)}</b> с мин <b>${mn}</b> / макс <b>${mx}</b>?` +
+          (addPlano ? "<br><br>Артикулът ще бъде <b>добавен в планограмата</b> на този магазин." : ""),
+    okText: "Да, пусни го", okClass: "go" });
+  if (!ok) return;
+  try {
+    if (addPlano) await api("/planogram/add", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify([{ store_id: storeId, sku }]) });
+    await api("/settings?source=manual&reason=" + encodeURIComponent("пуснат от „Не се поръчват“"), { method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([{ store_id: storeId, sku, min_stock: mn, max_stock: mx }]) });
+    toast(`„${a.name}“ вече се поръчва в ${storeName}.`); if (after) after();
+  } catch (e) { toast(e.message, false); }
+}
+async function showNordList(key) {
+  NLIST.key = key; NLIST.lim = 200;
+  $("nDetail").innerHTML = `<div class="empty loading">Зареждам списъка…</div>`; $("nDetail").scrollIntoView({ behavior: "smooth" });
+  const q = key === "selling" ? "selling=true" : `reason=${key}`;
+  const d = await api(`/ui/not-ordered/list?${q}`); await arts();
+  NLIST.rows = d.rows; NLIST.title = key === "selling" ? "Продават се, а не се поръчват" : d.reasons[key];
+  renderNordList();
+}
+function renderNordList() {
+  const f = (($("nlSearch") || {}).value || "").trim().toLowerCase();
+  const rows = NLIST.rows.filter(r => !f || (r.store + " " + r.sku + " " + r.name).toLowerCase().includes(f));
+  const shown = rows.slice(0, NLIST.lim);
+  const hadFocus = document.activeElement && document.activeElement.id === "nlSearch";
+  $("nDetail").innerHTML = `<div class="head"><h2>${esc(NLIST.title)}</h2><span class="note">${fmtN(rows.length)} позиции · всички магазини</span></div>
+  <div class="bar"><input type="search" id="nlSearch" placeholder="Търси магазин, код или артикул" value="${esc(f)}" style="flex:1;min-width:200px">
+  <button id="nlBack">← По магазини</button></div>
+  <div class="scroll"><table><thead><tr><th>Магазин</th><th>Код</th><th>Артикул</th><th>Причина</th><th class="num">Продажби 14 дни</th><th class="num">Наличност</th><th class="num">Мин</th><th class="num">Макс</th><th>Действие</th></tr></thead><tbody>
+  ${shown.map((r, i) => { const editable = ["no_minmax", "stopped", "not_in_plano"].includes(r.reason);
+    const act = r.reason === "no_order" ? `<button class="mini go" data-lret="${esc(r.sku)}">Върни</button>`
+      : r.reason === "inactive" ? `<span class="muted" style="font-size:12px">друг доставчик</span>`
+      : `<button class="mini go" data-li="${i}">${r.reason === "not_in_plano" ? "Добави и пусни" : "Пусни"}</button>`;
+    return `<tr><td>${esc(r.store)}</td><td>${esc(r.sku)}</td><td class="name">${esc(r.name)}</td>
+      <td><span class="tag ${r.sold_14d > 0 ? "bad" : "off"}">${esc(r.reason_label)}</span></td>
+      <td class="num ${r.sold_14d > 0 ? "low" : ""}">${fmtN(r.sold_14d)}</td><td class="num">${fmtN(r.stock)}</td>
+      <td class="num">${editable ? `<input type="number" min="0" step="1" value="${r.suggest_min ?? 1}" data-f="mn">` : "—"}</td>
+      <td class="num">${editable ? `<input type="number" min="0" step="1" value="${r.suggest_max ?? 1}" data-f="mx">` : "—"}</td><td>${act}</td></tr>`; }).join("")
+    || `<tr><td colspan="9" class="empty">Няма позиции.</td></tr>`}
+  ${rows.length > NLIST.lim ? `<tr><td colspan="9" style="text-align:center;padding:14px"><button id="nlMore">Покажи още (${fmtN(rows.length - NLIST.lim)})</button></td></tr>` : ""}
+  </tbody></table></div>`;
+  const inp = $("nlSearch"); inp.oninput = () => { NLIST.lim = 200; renderNordList(); };
+  if (hadFocus) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+  $("nlBack").onclick = () => { $("nDetail").innerHTML = ""; $("nBody").scrollIntoView({ behavior: "smooth" }); };
+  if ($("nlMore")) $("nlMore").onclick = () => { NLIST.lim += 200; renderNordList(); };
+  document.querySelectorAll("[data-li]").forEach(b => b.onclick = () => {
+    const r = shown[+b.dataset.li], tr = b.closest("tr");
+    startPosition(r.store_id, r.store, r.sku, +tr.querySelector('[data-f="mn"]').value, +tr.querySelector('[data-f="mx"]').value, !r.in_planogram,
+      () => { NLIST.rows = NLIST.rows.filter(x => !(x.store_id === r.store_id && x.sku === r.sku)); renderNordList(); loadNord(); });
+  });
+  document.querySelectorAll("[data-lret]").forEach(b => b.onclick = async () => { await askNoOrder(b.dataset.lret, false); showNordList(NLIST.key); loadNord(); });
 }
 
 /* ---------- сравнение ---------- */
