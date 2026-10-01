@@ -666,6 +666,21 @@ def _sheet_rows(ws, cap: int = 300):
     return list(ws.iter_rows(values_only=True, max_col=max_col))
 
 
+def _is_red(cell) -> bool:
+    """Червен шрифт или червен фон = НЕ се зарежда (извадени/сезонни артикули)."""
+    try:
+        fc = cell.font.color if cell.font else None
+        if fc is not None and fc.type == "rgb" and str(fc.rgb).upper().endswith("FF0000"):
+            return True
+        f = cell.fill
+        if f is not None and f.fill_type == "solid" and f.fgColor.type == "rgb" \
+                and str(f.fgColor.rgb).upper().endswith("FF0000"):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 @router.post("/import/supplier-workbook")
 async def import_supplier_workbook(
     file: UploadFile = File(...),
@@ -791,10 +806,11 @@ async def import_supplier_workbook(
                 for j, sid in col_store.items():
                     if j < len(r) and r[j]:
                         sizes[sid] = str(r[j]).strip().upper()
-        for r in rows[hdr_i + 1:]:
+        for ri, r in enumerate(rows[hdr_i + 1:], start=hdr_i + 2):  # ri = номер на реда в Excel
             if not r or not isinstance(r[0], (int, float)):
                 continue
             sku = str(int(r[0]))
+            row_red = _is_red(ws.cell(row=ri, column=2))  # цял ред в червено = изваден артикул
             a = arts.get(sku)
             if a is None:
                 pname = r[1] if len(r) > 1 else None
@@ -811,8 +827,14 @@ async def import_supplier_workbook(
                 arts[sku] = a
                 report["articles_created"] += 1
             listed_ids.add(a.id)
+            if row_red:
+                report["red_rows_skipped"] = report.get("red_rows_skipped", 0) + 1
+                continue
             for j, sid in col_store.items():
                 if j < len(r) and r[j] and str(r[j]).strip().lower() == "да":
+                    if _is_red(ws.cell(row=ri, column=j + 1)):
+                        report["red_cells_skipped"] = report.get("red_cells_skipped", 0) + 1
+                        continue
                     placements.add((sid, a.id))
 
     if listed_ids:
