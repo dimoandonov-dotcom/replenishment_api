@@ -43,10 +43,50 @@ _OPEN_PATHS = {
 }
 
 
-def session_token() -> str:
-    """Подпис на сесията - сменя се автоматично при смяна на паролата."""
-    secret = (_API_KEY + "|" + APP_PASSWORD).encode()
-    return _hmac.new(secret, ("session:" + APP_USER).encode(), _hashlib.sha256).hexdigest()
+def hash_password(pw: str, salt: str | None = None) -> str:
+    salt = salt or _os.urandom(8).hex()
+    h = _hashlib.pbkdf2_hmac("sha256", pw.encode(), salt.encode(), 120_000).hex()
+    return f"{salt}${h}"
+
+
+def check_password(pw: str, stored: str) -> bool:
+    try:
+        salt, _ = stored.split("$", 1)
+    except ValueError:
+        return False
+    return _hmac.compare_digest(hash_password(pw, salt), stored)
+
+
+def _secret_for(username: str) -> str | None:
+    """Таен ключ на сесията - сменя се автоматично при смяна на паролата."""
+    if APP_USER and username.lower() == APP_USER.lower():
+        return APP_PASSWORD
+    from .db import SessionLocal
+    with SessionLocal() as db:
+        u = db.get(m.AppUser, username.lower())
+        return u.password_hash if (u and u.is_active) else None
+
+
+def session_token(username: str | None = None) -> str:
+    username = (username or APP_USER).lower()
+    sec = _secret_for(username) or ""
+    sig = _hmac.new((_API_KEY + "|" + sec).encode(), ("session:" + username).encode(),
+                    _hashlib.sha256).hexdigest()
+    return f"{username}.{sig}"
+
+
+def session_user(request: Request) -> str | None:
+    cookie = request.cookies.get(SESSION_COOKIE, "")
+    if not cookie:
+        return None
+    if "." not in cookie:  # стара сесия на главния потребител
+        sec = (_API_KEY + "|" + APP_PASSWORD).encode()
+        legacy = _hmac.new(sec, ("session:" + APP_USER).encode(), _hashlib.sha256).hexdigest()
+        return APP_USER.lower() if (APP_USER and _hmac.compare_digest(cookie, legacy)) else None
+    user = cookie.split(".", 1)[0]
+    if _secret_for(user) is None:
+        return None
+    return user if _hmac.compare_digest(cookie, session_token(user)) else None
 
 
 INGEST_TOKEN = _os.getenv("INGEST_TOKEN", "").strip()
@@ -61,8 +101,9 @@ def is_authenticated(request: Request) -> bool:
         return True
     if _API_KEY and _hmac.compare_digest(request.headers.get("X-API-Key", ""), _API_KEY):
         return True
-    cookie = request.cookies.get(SESSION_COOKIE, "")
-    if APP_USER and APP_PASSWORD and cookie and _hmac.compare_digest(cookie, session_token()):
+    user = session_user(request)
+    if user:
+        request.state.user = user
         return True
     return False
 
@@ -238,6 +279,7 @@ def get_settings(store_id: int, db: Session = Depends(get_db)):
 
 @app.put("/settings")
 def upsert_settings(
+    request: Request,
     items: list[SettingIn],
     source: str = Query("api", pattern="^(api|manual|learning|rules|import)$"),
     reason: str | None = None,
@@ -249,6 +291,9 @@ def upsert_settings(
     source=learning -> автоматично учене: заключените позиции се пропускат.
     Всяка промяна отива в дневника settings_log.
     """
+    who = getattr(request.state, "user", None)
+    if source == "manual" and who:
+        reason = f"{reason or 'корекция'} · {who}"
     sku_map = {a.sku: a.id for a in db.execute(select(m.Article)).scalars().all()}
     updated, unknown, invalid, skipped_locked = 0, [], [], 0
 

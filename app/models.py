@@ -490,3 +490,16 @@ class AppAsset(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class AppUser(Base):
+    """Потребители на пулта (освен главния от APP_USER/APP_PASSWORD)."""
+
+    __tablename__ = "app_users"
+    username: Mapped[str] = mapped_column(Text, primary_key=True)
+    display_name: Mapped[str] = mapped_column(Text)
+    password_hash: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

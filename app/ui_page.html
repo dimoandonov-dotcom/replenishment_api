@@ -299,7 +299,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <div><div class="brand">MINMAX AI · АВТОМАТИЧНИ ЗАЯВКИ</div>
     <h1>Контролен пулт</h1></div>
   </div>
-  <div class="stamp"><div id="stamp">Зареждам…</div><button class="logout" onclick="logout()">Изход</button></div>
+  <div class="stamp"><div id="stamp">Зареждам…</div><span id="whoami" class="mono" style="font-size:12px;color:#E7C9A9;margin-right:10px"></span><button class="logout" onclick="logout()">Изход</button></div>
 </div>
 
 <nav id="nav">
@@ -961,7 +961,7 @@ function showLogin(err) {
       <label for="uIn">Потребител</label>
       <input type="text" id="uIn" autocomplete="username" autocapitalize="none" required>
       <label for="pIn">Парола</label>
-      <input type="password" id="pIn" autocomplete="current-password" required>
+      <input type="password" id="pIn" autocomplete="current-password" inputmode="text" required>
       <button class="go" type="submit">Влез</button>
       <div class="msg err">${err || ""}</div>
     </form>`;
@@ -972,7 +972,7 @@ function showLogin(err) {
     const r = await fetch("/ui/login", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: $("uIn").value, password: $("pIn").value }) });
     if (r.ok) location.reload();
-    else box.querySelector(".msg").textContent = "Грешен потребител или парола.";
+    else box.querySelector(".msg").textContent = r.status === 429 ? (await r.json()).detail : "Грешен потребител или парола.";
   };
 }
 async function logout() { await fetch("/ui/logout", { method: "POST" }); location.reload(); }
@@ -984,6 +984,7 @@ document.querySelectorAll("nav a").forEach(a => a.onclick = () => {
 });
 fetch("/ui/summary").then(r => {
   if (r.status === 401) { showLogin(); return; }
+  api("/ui/me").then(m => { const w = document.getElementById("whoami"); if (w && m.name) w.textContent = "👤 " + m.name; }).catch(() => {});
   show((location.hash || "#board").slice(1));
 });
 if ((location.hash || "#board") !== "#board") api("/ui/summary").then(d => $("stamp").innerHTML = `Обновено <b>${d.generated}</b>`).catch(() => {});

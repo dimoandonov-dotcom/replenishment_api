@@ -88,20 +88,76 @@ class LoginIn(BaseModel):
     password: str
 
 
+_FAILS: dict[str, list[float]] = {}
+_MAX_FAILS, _WINDOW = 5, 15 * 60
+
+
 @router.post("/ui/login", include_in_schema=False)
-def ui_login(payload: LoginIn, request: Request):
+def ui_login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
+    import time
     from . import main as _main
-    ok_user = hmac.compare_digest(payload.username.strip().lower(), _main.APP_USER.lower())
-    ok_pass = hmac.compare_digest(payload.password, _main.APP_PASSWORD)
-    if not (_main.APP_USER and _main.APP_PASSWORD and ok_user and ok_pass):
+    user = payload.username.strip().lower()
+    ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "").split(",")[0].strip()
+    key = f"{user}|{ip}"
+    now = time.time()
+    fails = [t for t in _FAILS.get(key, []) if now - t < _WINDOW]
+    if len(fails) >= _MAX_FAILS:
+        mins = int((_WINDOW - (now - fails[0])) // 60) + 1
+        raise HTTPException(429, f"Твърде много грешни опити. Опитай след {mins} мин.")
+    ok = False
+    if _main.APP_USER and user == _main.APP_USER.lower():
+        ok = hmac.compare_digest(payload.password, _main.APP_PASSWORD)
+    else:
+        u = db.get(m.AppUser, user)
+        ok = bool(u and u.is_active and _main.check_password(payload.password, u.password_hash))
+    if not ok:
+        _FAILS[key] = fails + [now]
         raise HTTPException(401, "Грешен потребител или парола")
+    _FAILS.pop(key, None)
     resp = JSONResponse({"ok": True})
     resp.set_cookie(
-        _main.SESSION_COOKIE, _main.session_token(),
+        _main.SESSION_COOKIE, _main.session_token(user),
         max_age=60 * 60 * 24 * 365, httponly=True, samesite="lax",
         secure=request.headers.get("x-forwarded-proto", request.url.scheme) == "https",
     )
     return resp
+
+
+@router.get("/ui/me")
+def ui_me(request: Request, db: Session = Depends(get_db)):
+    user = getattr(request.state, "user", None)
+    if not user:
+        return {"user": None, "name": "система"}
+    u = db.get(m.AppUser, user)
+    return {"user": user, "name": u.display_name if u else "Димо"}
+
+
+class UserIn(BaseModel):
+    username: str
+    display_name: str
+    password: str
+
+
+@router.post("/users")
+def users_upsert(payload: UserIn, request: Request, db: Session = Depends(get_db)):
+    """Създава/обновява потребител. Само главният потребител или API ключ."""
+    from . import main as _main
+    who = getattr(request.state, "user", None)
+    if who and who != _main.APP_USER.lower():
+        raise HTTPException(403, "Само главният потребител добавя потребители")
+    name = payload.username.strip().lower()
+    if not name.isascii() or not name.replace("_", "").isalnum():
+        raise HTTPException(400, "Потребителското име - само латиница и цифри")
+    if len(payload.password) < 4:
+        raise HTTPException(400, "Паролата е поне 4 знака")
+    u = db.get(m.AppUser, name)
+    h = _main.hash_password(payload.password)
+    if u is None:
+        db.add(m.AppUser(username=name, display_name=payload.display_name.strip(), password_hash=h))
+    else:
+        u.display_name, u.password_hash, u.is_active = payload.display_name.strip(), h, True
+    db.commit()
+    return {"ok": True, "username": name}
 
 
 @router.post("/ui/logout", include_in_schema=False)
