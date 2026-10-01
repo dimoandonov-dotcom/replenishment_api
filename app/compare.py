@@ -405,3 +405,57 @@ def order_xlsx(db: Session, order_id: int, side: str) -> tuple[str, bytes] | Non
     when = o.received_at.astimezone(SOFIA).strftime("%d.%m %H.%M")
     tag = "магазин" if side == "store" else "MinMaxAI"
     return f"{base} {when} {tag}.xlsx", _write_workbook(rows)
+
+
+def explain_order_line(l, series: list[float] | None) -> str:
+    """Защо MinMaxAI поръчва точно толкова (за раздел „Заявки по магазин")."""
+    ser = series or [0.0] * 14
+    sold = sum(ser)
+    sdp = sold / 14
+    last7, prev7 = sum(ser[7:]), sum(ser[:7])
+    st, mn, mx = float(l.current_stock), float(l.min_stock), float(l.max_stock)
+    pack, q = int(l.pack_size or 1), int(l.ordered_quantity)
+    need = max(mx - st, 0)
+    parts = []
+    if sold > 0:
+        t = f"Продава {_fmt(sdp)} бр./ден ({_fmt(sold)} бр. за 14 дни)"
+        if prev7 > 0 and last7 > prev7 * 1.3:
+            t += ", продажбите растат"
+        elif last7 < prev7 * 0.7:
+            t += ", продажбите падат"
+        parts.append(t + ".")
+    else:
+        parts.append("Не е продаван за последните 14 дни — поръчва се само по минимума.")
+    cov = f" ≈ {_fmt(st / sdp)} дни продажби" if sdp > 0 and st > 0 else ""
+    if st < 0:
+        parts.append(f"Наличността е на минус ({_fmt(st)}) — вероятно доставка, която не е заведена в Мистрал; системата допълва от минуса.")
+    else:
+        parts.append(f"Наличност {_fmt(st)} бр.{cov}, под минимума {_fmt(mn)} — затова се поръчва.")
+    parts.append(f"До максимума {_fmt(mx)} липсват {_fmt(need)} бр.")
+    if pack > 1:
+        packs = need / pack
+        rnd = q // pack
+        rule = ("до X.5 се закръгля надолу" if packs - int(packs) <= 0.5 else "над X.5 се закръгля нагоре")
+        if packs < 1 and rnd == 1:
+            rule = "под минимума винаги поне 1 опаковка"
+        parts.append(f"Това са {_fmt(round(packs, 2))} опаковки по {pack} бр. → {rule} → {rnd} опак. = {q} бр.")
+    else:
+        parts.append(f"Поръчва се на брой: {q} бр.")
+    if sdp > 0:
+        after = (st + q) / sdp
+        parts.append(f"След доставка ≈ {_fmt(after)} дни запас.")
+        if after < 2:
+            parts.append("⚠️ Максимумът е нисък спрямо продажбите — стига за под 2 дни; нощното учене ще го вдигне (ако не е заключен 🔒).")
+        elif after > 21:
+            parts.append("⚠️ Запасът ще е голям спрямо продажбите (над 3 седмици) — максимумът може да се намали.")
+    return " ".join(parts)
+
+
+def order_explain(db: Session, store_id: int) -> dict:
+    today = datetime.now(SOFIA).date()
+    res = service.calculate_for_store(db, store_id, today, None, False)
+    series = _series(db, store_id, today)
+    days = [(today - timedelta(days=14 - i)).strftime("%d.%m") for i in range(14)]
+    return {"days": days, "items": {
+        l.sku: {"series": series.get(l.sku, [0.0] * 14), "text": explain_order_line(l, series.get(l.sku))}
+        for l in res.lines}}

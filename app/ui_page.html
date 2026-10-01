@@ -246,7 +246,7 @@ button.go, #saveOrder, #loginForm button { color:#fff; border:none; background:l
 button.warm, #xlsOrder, #cXls, [data-xls] { color:#fff; border:none; background:linear-gradient(135deg,#2FA36B,var(--xls)); box-shadow:0 6px 16px rgba(29,122,70,.30); }
 #syncNow { color:#fff; border:none; background:linear-gradient(135deg,#4C9BE8,var(--blue)); box-shadow:0 6px 16px rgba(47,125,209,.32); }
 #runNow { color:#fff; border:none; background:linear-gradient(135deg,#F0643C,#C8412F); box-shadow:0 6px 16px rgba(200,65,47,.32); }
-#reloadOrder, #cAll, #lPreview { color:#fff; border:none; background:linear-gradient(135deg,#9B82FF,var(--violet)); box-shadow:0 6px 16px rgba(122,90,248,.30); }
+#reloadOrder, #cAll, #lPreview, #oxAll { color:#fff; border:none; background:linear-gradient(135deg,#9B82FF,var(--violet)); box-shadow:0 6px 16px rgba(122,90,248,.30); }
 #cUp, [data-imp] { color:#fff; border:none; background:linear-gradient(135deg,#F2B85A,var(--gold)); box-shadow:0 6px 16px rgba(233,162,59,.30); }
 .nav-btn, #prevStore, #nextStore { min-width:42px; font-size:16px; }
 .ripple { position:absolute; border-radius:50%; background:rgba(255,255,255,.45); transform:scale(0); animation:ripple .6s ease-out; pointer-events:none; }
@@ -315,6 +315,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <div class="stamp"><div id="stamp">Зареждам…</div><span id="whoami" class="mono" style="font-size:12px;color:#E7C9A9;margin-right:10px"></span><button class="logout" onclick="logout()">Изход</button></div>
 </div>
 
+<div id="freshInfo" class="note" style="margin:14px 2px -6px;font-size:12px"></div>
 <nav id="nav">
   <a href="#board" data-tab="board">Табло</a>
   <a href="#orders" data-tab="orders">Заявки по магазин</a>
@@ -345,6 +346,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <button id="nextStore" aria-label="Следващ магазин">&rarr;</button>
     <button class="go" id="reloadOrder">Преизчисли</button>
     <button class="warm" id="xlsOrder">Свали Excel</button>
+    <button id="oxAll">Покажи всички графики</button>
     <span class="msg" id="ordMsg"></span>
   </div>
   <div class="totals" id="ordTotals"></div>
@@ -594,7 +596,7 @@ async function loadBoard() {
 }
 
 /* ---------- заявки ---------- */
-let ordLines = [], edits = {}, curIdx = 0;
+let ordLines = [], edits = {}, curIdx = 0, ORD_EX = { days: [], items: {} };
 async function initOrders() {
   const list = await stores(); fillStoreSelect($("storeSel"), list);
   $("storeSel").onchange = () => loadOrder();
@@ -603,6 +605,7 @@ async function initOrders() {
   $("reloadOrder").onclick = () => loadOrder();
   $("xlsOrder").onclick = () => download(`/orders/preview/${$("storeSel").value}/export`).catch(e => msg("ordMsg", e.message, false));
   $("saveOrder").onclick = saveOrder;
+  $("oxAll").onclick = () => document.querySelectorAll("#ordBody td.ox").forEach(td => { if (td.textContent.includes("▸")) td.click(); });
   $("undoOrder").onclick = () => loadOrder();
   if (pendingStore) { $("storeSel").value = pendingStore; pendingStore = null; }
   loadOrder();
@@ -621,7 +624,9 @@ async function loadOrder() {
   const id = $("storeSel").value;
   $("ordBody").innerHTML = `<tr><td colspan="10" class="empty">Изчислявам…</td></tr>`;
   try {
-    const [d, a, st] = await Promise.all([api(`/orders/preview/${id}?respect_schedule=false`), arts(), api(`/settings/${id}`)]);
+    const [d, a, st, ex] = await Promise.all([api(`/orders/preview/${id}?respect_schedule=false`), arts(), api(`/settings/${id}`),
+      api(`/ui/orders/${id}/explain`).catch(() => ({ days: [], items: {} }))]);
+    ORD_EX = ex;
     const LOCK = {}; st.forEach(x => LOCK[x.sku] = x.auto_adjust === false);
     ordLines = d.lines;
     let value = 0, units = 0;
@@ -633,7 +638,7 @@ async function loadOrder() {
       const promo = art.promo_price != null ? `<span class="tag warn">промо до ${esc(art.promo_until)}</span>` : "";
       return `<tr data-sku="${esc(l.sku)}">
         <td>${esc(l.sku)}</td>
-        <td class="name">${esc(art.name || l.name)}</td>
+        <td class="name ox" style="cursor:pointer" title="Графика и обяснение">▸ ${esc(art.name || l.name)}</td>
         <td class="num ${l.current_stock < l.min_stock ? "low" : ""}">${fmtN(l.current_stock)}</td>
         <td class="num"><input type="number" min="0" step="1" value="${l.min_stock}" data-f="min_stock" aria-label="Мин"></td>
         <td class="num"><input type="number" min="0" step="1" value="${l.max_stock}" data-f="max_stock" aria-label="Макс"></td>
@@ -641,7 +646,8 @@ async function loadOrder() {
         <td class="num">${l.pack_size > 1 ? l.pack_size : "бр."}</td>
         <td class="num">${fmtE(price)}</td>
         <td class="num">${fmtE(val)}</td>
-        <td>${promo}${LOCK[l.sku] ? ' <span class="tag" title="Коригирано ръчно — ученето не го пипа">🔒</span>' : ''}</td></tr>`;
+        <td>${promo}${LOCK[l.sku] ? ' <span class="tag" title="Коригирано ръчно — ученето не го пипа">🔒</span>' : ''}</td></tr>
+        <tr class="oxrow" data-for="${esc(l.sku)}" style="display:none"><td colspan="10" style="background:var(--paper)"></td></tr>`;
     });
     $("ordBody").innerHTML = rows.join("") || `<tr><td colspan="10" class="empty">В този магазин няма артикул под минимума.</td></tr>`;
     $("ordTotals").innerHTML =
@@ -649,6 +655,18 @@ async function loadOrder() {
       `<span>Стойност <b>${fmtE(value)} €</b></span>` +
       `<span>Над минимума ${d.skipped_above_min}</span><span>Без наличност ${d.skipped_no_stock_data.length}</span>`;
     document.querySelectorAll("#ordBody input").forEach(inp => inp.oninput = onEdit);
+    document.querySelectorAll("#ordBody td.ox").forEach(td => td.onclick = () => {
+      const sku = td.parentNode.dataset.sku, row = document.querySelector(`#ordBody tr.oxrow[data-for="${CSS.escape(sku)}"]`);
+      if (!row) return;
+      if (row.style.display === "none") {
+        const e = (ORD_EX.items || {})[sku], l = ordLines.find(x => x.sku === sku);
+        row.firstElementChild.innerHTML = e ? `<div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;padding:10px 4px;position:sticky;left:0;max-width:min(1100px, calc(100vw - 48px))">
+          <div style="flex:1 1 420px;min-width:0">${salesChart(e.series, ORD_EX.days, l.current_stock, l.min_stock, l.max_stock)}</div>
+          <div style="flex:1 1 280px;font-family:var(--head);font-size:14px;line-height:1.6"><b>Защо MinMaxAI поръчва ${fmtN(l.ordered_quantity)} бр.</b><br>${esc(e.text)}</div></div>`
+          : `<div class="empty">Няма данни за продажби.</div>`;
+        row.style.display = ""; td.textContent = td.textContent.replace("▸", "▾");
+      } else { row.style.display = "none"; td.textContent = td.textContent.replace("▾", "▸"); }
+    });
     msg("ordMsg", "");
   } catch (e) { msg("ordMsg", e.message, false); $("ordBody").innerHTML = `<tr><td colspan="10" class="empty">Грешка при зареждане.</td></tr>`; }
 }
@@ -1007,6 +1025,36 @@ window.addEventListener("load", () => {
   };
 });
 
+
+/* ---------- автоматично обновяване ---------- */
+const AUTO_MIN = 5;
+let lastRefresh = Date.now();
+function currentTab() { return (location.hash || "#board").slice(1); }
+async function autoRefresh(force = false) {
+  if (document.hidden && !force) return;
+  if (document.querySelector(".modal-bg")) return;            // не пречим на отворен прозорец
+  const tab = currentTab();
+  try {
+    if (tab === "board") await loadBoard();
+    else if (tab === "orders" && !Object.keys(edits).length) await loadOrder();   // не губим незаписани корекции
+    else if (tab === "cmp") await loadCmp();
+    else if (tab === "learn") await loadLearn();
+    else if (tab === "plano" && PDATA) await loadPlano();
+    lastRefresh = Date.now(); updateFresh();
+  } catch (e) {}
+}
+async function updateFresh() {
+  const el = document.getElementById("freshInfo"); if (!el) return;
+  try {
+    const r = await api("/ui/refresh-status");
+    const mins = Math.round((Date.now() - lastRefresh) / 60000);
+    el.innerHTML = `🔄 пултът: преди ${mins} мин · наличности от Мистрал: <b>${r.stock_at || "—"}</b> (сами на ${r.auto_every_min} мин, ${r.auto_hours})`;
+  } catch (e) {}
+}
+setInterval(() => autoRefresh(), AUTO_MIN * 60 * 1000);
+setInterval(updateFresh, 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - lastRefresh > 60 * 1000) autoRefresh(true); });
+
 /* ---------- вход ---------- */
 function showLogin(err) {
   if (document.querySelector(".login")) return;
@@ -1046,6 +1094,7 @@ fetch("/ui/summary").then(r => {
   if (r.status === 401) { showLogin(); return; }
   api("/ui/me").then(m => { const w = document.getElementById("whoami"); if (w && m.name) w.textContent = "👤 " + m.name; }).catch(() => {});
   show((location.hash || "#board").slice(1));
+  updateFresh();
 });
 if ((location.hash || "#board") !== "#board") api("/ui/summary").then(d => $("stamp").innerHTML = `Обновено <b>${d.generated}</b>`).catch(() => {});
 </script>

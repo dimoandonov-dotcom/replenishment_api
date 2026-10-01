@@ -691,3 +691,17 @@ def article_no_order(sku: str, payload: NoOrderIn, request: Request, db: Session
     plano = db.execute(select(func.count()).select_from(m.Planogram)
                        .where(m.Planogram.article_id == a.id)).scalar() or 0
     return {"sku": a.sku, "no_order": a.no_order, "by": who, "in_planogram_stores": plano}
+
+
+@router.get("/ui/orders/{store_id}/explain")
+def ui_order_explain(store_id: int, db: Session = Depends(get_db)):
+    """Графика на продажбите + обяснение за всеки ред от заявката на магазина."""
+    from . import compare
+    return compare.order_explain(db, store_id)
+
+
+@router.get("/ui/refresh-status")
+def ui_refresh_status(db: Session = Depends(get_db)):
+    from . import refresher
+    last = db.execute(select(func.max(m.StockSnapshot.captured_at))).scalar()
+    return {"stock_at": _fmt(last), **refresher.status()}

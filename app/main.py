@@ -601,3 +601,12 @@ app.include_router(admin_router)
 from .ui import router as ui_router  # noqa: E402
 
 app.include_router(ui_router)
+
+
+# Автоматично опресняване на наличностите от Мистрал (на всеки 30 мин, 07-22 ч.)
+@app.on_event("startup")
+def _start_refresher():
+    import os as __os
+    if __os.getenv("DISABLE_REFRESHER") != "1":
+        from . import refresher
+        refresher.start()
