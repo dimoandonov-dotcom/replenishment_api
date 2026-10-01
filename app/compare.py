@@ -109,7 +109,7 @@ def record(db: Session, store_raw: str, lines: list[dict], raw_text: str | None,
                 "pack": a.pack_size,
                 "plano": a.id in plano,
                 "price": float(a.delivery_price) if a.delivery_price is not None else None,
-                "active": a.is_active,
+                "active": a.is_active, "no_order": a.no_order,
             }
 
     for sku in set(store_qty) | set(api):
@@ -138,6 +138,8 @@ def _reason(sq: float, our, c: dict) -> str:
     if sq > 0 and aq > 0:
         return "и двамата" if abs(sq - aq) < 0.01 else "различно количество"
     if sq > 0:
+        if c.get("no_order"):
+            return "само магазин — артикулът не се поръчва"
         if c.get("active") is False:
             return "само магазин — артикулът е спрян"
         if c.get("max") == 0:
@@ -266,6 +268,8 @@ def explain(l, series: list[float] | None) -> dict:
         elif "извън планограмата" in note:
             parts.append(f"Ани поръчва {_fmt(sq)} бр., но артикулът не е в планограмата на магазина — MinMaxAI не го поръчва."
                          + (" Продава се — да се помисли за добавяне в планограмата." if sdp >= 0.5 else ""))
+        elif "не се поръчва" in note:
+            parts.append(f"Ани поръчва {_fmt(sq)} бр., но артикулът е отбелязан „Не се поръчва“ в асортимента — MinMaxAI не го поръчва.")
         elif "0-0" in note or "спрян" in note:
             parts.append(f"Ани поръчва {_fmt(sq)} бр., но артикулът е спрян (0-0) по правилата."
                          + (" Продава се над 1 бр./ден — спирането да се преразгледа." if sdp >= 1 else ""))

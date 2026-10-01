@@ -310,6 +310,9 @@ def ui_assortment(db: Session = Depends(get_db)):
             "planogram_stores": plano_cnt.get(a.id, 0),
             "active_settings": set_cnt.get(a.id, 0),
             "is_active": a.is_active,
+            "no_order": bool(a.no_order), "no_order_reason": a.no_order_reason,
+            "no_order_by": a.no_order_by,
+            "no_order_at": a.no_order_at.astimezone(_SOFIA).strftime("%d.%m.%Y %H:%M") if a.no_order_at else None,
             "promo_price": promo[0] if promo else None,
             "promo_until": promo[1].strftime("%d.%m.%Y") if promo else None,
             "effective_price": promo[0] if promo else dp,
@@ -361,7 +364,7 @@ def ui_planogram(store_id: int, db: Session = Depends(get_db)):
             "min": _f(s.min_stock) if s else None,
             "max": _f(s.max_stock) if s else None,
             "stock": stock.get(aid),
-            "status": status, "is_active": a.is_active,
+            "status": "no_order" if (a.no_order and in_plano) else status, "is_active": a.is_active,
         })
     rows.sort(key=lambda r: (r["category"] or "", r["name"] or ""))
     counts = {}
@@ -666,3 +669,25 @@ async def brand_logo_upload(request: Request, db: Session = Depends(get_db)):
         a.mime, a.content = mime, data
     db.commit()
     return {"ok": True, "bytes": len(data)}
+
+
+class NoOrderIn(BaseModel):
+    no_order: bool
+    reason: str | None = None
+
+
+@router.post("/articles/{sku}/no-order")
+def article_no_order(sku: str, payload: NoOrderIn, request: Request, db: Session = Depends(get_db)):
+    """Отбелязва артикул „Не се поръчва“ (или го връща). Помни се трайно."""
+    a = db.execute(select(m.Article).where(m.Article.sku == sku)).scalar_one_or_none()
+    if a is None:
+        raise HTTPException(404, "Няма такъв артикул")
+    who = getattr(request.state, "user", None) or "система"
+    a.no_order = payload.no_order
+    a.no_order_reason = (payload.reason or "").strip() or None if payload.no_order else None
+    a.no_order_by = who
+    a.no_order_at = datetime.now(timezone.utc)
+    db.commit()
+    plano = db.execute(select(func.count()).select_from(m.Planogram)
+                       .where(m.Planogram.article_id == a.id)).scalar() or 0
+    return {"sku": a.sku, "no_order": a.no_order, "by": who, "in_planogram_stores": plano}

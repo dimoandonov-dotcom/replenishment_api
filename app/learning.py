@@ -135,7 +135,7 @@ def run(db: Session, apply: bool = True) -> dict:
 
         for aid in plano:
             a = arts.get(aid)
-            if a is None or not a.is_active or a.sku in EXPLICIT_STOP:
+            if a is None or not a.is_active or a.no_order or a.sku in EXPLICIT_STOP:
                 continue
             if "АМБАЛАЖ" in _C(a.name):
                 continue

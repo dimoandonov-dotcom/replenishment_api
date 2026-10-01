@@ -173,6 +173,11 @@ class Article(Base):
     price_note: Mapped[str | None] = mapped_column(
         Text
     )
+    # "Не се поръчва" - решение на човек, пази се трайно (и след нов импорт)
+    no_order: Mapped[bool] = mapped_column(Boolean, default=False)
+    no_order_reason: Mapped[str | None] = mapped_column(Text)
+    no_order_by: Mapped[str | None] = mapped_column(Text)
+    no_order_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True
     )

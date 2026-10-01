@@ -212,6 +212,19 @@ h1 .script { font-family:var(--script); font-weight:700; color:var(--fire1); fon
 @keyframes glow { 0%,100% { filter:drop-shadow(0 3px 10px rgba(244,125,38,.35)) } 55% { filter:drop-shadow(0 3px 18px rgba(255,170,90,.7)) } }
 @media (max-width:620px) { .logo300.has-logo img { height:58px; } .logo300.big.has-logo img { height:96px; } }
 
+
+/* ---------- прозорец за потвърждение ---------- */
+.modal-bg { position:fixed; inset:0; background:rgba(20,17,14,.55); backdrop-filter:blur(3px); display:grid; place-items:center; z-index:60; padding:18px; animation:fadeIn .2s both; }
+.modal { background:var(--raised); color:var(--ink); border-radius:20px; padding:26px 24px 20px; width:min(460px,100%); box-shadow:0 30px 70px rgba(0,0,0,.4); animation:pop .35s cubic-bezier(.2,1.3,.4,1) both; }
+.modal h3 { margin:0 0 10px; font-size:20px; font-weight:800; display:flex; gap:10px; align-items:center; }
+.modal p { margin:0 0 14px; font-size:14.5px; line-height:1.55; color:var(--slate); }
+.modal p b { color:var(--ink); }
+.modal textarea { width:100%; min-height:64px; border-radius:10px; border:1px solid var(--line-strong); background:var(--paper); padding:10px; font-family:var(--head); font-size:14px; color:var(--ink); }
+.modal .acts { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; flex-wrap:wrap; }
+button.mini { padding:5px 10px; font-size:12px; border-radius:8px; }
+button.danger, .modal button.danger { color:#fff; border:none; background:linear-gradient(135deg,#F0643C,#C8412F); box-shadow:0 4px 12px rgba(200,65,47,.3); }
+@keyframes fadeIn { from { opacity:0 } to { opacity:1 } }
+
 /* ---------- навигация: цветни хапчета ---------- */
 nav { border:none; gap:8px; margin:18px 0 22px; padding:4px 2px 8px; }
 nav a { border:none !important; border-radius:999px; padding:10px 16px 10px 14px; background:var(--raised); color:var(--ink);
@@ -362,6 +375,8 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
       <option value="noprice">Без цена</option>
       <option value="noplano">Извън планограма</option>
       <option value="inactive">Спрени</option>
+      <option value="noorder">🚫 Не се поръчват</option>
+      <option value="noorderplano">⚠️ Не се поръчват, но са в планограмата</option>
     </select>
     <span class="note" id="aCount"></span>
   </div>
@@ -369,7 +384,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <thead><tr>
       <th>Код</th><th>Артикул</th><th>Категория</th><th class="num">Опак.</th>
       <th class="num">База €</th><th class="num">Т.О.</th><th class="num">Доставна €</th>
-      <th>Промо</th><th class="num">В планограма</th><th class="num">С мин/макс</th>
+      <th>Промо</th><th class="num">В планограма</th><th class="num">С мин/макс</th><th>Поръчка</th>
     </tr></thead>
     <tbody id="aBody"></tbody>
   </table></div>
@@ -385,6 +400,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
       <option value="stopped">Спрени (0–0)</option>
       <option value="not_in_planogram">Настроени, но извън планограмата</option>
       <option value="ok">Наред</option>
+      <option value="no_order">🚫 Не се поръчват — да се махнат</option>
     </select>
     <span class="note" id="pInfo"></span>
   </div>
@@ -678,7 +694,8 @@ function renderAssort() {
     (!q || a.sku.includes(q) || (a.name || "").toUpperCase().includes(q)) &&
     (!cat || a.category === cat) &&
     (!f || (f === "promo" && a.promo_price != null) || (f === "noprice" && a.delivery_price == null) ||
-      (f === "noplano" && !a.planogram_stores && a.is_active) || (f === "inactive" && !a.is_active)));
+      (f === "noplano" && !a.planogram_stores && a.is_active) || (f === "inactive" && !a.is_active) ||
+      (f === "noorder" && a.no_order) || (f === "noorderplano" && a.no_order && a.planogram_stores > 0)));
   $("aCount").textContent = `${rows.length} от ${ALIST.length}`;
   const lim = window._aLim || 150;
   $("aBody").innerHTML = rows.slice(0, lim).map(a => `<tr>
@@ -690,18 +707,61 @@ function renderAssort() {
     <td class="num">${a.trade_discount ? (a.trade_discount * 100).toFixed(0) + "%" : "—"}</td>
     <td class="num"><b>${fmtE(a.delivery_price)}</b></td>
     <td>${a.promo_price != null ? `<span class="tag warn">${fmtE(a.promo_price)} € до ${esc(a.promo_until)}</span>` : (a.price_note ? `<span class="muted" style="font-size:11px" title="${esc(a.price_note)}">изтекли</span>` : "")}</td>
-    <td class="num">${a.planogram_stores || "—"}</td>
-    <td class="num">${a.active_settings || "—"}</td></tr>`).join("")
-    || `<tr><td colspan="10" class="empty">Няма артикули по този филтър.</td></tr>`;
+    <td class="num">${a.planogram_stores || "—"}${a.no_order && a.planogram_stores ? ' <span class="tag warn" title="Махни го от планограмата">⚠️</span>' : ""}</td>
+    <td class="num">${a.active_settings || "—"}</td>
+    <td>${a.no_order
+      ? `<span class="tag bad" title="${esc((a.no_order_reason || "") + (a.no_order_by ? " · " + a.no_order_by : "") + (a.no_order_at ? " · " + a.no_order_at : ""))}">🚫 не се поръчва</span> <button class="mini" data-noorder="${esc(a.sku)}" data-v="0">Върни</button>`
+      : `<button class="mini danger" data-noorder="${esc(a.sku)}" data-v="1">Не се поръчва</button>`}</td></tr>`).join("")
+    || `<tr><td colspan="11" class="empty">Няма артикули по този филтър.</td></tr>`;
+  document.querySelectorAll("[data-noorder]").forEach(b => b.onclick = () => askNoOrder(b.dataset.noorder, b.dataset.v === "1"));
   if (rows.length > lim) {
-    $("aBody").insertAdjacentHTML("beforeend", `<tr><td colspan="10" style="text-align:center;padding:14px"><button id="aMore">Покажи още (${rows.length - lim})</button></td></tr>`);
+    $("aBody").insertAdjacentHTML("beforeend", `<tr><td colspan="11" style="text-align:center;padding:14px"><button id="aMore">Покажи още (${rows.length - lim})</button></td></tr>`);
     $("aMore").onclick = () => { window._aLim = lim + 150; renderAssort(); };
   }
 }
 
+
+/* ---------- потвърждение "Не се поръчва" ---------- */
+function confirmBox({ title, html, okText, okClass = "danger", withReason = false }) {
+  return new Promise(resolve => {
+    const bg = document.createElement("div"); bg.className = "modal-bg";
+    bg.innerHTML = `<div class="modal" role="dialog" aria-modal="true"><h3>${title}</h3><p>${html}</p>
+      ${withReason ? '<textarea id="mReason" placeholder="Причина (по желание): напр. спрян от доставчика, сезонен, не се продава"></textarea>' : ""}
+      <div class="acts"><button id="mNo">Отказ</button><button id="mYes" class="${okClass}">${okText}</button></div></div>`;
+    document.body.appendChild(bg);
+    const close = v => { bg.remove(); resolve(v); };
+    bg.querySelector("#mNo").onclick = () => close(null);
+    bg.querySelector("#mYes").onclick = () => close({ reason: withReason ? bg.querySelector("#mReason").value : "" });
+    bg.onclick = e => { if (e.target === bg) close(null); };
+    document.addEventListener("keydown", function k(e) { if (e.key === "Escape") { document.removeEventListener("keydown", k); close(null); } });
+    setTimeout(() => bg.querySelector("#mNo").focus(), 50);
+  });
+}
+async function askNoOrder(sku, stop) {
+  const a = (ARTS || {})[sku] || { name: sku, planogram_stores: 0 };
+  const ok = await confirmBox(stop ? {
+    title: "🚫 Спиране на артикул",
+    html: `Сигурен ли си, че <b>${esc(a.name)}</b> (код ${esc(sku)}) вече <b>не се поръчва</b>?<br><br>
+      Ще спре да влиза в заявките за <b>всички магазини</b>${a.planogram_stores ? ` (в планограмата е в ${a.planogram_stores} магазина)` : ""}.
+      MinMaxAI ще помни това, докато някой не го върне.`,
+    okText: "Да, не се поръчва", withReason: true,
+  } : {
+    title: "↩️ Връщане на артикул",
+    html: `Да върна ли <b>${esc(a.name)}</b> (код ${esc(sku)}) в заявките? Пак ще се поръчва по мин/макс в магазините от планограмата.`,
+    okText: "Да, върни го", okClass: "go",
+  });
+  if (!ok) return;
+  try {
+    const r = await api(`/articles/${encodeURIComponent(sku)}/no-order`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ no_order: stop, reason: ok.reason || null }) });
+    toast(stop ? `„${a.name}“ вече не се поръчва.` + (r.in_planogram_stores ? ` Напомняне: махни го от планограмата (${r.in_planogram_stores} маг.).` : "") : `„${a.name}“ пак се поръчва.`);
+    ARTS = null; ALIST = Object.values(await arts()); renderAssort();
+  } catch (e) { toast(e.message, false); }
+}
+
 /* ---------- планограма ---------- */
 let PDATA = null;
-const PSTAT = { ok: ["наред", ""], missing_minmax: ["без мин/макс", "warn"], stopped: ["спрян 0–0", "off"], not_in_planogram: ["извън планограма", "bad"] };
+const PSTAT = { ok: ["наред", ""], missing_minmax: ["без мин/макс", "warn"], stopped: ["спрян 0–0", "off"], not_in_planogram: ["извън планограма", "bad"], no_order: ["🚫 не се поръчва — махни от планограмата", "bad"] };
 async function initPlano() {
   fillStoreSelect($("pStore"), await stores());
   $("pStore").onchange = loadPlano; $("pFilter").onchange = renderPlano;

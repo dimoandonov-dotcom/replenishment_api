@@ -15,6 +15,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from app.db import engine  # noqa: E402
 
 MIGRATIONS = [
+    "ALTER TABLE articles ADD COLUMN IF NOT EXISTS no_order BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE articles ADD COLUMN IF NOT EXISTS no_order_reason TEXT",
+    "ALTER TABLE articles ADD COLUMN IF NOT EXISTS no_order_by TEXT",
+    "ALTER TABLE articles ADD COLUMN IF NOT EXISTS no_order_at TIMESTAMPTZ",
     "ALTER TABLE stores ADD COLUMN IF NOT EXISTS size_class TEXT",
     "ALTER TABLE articles ADD COLUMN IF NOT EXISTS supplier_name TEXT",
     "ALTER TABLE articles ADD COLUMN IF NOT EXISTS base_price NUMERIC(12,4)",
