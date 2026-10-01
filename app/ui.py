@@ -731,3 +731,38 @@ def ui_not_ordered_store(store_id: int, db: Session = Depends(get_db)):
     if not st:
         raise HTTPException(404, "Няма такъв магазин")
     return {"store": st.name, "reasons": notordered.REASONS, "rows": notordered.store_rows(db, store_id)}
+
+
+# ---------------------------------------------------------------------------
+# Презентацията - отваря се само след вход
+# ---------------------------------------------------------------------------
+
+@router.get("/presentation", include_in_schema=False)
+def presentation(db: Session = Depends(get_db)):
+    a = db.get(m.AppAsset, "presentation")
+    if a is None:
+        raise HTTPException(404, "Още няма качена презентация")
+    return Response(content=a.content, media_type="application/pdf",
+                    headers={"Content-Disposition": "inline; filename*=UTF-8''MinMaxAI_prezentaciya.pdf",
+                             "Cache-Control": "private, max-age=60"})
+
+
+@router.post("/presentation")
+async def presentation_upload(request: Request, db: Session = Depends(get_db)):
+    from . import main as _main
+    who = getattr(request.state, "user", None)
+    if who and who != _main.APP_USER.lower():
+        raise HTTPException(403, "Само главният потребител качва презентацията")
+    f = (await request.form()).get("file")
+    if f is None:
+        raise HTTPException(400, "Липсва файл")
+    data = await f.read()
+    if not data.startswith(b"%PDF") or len(data) > 15 * 1024 * 1024:
+        raise HTTPException(400, "Само PDF до 15 MB")
+    a = db.get(m.AppAsset, "presentation")
+    if a is None:
+        db.add(m.AppAsset(key="presentation", mime="application/pdf", content=data))
+    else:
+        a.content, a.mime = data, "application/pdf"
+    db.commit()
+    return {"ok": True, "bytes": len(data)}

@@ -1231,7 +1231,8 @@ function showLogin(err) {
     ev.preventDefault();
     const r = await fetch("/ui/login", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: $("uIn").value, password: $("pIn").value }) });
-    if (r.ok) location.reload();
+    if (r.ok) { const nx = new URLSearchParams(location.search).get("next");
+      if (nx && nx.startsWith("/") && !nx.startsWith("//")) location.href = nx; else location.reload(); }
     else box.querySelector(".msg").textContent = r.status === 429 ? (await r.json()).detail : "Грешен потребител или парола.";
   };
 }

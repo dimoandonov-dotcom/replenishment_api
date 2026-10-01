@@ -120,6 +120,9 @@ async def _require_auth(request: Request, call_next):
         if client in ("127.0.0.1", "::1", "localhost", "testclient"):
             return await call_next(request)
     if not is_authenticated(request):
+        if request.method == "GET" and request.url.path == "/presentation":
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse("/?next=/presentation", status_code=302)  # първо вход, после файла
         return JSONResponse(status_code=401, content={"detail": "Нужен е вход"})
     return await call_next(request)
 
