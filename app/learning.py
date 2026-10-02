@@ -86,6 +86,8 @@ def run(db: Session, apply: bool = True) -> dict:
         from . import quality
         notes.append(f"качество: {quality.record(db, datetime.now(SOFIA).date() - timedelta(days=1))['pct_ok']}%")
         notes.append(f"изчистени стари наличности: {quality.prune_snapshots(db)}")
+        from . import anomalies
+        notes.append(f"движения/ревизии: {anomalies.sync(db, 14)}")
     except Exception as e:
         db.rollback()
         notes.append(f"качество: {type(e).__name__}")

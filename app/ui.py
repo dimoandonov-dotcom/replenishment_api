@@ -845,3 +845,32 @@ def mistral_movement_types(days: int = Query(7, ge=1, le=60), ndk_only: bool = T
         return mistral.movement_types(days, codes)
     except Exception as e:
         raise HTTPException(502, f"Мистрал: {type(e).__name__}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Аномалии в наличностите
+# ---------------------------------------------------------------------------
+
+@router.post("/anomalies/sync")
+def anomalies_sync(days: int = Query(14, ge=1, le=60), db: Session = Depends(get_db)):
+    from . import anomalies
+    try:
+        return anomalies.sync(db, days)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(502, f"Мистрал: {type(e).__name__}: {e}")
+
+
+@router.get("/ui/anomalies")
+def ui_anomalies(days: int = Query(7, ge=1, le=60), db: Session = Depends(get_db)):
+    from . import anomalies
+    return anomalies.summary(db, days)
+
+
+@router.get("/ui/anomalies/list")
+def ui_anomalies_list(kind: str | None = None, store_id: int | None = None,
+                      days: int = Query(7, ge=1, le=60), db: Session = Depends(get_db)):
+    from . import anomalies
+    rows = [r for r in anomalies.items(db, days, store_id) if not kind or r["kind"] == kind]
+    rows.sort(key=lambda r: (r["eur"], r["qty"]))
+    return {"count": len(rows), "rows": rows, "kinds": anomalies.KIND}
