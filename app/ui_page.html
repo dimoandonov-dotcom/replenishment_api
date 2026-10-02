@@ -442,7 +442,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <div class="board" id="cKpis"></div>
   <div class="head"><h2>Заявки на магазините</h2><span class="note">идват автоматично от anindk при „Свали Excel“</span></div>
   <div class="scroll"><table>
-    <thead><tr><th>Магазин</th><th>Получена</th><th class="num">Съвпадат</th><th class="num">Само магазин</th><th class="num">Само MinMaxAI</th><th class="num">Еднакво к-во</th><th class="num">Магазин €</th><th class="num">MinMaxAI €</th></tr></thead>
+    <thead><tr><th>Магазин</th><th>Получена</th><th class="num">Съвпадат</th><th class="num">Само магазин</th><th class="num">Само MinMaxAI</th><th class="num">Без „да“</th><th class="num">Еднакво к-во</th><th class="num">Магазин €</th><th class="num">MinMaxAI €</th></tr></thead>
     <tbody id="cBody"></tbody>
   </table></div>
   <div id="cDetail"></div>
@@ -979,6 +979,7 @@ async function loadCmp() {
     ["СЪВПАДЕНИЕ", pct + "%", "a", "от редовете на магазините ги има и при нас"],
     ["САМО МАГАЗИН", fmtN(t.only_store), "", "поръчали са, ние не бихме"],
     ["САМО MinMaxAI", fmtN(t.only_api), "", "под мин, но магазинът не е поискал"],
+    ["БЕЗ „ДА“ В ПЛАНОГРАМАТА", fmtN(t.off_plano || 0), "", "Ани поръчва, но не е за този магазин — не се брои в %"],
     ["БРОЙКИ МАГАЗИН", fmtN(t.store_units), "", ""],
     ["БРОЙКИ MinMaxAI", fmtN(t.api_units), "", ""],
     ["СТОЙНОСТ МАГАЗИН", fmtE(t.store_value), "a", "€ по доставни цени"],
@@ -987,9 +988,9 @@ async function loadCmp() {
   $("cKpis").innerHTML = tiles.map(([l, v, c, s]) => `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("");
   $("cBody").innerHTML = d.orders.map(o => `<tr data-id="${o.id}" style="cursor:pointer">
     <td class="name">${esc(o.store)} ${o.matched ? "" : '<span class="tag bad">неразпознат</span>'}</td><td>${o.at}</td>
-    <td class="num">${o.both}</td><td class="num">${o.only_store}</td><td class="num">${o.only_api}</td><td class="num">${o.same_qty}</td>
+    <td class="num">${o.both}</td><td class="num">${o.only_store}</td><td class="num">${o.only_api}</td><td class="num">${o.off_plano || 0}</td><td class="num">${o.same_qty}</td>
     <td class="num">${fmtE(o.store_value)}</td><td class="num">${fmtE(o.api_value)}</td></tr>`).join("")
-    || `<tr><td colspan="8" class="empty">Още няма получени заявки от магазините.</td></tr>`;
+    || `<tr><td colspan="9" class="empty">Още няма получени заявки от магазините.</td></tr>`;
   document.querySelectorAll("#cBody tr[data-id]").forEach(tr => tr.onclick = () => showCmp(tr.dataset.id));
 }
 function salesChart(series, days, st, mn, mx) {
@@ -1021,7 +1022,7 @@ function salesChart(series, days, st, mn, mx) {
   }
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;display:block" role="img" aria-label="Продажби по дни">${bars}${avgLine}</svg>${gauge}`;
 }
-const VERD = { "MinMaxAI": ["по-близо: MinMaxAI", ""], "Ани": ["по-близо: Ани", "warn"], "равни": ["равни", "off"], "неясно": ["неясно", "off"] };
+const VERD = { "MinMaxAI": ["по-близо: MinMaxAI", ""], "Ани": ["по-близо: Ани", "warn"], "равни": ["равни", "off"], "неясно": ["неясно", "off"], "планограма": ["няма „да“", "bad"] };
 let CMP = null;
 async function showCmp(id) {
   CMP = await api(`/ui/compare/${id}`); const d = CMP;
@@ -1032,7 +1033,7 @@ async function showCmp(id) {
   <div class="bar"><button onclick="download('/ui/compare/${d.id}/xlsx?side=store')">Excel — заявката на магазина</button>
   <button class="warm" onclick="download('/ui/compare/${d.id}/xlsx?side=api')">Excel — заявката на MinMaxAI</button>
   <button id="cAll">Покажи всички графики</button></div>
-  <div class="totals"><span>Разлики <b>${diffs}</b></span><span>По продажбите по-близо: MinMaxAI <b>${v["MinMaxAI"] || 0}</b></span><span>Ани <b>${v["Ани"] || 0}</b></span><span>равни <b>${v["равни"] || 0}</b></span></div>
+  <div class="totals"><span>Разлики <b>${diffs}</b></span><span>По продажбите по-близо: MinMaxAI <b>${v["MinMaxAI"] || 0}</b></span><span>Ани <b>${v["Ани"] || 0}</b></span><span>равни <b>${v["равни"] || 0}</b></span><span>без „да“ в планограмата <b>${v["планограма"] || 0}</b></span></div>
   <p class="note" style="margin:0 0 10px">Цъкни на ред с разлика — графика на продажбите ден по ден за 14 дни и обяснение.</p>
   <div class="scroll"><table><thead><tr><th>Код</th><th>Артикул</th><th class="num">Ани</th><th class="num">MinMaxAI</th><th class="num">Разлика</th>
   <th class="num" title="В момента на заявката на Ани">Нал. при заявката</th><th class="num" title="Последни данни от Мистрал">Нал. сега</th><th class="num">Мин</th><th class="num">Макс</th><th class="num">Прод./ден</th><th>Защо</th><th>По продажбите</th></tr></thead><tbody id="cRows">

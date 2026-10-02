@@ -138,14 +138,14 @@ def _reason(sq: float, our, c: dict) -> str:
     if sq > 0 and aq > 0:
         return "и двамата" if abs(sq - aq) < 0.01 else "различно количество"
     if sq > 0:
+        if c.get("plano") is False:
+            return "само магазин — няма „да“ в планограмата"
         if c.get("no_order"):
             return "само магазин — артикулът не се поръчва"
         if c.get("active") is False:
             return "само магазин — артикулът е спрян"
         if c.get("max") == 0:
             return "само магазин — спрян 0-0"
-        if c.get("plano") is False:
-            return "само магазин — извън планограмата"
         if c.get("min") is None:
             return "само магазин — няма мин/макс"
         st = c.get("stock")
@@ -158,6 +158,12 @@ def _reason(sq: float, our, c: dict) -> str:
 # ---------------------------------------------------------------------------
 # Справки
 # ---------------------------------------------------------------------------
+
+def _off(l) -> bool:
+    """Редът на магазина е за артикул без „да“ в планограмата на този магазин."""
+    n = l.note or ""
+    return "планограма" in n
+
 
 def _money(q, p):
     return float(q or 0) * float(p or 0)
@@ -178,14 +184,15 @@ def summary(db: Session, days: int = 14) -> dict:
     for ln in lines:
         by_order.setdefault(ln.order_id, []).append(ln)
 
-    rows, tot = [], {"orders": 0, "both": 0, "only_store": 0, "only_api": 0,
+    rows, tot = [], {"orders": 0, "both": 0, "only_store": 0, "only_api": 0, "off_plano": 0,
                      "same_qty": 0, "store_units": 0.0, "api_units": 0.0,
                      "store_value": 0.0, "api_value": 0.0}
     for o in orders:
         ls = by_order.get(o.id, [])
         st = {
             "both": sum(1 for l in ls if l.store_qty > 0 and l.api_qty > 0),
-            "only_store": sum(1 for l in ls if l.store_qty > 0 and l.api_qty == 0),
+            "only_store": sum(1 for l in ls if l.store_qty > 0 and l.api_qty == 0 and not _off(l)),
+            "off_plano": sum(1 for l in ls if l.store_qty > 0 and _off(l)),
             "only_api": sum(1 for l in ls if l.store_qty == 0 and l.api_qty > 0),
             "same_qty": sum(1 for l in ls if l.store_qty > 0 and l.store_qty == l.api_qty),
             "store_units": float(sum(l.store_qty for l in ls)),
@@ -265,9 +272,9 @@ def explain(l, series: list[float] | None) -> dict:
             parts.append(f"Ани поръчва {_fmt(sq)} бр., но наличността е над минимума {_fmt(mn)} — MinMaxAI още не поръчва.")
             if c_now is not None and c_now < 2:
                 parts.append("Внимание: наличността стига за под 2 дни — минимумът изглежда нисък; ученето ще го вдигне, ако продажбите го потвърдят.")
-        elif "извън планограмата" in note:
-            parts.append(f"Ани поръчва {_fmt(sq)} бр., но артикулът не е в планограмата на магазина — MinMaxAI не го поръчва."
-                         + (" Продава се — да се помисли за добавяне в планограмата." if sdp >= 0.5 else ""))
+        elif "планограма" in note:
+            parts.append(f"Ани поръчва {_fmt(sq)} бр., но в планограмата няма „да“ за този артикул в този магазин — по правилата не се поръчва."
+                         + (f" Продава {_fmt(sdp)} бр./ден — ако трябва да се зарежда, сложете „да“ в планограмата." if sdp >= 0.5 else ""))
         elif "не се поръчва" in note:
             parts.append(f"Ани поръчва {_fmt(sq)} бр., но артикулът е отбелязан „Не се поръчва“ в асортимента — MinMaxAI не го поръчва.")
         elif "0-0" in note or "спрян" in note:
@@ -286,6 +293,9 @@ def explain(l, series: list[float] | None) -> dict:
 
     # оценка: след доставка запасът трябва да е между 2 дни и (дни покритие + 2)
     verdict = "равни" if abs(sq - aq) < 0.01 else "неясно"
+    if "планограма" in note:
+        return {"text": " ".join(parts), "verdict": "планограма", "sdp": round(sdp, 2),
+                "sold_14d": round(sold, 1), "zero_days": zero_days}
     if abs(sq - aq) >= 0.01 and st is not None:
         if sdp <= 0:
             verdict = "Ани" if sq < aq else "MinMaxAI"
@@ -338,7 +348,7 @@ def detail(db: Session, order_id: int) -> dict:
     verdicts = {}
     for r in out:
         if abs(r["diff"]) >= 0.01:
-            verdicts[r["verdict"]] = verdicts.get(r["verdict"], 0) + 1
+            verdicts[r["verdict"]] = verdicts.get(r["verdict"], 0) + 1  # "планограма" се брои отделно
     return {
         "id": o.id, "store": store.name if store else o.store_raw,
         "at": o.received_at.astimezone(SOFIA).strftime("%d.%m.%Y %H:%M"),
@@ -357,12 +367,12 @@ def export_xlsx(db: Session, days: int = 14) -> bytes:
     ws = wb.active
     ws.title = "По заявки"
     hdr = ["Магазин", "Получена", "Наличности от", "Съвпадащи редове", "Само магазин",
-           "Само MinMaxAI", "Еднакво к-во", "Бройки магазин", "Бройки MinMaxAI",
+           "Само MinMaxAI", "Без „да“ в планограмата", "Еднакво к-во", "Бройки магазин", "Бройки MinMaxAI",
            "Стойност магазин €", "Стойност MinMaxAI €"]
     ws.append(hdr)
     for r in s["orders"]:
         ws.append([r["store"], r["at"], r["stock_at"], r["both"], r["only_store"],
-                   r["only_api"], r["same_qty"], r["store_units"], r["api_units"],
+                   r["only_api"], r["off_plano"], r["same_qty"], r["store_units"], r["api_units"],
                    r["store_value"], r["api_value"]])
     d2 = wb.create_sheet("Всички редове")
     d2.append(["Магазин", "Получена", "Код", "Артикул", "Магазин поръча", "MinMaxAI",
