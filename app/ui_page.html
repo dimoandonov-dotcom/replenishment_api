@@ -933,14 +933,26 @@ function renderQual() {
 
 /* ---------- аномалии ---------- */
 const ANK = { shortage: "bad", surplus: "warn", negative: "bad", phantom: "warn", writeoff: "off", correction: "off", undelivered: "bad", short_delivery: "warn" };
+// какво значи и какво да се направи - за картите, списъците и всеки ред
+const ANH = {
+  shortage: ["Ревизията е намерила по-малко, отколкото пише в Мистрал.", "Провери за кражба, брак без документ или стока, продавана под друг код."],
+  surplus: ["Ревизията е намерила повече, отколкото пише в Мистрал.", "Обикновено е стока, заведена или продавана под грешен код. Провери сходните артикули (кен ↔ бутилка, различни разфасовки)."],
+  negative: ["Продадено е повече, отколкото е заведено — наличността е на минус.", "Заведи липсващата доставка в Мистрал. Докато е на минус, заявките са грешни."],
+  phantom: ["По Мистрал има наличност, но от 4+ дни не се продава, а преди се продаваше.", "Провери дали стоката я има на рафта. Ако я няма — коригирай наличността, иначе системата няма да я поръча."],
+  writeoff: ["Стоката е отписана като брак.", "При големи количества провери причината."],
+  correction: ["Ръчна корекция надолу без ревизия.", "Провери кой и защо е коригирал."],
+  undelivered: ["Ани е поръчала, но в Мистрал няма доставка за деня.", "Провери с НДК дали е доставено. Ако е доставено — магазинът да заведе доставката."],
+  short_delivery: ["Доставено е по-малко от поръчаното.", "Провери с НДК за липсващите бройки или дали доставката е заведена само частично."],
+};
 async function loadAnom() {
   $("anDays").onchange = loadAnom;
   const d = await api(`/ui/anomalies?days=${$("anDays").value}`), t = d.totals || {};
   $("anUntil").textContent = d.data_until ? `данни до ${d.data_until}` : "";
   const net = (t.shortage?.eur || 0) + (t.surplus?.eur || 0);
-  const tiles = [["НЕТО ОТ РЕВИЗИИ", fmtE(net) + " €", net < 0 ? "a" : "t", "липси + излишъци", ""],
+  const tiles = [["НЕТО ОТ РЕВИЗИИ", fmtE(net) + " €", net < 0 ? "a" : "t", "липси + излишъци от ревизиите<br><span style=\"opacity:.85\">Близо до 0 = объркани артикули; голям минус = реална загуба.</span>", ""],
     ...Object.entries(d.kinds).filter(([k]) => (t[k]?.n || 0) > 0 || ["shortage", "surplus", "negative", "phantom", "undelivered"].includes(k))
-      .map(([k, l]) => [l.toUpperCase(), fmtN(t[k]?.n || 0), k === "shortage" || k === "negative" ? "a" : "", `${fmtN(t[k]?.qty || 0)} бр. · ${fmtE(t[k]?.eur || 0)} €`, k])];
+      .map(([k, l]) => [l.toUpperCase(), fmtN(t[k]?.n || 0), k === "shortage" || k === "negative" || k === "undelivered" ? "a" : "",
+        `${fmtN(t[k]?.qty || 0)} бр. · ${fmtE(t[k]?.eur || 0)} €<br><span style="opacity:.85">${(ANH[k] || [""])[0]}</span>`, k])];
   $("anKpis").innerHTML = tiles.map(([l, v, c, sub, k]) => `<div class="tile" ${k ? `data-k="${k}" style="cursor:pointer"` : ""}><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${sub}${k ? " · <u>виж →</u>" : ""}</div></div>`).join("");
   document.querySelectorAll("#anKpis .tile[data-k]").forEach(el => el.onclick = () => showAnom({ kind: el.dataset.k, title: d.kinds[el.dataset.k] }));
   $("anBody").innerHTML = (d.stores || []).map(r => { const n = (r.shortage_eur || 0) + (r.surplus_eur || 0);
@@ -962,14 +974,20 @@ async function showAnom({ kind, store_id, title }) {
 function renderAnom() {
   const f = (($("alSearch") || {}).value || "").trim().toLowerCase(), had = document.activeElement && document.activeElement.id === "alSearch";
   const rows = AL.rows.filter(r => !f || (r.store + " " + r.sku + " " + r.name).toLowerCase().includes(f)), shown = rows.slice(0, AL.lim);
+  const kinds = [...new Set(rows.map(r => r.kind))];
+  const help = kinds.filter(k => ANH[k]).map(k => `<div style="margin:4px 0"><span class="tag ${ANK[k] || "off"}">${esc(AL.kinds[k] || k)}</span>
+    ${esc(ANH[k][0])} <b>→ ${esc(ANH[k][1])}</b></div>`).join("");
   $("anDetail").innerHTML = `<div class="head"><h2>${esc(AL.title)}</h2><span class="note">${fmtN(rows.length)} реда</span></div>
+  ${help ? `<div class="card" style="padding:12px 16px;margin-bottom:12px;font-size:14px;line-height:1.55">${help}</div>` : ""}
   <div class="bar"><input type="search" id="alSearch" placeholder="Търси магазин, код или артикул" value="${esc(f)}" style="flex:1;min-width:200px"><button id="alClose">Затвори</button></div>
-  <div class="scroll"><table><thead><tr><th>Дата</th><th>Магазин</th><th>Код</th><th>Артикул</th><th>Вид</th><th class="num">Бройки</th><th class="num">€</th><th>Подробности</th></tr></thead><tbody>
+  <div class="scroll"><table><thead><tr><th>Дата</th><th>Магазин</th><th>Код</th><th>Артикул</th><th>Вид</th><th class="num">Бройки</th><th class="num">€</th><th>Какво е</th><th>Какво да се направи</th></tr></thead><tbody>
   ${shown.map(r => `<tr><td>${esc(r.day || "")}</td><td>${esc(r.store)}</td><td>${esc(r.sku)}</td><td class="name">${esc(r.name)}</td>
     <td><span class="tag ${ANK[r.kind] || "off"}">${esc(AL.kinds[r.kind] || r.kind)}</span></td>
-    <td class="num ${r.qty < 0 ? "low" : ""}">${fmtN(r.qty)}</td><td class="num ${r.eur < 0 ? "low" : ""}">${fmtE(r.eur)}</td><td class="muted" style="font-size:12px">${esc(r.info || "")}</td></tr>`).join("")
-    || `<tr><td colspan="8" class="empty">Няма редове.</td></tr>`}
-  ${rows.length > AL.lim ? `<tr><td colspan="8" style="text-align:center;padding:14px"><button id="alMore">Покажи още (${fmtN(rows.length - AL.lim)})</button></td></tr>` : ""}
+    <td class="num ${r.qty < 0 ? "low" : ""}">${fmtN(r.qty)}</td><td class="num ${r.eur < 0 ? "low" : ""}">${fmtE(r.eur)}</td>
+    <td style="font-size:12.5px;min-width:220px">${esc(r.info || (ANH[r.kind] || [""])[0])}</td>
+    <td style="font-size:12.5px;min-width:220px"><b>${esc((ANH[r.kind] || ["", ""])[1])}</b></td></tr>`).join("")
+    || `<tr><td colspan="9" class="empty">Няма редове.</td></tr>`}
+  ${rows.length > AL.lim ? `<tr><td colspan="9" style="text-align:center;padding:14px"><button id="alMore">Покажи още (${fmtN(rows.length - AL.lim)})</button></td></tr>` : ""}
   </tbody></table></div>`;
   const inp = $("alSearch"); inp.oninput = () => { AL.lim = 200; renderAnom(); };
   if (had) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
