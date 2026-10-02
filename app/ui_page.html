@@ -438,13 +438,14 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
 <!-- ============ АНОМАЛИИ ============ -->
 <section class="tab" id="tab-anom">
   <p class="note" style="margin:0 0 14px;line-height:1.6">Всяка нощ се дърпат от Мистрал <b>всички движения</b> на НДК стоката (продажби, доставки, брак, корекции) и <b>резултатите от ревизиите</b>.
-  Тук са липсите и излишъците от ревизии, отрицателните наличности (продадено без заведена доставка) и „фантомната“ наличност (по Мистрал има, но не се продава от 4+ дни — вероятно я няма на рафта).</p>
+  Тук са липсите и излишъците от ревизии, отрицателните наличности (продадено без заведена доставка), „фантомната“ наличност (по Мистрал има, но не се продава от 4+ дни — вероятно я няма на рафта)
+  и <b>доставките</b>: поръчано от Ани, но незаведено в Мистрал или доставено по-малко.</p>
   <div class="bar"><select id="anDays"><option value="7">7 дни</option><option value="14" selected>14 дни</option><option value="30">30 дни</option></select><span class="note" id="anUntil"></span></div>
   <div class="board" id="anKpis"></div>
   <div id="anDetail"></div>
   <div class="head"><h2>По магазини</h2><span class="note">най-голяма загуба отгоре · цъкни на магазин</span></div>
   <div class="scroll"><table>
-    <thead><tr><th>Магазин</th><th class="num">Липси €</th><th class="num">Излишъци €</th><th class="num">Нето €</th><th class="num">Липси бр. редове</th><th class="num">На минус</th><th class="num">Фантомни</th><th class="num">Брак</th></tr></thead>
+    <thead><tr><th>Магазин</th><th class="num">Липси €</th><th class="num">Излишъци €</th><th class="num">Нето €</th><th class="num">Липси бр. редове</th><th class="num">На минус</th><th class="num">Фантомни</th><th class="num">Незаведени доставки</th><th class="num">Брак</th></tr></thead>
     <tbody id="anBody"></tbody>
   </table></div>
 </section>
@@ -931,22 +932,23 @@ function renderQual() {
 
 
 /* ---------- аномалии ---------- */
-const ANK = { shortage: "bad", surplus: "warn", negative: "bad", phantom: "warn", writeoff: "off", correction: "off" };
+const ANK = { shortage: "bad", surplus: "warn", negative: "bad", phantom: "warn", writeoff: "off", correction: "off", undelivered: "bad", short_delivery: "warn" };
 async function loadAnom() {
   $("anDays").onchange = loadAnom;
   const d = await api(`/ui/anomalies?days=${$("anDays").value}`), t = d.totals || {};
   $("anUntil").textContent = d.data_until ? `данни до ${d.data_until}` : "";
   const net = (t.shortage?.eur || 0) + (t.surplus?.eur || 0);
   const tiles = [["НЕТО ОТ РЕВИЗИИ", fmtE(net) + " €", net < 0 ? "a" : "t", "липси + излишъци", ""],
-    ...Object.entries(d.kinds).filter(([k]) => (t[k]?.n || 0) > 0 || ["shortage", "surplus", "negative", "phantom"].includes(k))
+    ...Object.entries(d.kinds).filter(([k]) => (t[k]?.n || 0) > 0 || ["shortage", "surplus", "negative", "phantom", "undelivered"].includes(k))
       .map(([k, l]) => [l.toUpperCase(), fmtN(t[k]?.n || 0), k === "shortage" || k === "negative" ? "a" : "", `${fmtN(t[k]?.qty || 0)} бр. · ${fmtE(t[k]?.eur || 0)} €`, k])];
   $("anKpis").innerHTML = tiles.map(([l, v, c, sub, k]) => `<div class="tile" ${k ? `data-k="${k}" style="cursor:pointer"` : ""}><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${sub}${k ? " · <u>виж →</u>" : ""}</div></div>`).join("");
   document.querySelectorAll("#anKpis .tile[data-k]").forEach(el => el.onclick = () => showAnom({ kind: el.dataset.k, title: d.kinds[el.dataset.k] }));
   $("anBody").innerHTML = (d.stores || []).map(r => { const n = (r.shortage_eur || 0) + (r.surplus_eur || 0);
     return `<tr data-s="${r.store_id}" style="cursor:pointer"><td class="name">${esc(r.store)}</td>
     <td class="num low">${fmtE(r.shortage_eur)}</td><td class="num">${fmtE(r.surplus_eur)}</td><td class="num ${n < 0 ? "low" : ""}"><b>${fmtE(n)}</b></td>
-    <td class="num">${r.shortage_n}</td><td class="num">${r.negative_n}</td><td class="num">${r.phantom_n}</td><td class="num">${r.writeoff_n}</td></tr>`; }).join("")
-    || `<tr><td colspan="8" class="empty">Няма данни — първото дърпане е тази нощ в 02:30.</td></tr>`;
+    <td class="num">${r.shortage_n}</td><td class="num">${r.negative_n}</td><td class="num">${r.phantom_n}</td>
+    <td class="num ${(r.undelivered_n || 0) + (r.short_delivery_n || 0) ? "low" : ""}">${(r.undelivered_n || 0) + (r.short_delivery_n || 0)}</td><td class="num">${r.writeoff_n}</td></tr>`; }).join("")
+    || `<tr><td colspan="9" class="empty">Няма данни — първото дърпане е тази нощ в 02:30.</td></tr>`;
   document.querySelectorAll("#anBody tr[data-s]").forEach(tr => tr.onclick = () => showAnom({ store_id: +tr.dataset.s, title: tr.firstElementChild.textContent }));
 }
 let AL = { rows: [], lim: 200 };

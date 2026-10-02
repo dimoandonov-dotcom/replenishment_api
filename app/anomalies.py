@@ -34,6 +34,7 @@ KIND = {
     "shortage": "Липси от ревизия", "surplus": "Излишъци от ревизия",
     "negative": "Отрицателна наличност", "phantom": "Фантомна наличност",
     "writeoff": "Брак / отписване", "correction": "Ръчни корекции надолу",
+    "undelivered": "Незаведена доставка", "short_delivery": "Непълна доставка",
 }
 PHANTOM_DAYS = 4
 
@@ -193,6 +194,30 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
                 out.append({"kind": "phantom", "store_id": sid, "store": stores[sid], "sku": sku(aid), "name": name(aid),
                             "qty": st, "eur": round(st * price(aid), 2), "day": today.strftime("%d.%m"),
                             "info": f"продаваше {sum(ser[:-PHANTOM_DAYS]) / (14 - PHANTOM_DAYS):.1f}/ден, от {PHANTOM_DAYS} дни 0 продажби"})
+
+    # поръчано от Ани -> доставено ли е и заведено в Мистрал? (само завършени дни)
+    try:
+        from . import deliveries
+        dsince = today - timedelta(days=days)
+        dl, ani = deliveries._delivered(db, dsince), deliveries._ani(db, dsince)
+        for (sid, d), lines in ani.items():
+            if d >= today or d < dsince or (store_id and sid != store_id) or sid not in stores:
+                continue
+            got = dl.get((sid, d), {})
+            for aid, q in lines.items():
+                if aid not in arts or "АМБАЛАЖ" in name(aid).upper():
+                    continue
+                g = got.get(aid, 0.0)
+                if g <= 0:
+                    out.append({"kind": "undelivered", "store_id": sid, "store": stores[sid], "sku": sku(aid), "name": name(aid),
+                                "qty": -q, "eur": round(-q * price(aid), 2), "day": d.strftime("%d.%m"),
+                                "info": f"Ани поръча {q:g} бр. — в Мистрал няма доставка за деня (не е доставено или не е заведено)"})
+                elif g < q - 0.01:
+                    out.append({"kind": "short_delivery", "store_id": sid, "store": stores[sid], "sku": sku(aid), "name": name(aid),
+                                "qty": g - q, "eur": round((g - q) * price(aid), 2), "day": d.strftime("%d.%m"),
+                                "info": f"поръчано {q:g} бр., доставено {g:g} бр."})
+    except Exception:
+        db.rollback()
     return out
 
 
