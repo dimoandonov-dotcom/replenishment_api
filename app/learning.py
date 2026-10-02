@@ -81,6 +81,15 @@ def run(db: Session, apply: bool = True) -> dict:
     except Exception as e:  # учим по наличните данни
         notes.append(f"Мистрал: {type(e).__name__}")
 
+    # снимка на качеството за вчера (наличностите в 02:30 = края на деня) + почистване
+    try:
+        from . import quality
+        notes.append(f"качество: {quality.record(db, datetime.now(SOFIA).date() - timedelta(days=1))['pct_ok']}%")
+        notes.append(f"изчистени стари наличности: {quality.prune_snapshots(db)}")
+    except Exception as e:
+        db.rollback()
+        notes.append(f"качество: {type(e).__name__}")
+
     today = datetime.now(SOFIA).date()
     since = today - timedelta(days=DAYS)
     last_sale = db.execute(select(func.max(m.SalesHistory.sale_date))).scalar()

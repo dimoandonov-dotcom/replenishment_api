@@ -766,3 +766,36 @@ async def presentation_upload(request: Request, db: Session = Depends(get_db)):
         a.content, a.mime = data, "application/pdf"
     db.commit()
     return {"ok": True, "bytes": len(data)}
+
+
+# ---------------------------------------------------------------------------
+# Качество на заявките
+# ---------------------------------------------------------------------------
+
+@router.get("/ui/quality")
+def ui_quality(days: int = Query(30, ge=1, le=120), db: Session = Depends(get_db)):
+    from . import quality
+    c = quality.compute(db)
+    return {**c, "history": quality.history(db, days)}
+
+
+@router.get("/ui/quality/list")
+def ui_quality_list(status: str | None = None, store_id: int | None = None, db: Session = Depends(get_db)):
+    from . import quality
+    rows = [r for r in quality.positions(db, store_id) if r["status"] != "idle" and (not status or r["status"] == status)]
+    order = {"out": 0, "over": 1, "low": 2, "ok": 3}
+    rows.sort(key=lambda r: (order[r["status"]], -r["per_day"], r["store"]))
+    return {"count": len(rows), "rows": rows, "labels": quality.LABEL}
+
+
+@router.post("/quality/record")
+def quality_record(db: Session = Depends(get_db)):
+    """Ръчна снимка за днес (нормално става всяка нощ в 02:30)."""
+    from . import quality
+    return quality.record(db)
+
+
+@router.post("/quality/prune")
+def quality_prune(db: Session = Depends(get_db)):
+    from . import quality
+    return {"deleted": quality.prune_snapshots(db)}

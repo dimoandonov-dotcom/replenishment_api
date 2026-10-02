@@ -236,7 +236,7 @@ nav a:hover { transform:translateY(-2px); }
 nav a.on { background:var(--c,var(--amber)); color:#fff; box-shadow:0 8px 20px color-mix(in srgb,var(--c,var(--amber)) 40%,transparent); }
 nav a.on::before { background:#fff; box-shadow:0 0 0 3px rgba(255,255,255,.35); }
 nav a[data-tab="board"]{--c:#D9621C} nav a[data-tab="orders"]{--c:#2F7DD1} nav a[data-tab="assort"]{--c:#E9A23B}
-nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A}
+nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A} nav a[data-tab="qual"]{--c:#0EA5A4}
 
 /* ---------- бутони ---------- */
 button { border-radius:10px; border:1px solid var(--line-strong); background:var(--raised); font-family:var(--head); font-weight:700;
@@ -322,6 +322,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <a href="#orders" data-tab="orders">Заявки по магазин</a>
   <a href="#assort" data-tab="assort">Асортимент и цени</a>
   <a href="#plano" data-tab="plano">Планограма</a>
+  <a href="#qual" data-tab="qual">Качество</a>
   <a href="#nord" data-tab="nord">Не се поръчват</a>
   <a href="#cmp" data-tab="cmp">Сравнение</a>
   <a href="#learn" data-tab="learn">Обучение</a>
@@ -414,6 +415,22 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <thead><tr><th>Код</th><th>Артикул</th><th>Категория</th><th class="num">Наличност</th>
       <th class="num">Мин</th><th class="num">Макс</th><th>Състояние</th></tr></thead>
     <tbody id="pBody"></tbody>
+  </table></div>
+</section>
+
+<!-- ============ КАЧЕСТВО ============ -->
+<section class="tab" id="tab-qual">
+  <p class="note" style="margin:0 0 14px;line-height:1.6">Как се справят заявките <b>в магазините</b> — без да зависи от Ани. За всяка позиция с „да“ в планограмата:
+  <b>свършил</b> (наличност 0, а се продава — поръчали сме малко), <b>свръхзапас</b> (стига за над 3 седмици — поръчали сме много),
+  <b>под минимума</b> (влиза в днешната заявка) и <b>точно</b>. Снимка се прави всяка нощ — оттам е тенденцията.</p>
+  <div class="board" id="qKpis"></div>
+  <div id="qDetail"></div>
+  <div class="head"><h2>Тенденция по дни</h2><span class="note">оценка % · свършили</span></div>
+  <div id="qTrend" class="card" style="padding:18px"></div>
+  <div class="head"><h2>По магазини</h2><span class="note">най-много свършили отгоре · цъкни на магазин</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Магазин</th><th class="num">Оценка</th><th class="num">Свършили</th><th class="num">Свръхзапас</th><th class="num">Под минимума</th><th class="num">Позиции</th></tr></thead>
+    <tbody id="qBody"></tbody>
   </table></div>
 </section>
 
@@ -554,7 +571,7 @@ const loaded = {};
 function show(tab) {
   document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + tab));
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, qual: loadQual, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -836,6 +853,58 @@ function renderPlano() {
     || `<tr><td colspan="7" class="empty">Няма артикули в тази група.</td></tr>`;
 }
 
+
+
+/* ---------- качество на заявките ---------- */
+const QST = { out: ["свършил", "bad"], over: ["свръхзапас", "warn"], low: ["под минимума — в заявката", ""], ok: ["точно", "off"] };
+async function loadQual() {
+  const d = await api("/ui/quality"), t = d.totals;
+  const tiles = [["ОЦЕНКА", t.pct_ok + "%", "t", "точни + под минимума", ""], ["СВЪРШИЛИ", fmtN(t.out), "a", "поръчали сме малко", "out"],
+    ["СВРЪХЗАПАС", fmtN(t.over), "", "над 3 седмици запас", "over"], ["ПОД МИНИМУМА", fmtN(t.low), "", "влизат в днешната заявка", "low"],
+    ["ТОЧНИ", fmtN(t.ok), "", "между мин и макс", "ok"], ["ПОЗИЦИИ", fmtN(t.positions), "", `към ${d.at}`, ""]];
+  $("qKpis").innerHTML = tiles.map(([l, v, c, sub, k]) => `<div class="tile" ${k ? `data-q="${k}" style="cursor:pointer"` : ""}><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${sub}${k ? " · <u>виж →</u>" : ""}</div></div>`).join("");
+  document.querySelectorAll("#qKpis .tile[data-q]").forEach(el => el.onclick = () => showQual({ status: el.dataset.q }));
+  const h = d.history || [];
+  if (!h.length) $("qTrend").innerHTML = `<div class="note">Първата снимка се записва тази нощ в 02:30 — оттам започва тенденцията.</div>`;
+  else {
+    const W = Math.max(320, h.length * 46), H = 170, bw = 30;
+    $("qTrend").innerHTML = `<div style="overflow-x:auto"><svg width="${W}" height="${H}" role="img" aria-label="Оценка по дни">
+      ${h.map((x, i) => { const bh = Math.max(2, (x.pct_ok / 100) * (H - 50)), X = 10 + i * 46;
+        return `<rect x="${X}" y="${H - 24 - bh}" width="${bw}" height="${bh}" rx="4" fill="var(--teal)"><title>${x.day}: ${x.pct_ok}% · свършили ${x.out}</title></rect>
+        <text x="${X + bw / 2}" y="${H - 28 - bh}" font-size="11" text-anchor="middle" fill="var(--ink)" font-family="IBM Plex Mono, monospace">${Math.round(x.pct_ok)}%</text>
+        <text x="${X + bw / 2}" y="${H - 8}" font-size="11" text-anchor="middle" fill="var(--slate)" font-family="IBM Plex Mono, monospace">${x.day}</text>
+        <text x="${X + bw / 2}" y="14" font-size="11" text-anchor="middle" fill="var(--danger)" font-family="IBM Plex Mono, monospace">${x.out}</text>`; }).join("")}
+    </svg></div><div class="note" style="margin-top:6px">Стълбчета — оценка %. Червено горе — брой свършили.</div>`;
+  }
+  $("qBody").innerHTML = d.stores.map(r => `<tr data-s="${r.store_id}" style="cursor:pointer"><td class="name">${esc(r.store)}</td>
+    <td class="num"><b>${r.pct_ok}%</b></td><td class="num ${r.out ? "low" : ""}">${r.out}</td><td class="num">${r.over}</td><td class="num">${r.low}</td><td class="num">${r.positions}</td></tr>`).join("");
+  document.querySelectorAll("#qBody tr[data-s]").forEach(tr => tr.onclick = () => showQual({ store_id: +tr.dataset.s, title: tr.firstElementChild.textContent }));
+}
+let QL = { rows: [], lim: 200 };
+async function showQual({ status, store_id, title }) {
+  $("qDetail").innerHTML = `<div class="empty loading">Зареждам…</div>`; $("qDetail").scrollIntoView({ behavior: "smooth" });
+  const q = new URLSearchParams(); if (status) q.set("status", status); if (store_id) q.set("store_id", store_id);
+  const d = await api(`/ui/quality/list?${q}`);
+  QL = { rows: store_id ? d.rows.filter(r => r.status !== "ok") : d.rows, lim: 200, title: title || (QST[status] || ["Всички"])[0] };
+  renderQual();
+}
+function renderQual() {
+  const f = (($("qlSearch") || {}).value || "").trim().toLowerCase(), had = document.activeElement && document.activeElement.id === "qlSearch";
+  const rows = QL.rows.filter(r => !f || (r.store + " " + r.sku + " " + r.name).toLowerCase().includes(f)), shown = rows.slice(0, QL.lim);
+  $("qDetail").innerHTML = `<div class="head"><h2>${esc(QL.title)}</h2><span class="note">${fmtN(rows.length)} позиции</span></div>
+  <div class="bar"><input type="search" id="qlSearch" placeholder="Търси магазин, код или артикул" value="${esc(f)}" style="flex:1;min-width:200px"><button id="qlClose">Затвори</button></div>
+  <div class="scroll"><table><thead><tr><th>Магазин</th><th>Код</th><th>Артикул</th><th>Състояние</th><th class="num">Наличност</th><th class="num">Мин</th><th class="num">Макс</th><th class="num">Прод./ден</th><th class="num">Дни запас</th></tr></thead><tbody>
+  ${shown.map(r => { const [l, c] = QST[r.status] || [r.status, "off"];
+    return `<tr><td>${esc(r.store)}</td><td>${esc(r.sku)}</td><td class="name">${esc(r.name)}</td><td><span class="tag ${c}">${l}</span></td>
+    <td class="num ${r.stock <= 0 ? "low" : ""}">${fmtN(r.stock)}</td><td class="num">${fmtN(r.min)}</td><td class="num">${fmtN(r.max)}</td>
+    <td class="num">${fmtN(r.per_day)}</td><td class="num">${r.cover_days == null ? "—" : fmtN(r.cover_days)}</td></tr>`; }).join("") || `<tr><td colspan="9" class="empty">Няма позиции.</td></tr>`}
+  ${rows.length > QL.lim ? `<tr><td colspan="9" style="text-align:center;padding:14px"><button id="qlMore">Покажи още (${fmtN(rows.length - QL.lim)})</button></td></tr>` : ""}
+  </tbody></table></div>`;
+  const inp = $("qlSearch"); inp.oninput = () => { QL.lim = 200; renderQual(); };
+  if (had) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+  $("qlClose").onclick = () => { $("qDetail").innerHTML = ""; };
+  if ($("qlMore")) $("qlMore").onclick = () => { QL.lim += 200; renderQual(); };
+}
 
 /* ---------- не се поръчват ---------- */
 async function loadNord() {
@@ -1189,6 +1258,7 @@ async function autoRefresh(force = false) {
     if (tab === "board") await loadBoard();
     else if (tab === "orders" && !Object.keys(edits).length) await loadOrder();   // не губим незаписани корекции
     else if (tab === "cmp") await loadCmp();
+    else if (tab === "qual") await loadQual();
     else if (tab === "nord") { await loadNord(); if (NSTORE) await showNord(NSTORE, true); }
     else if (tab === "learn") await loadLearn();
     else if (tab === "plano" && PDATA) await loadPlano();
