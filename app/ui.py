@@ -890,3 +890,17 @@ def ui_deliveries(days: int = Query(14, ge=1, le=60), db: Session = Depends(get_
 def ui_delivery_detail(store_id: int, day: str, db: Session = Depends(get_db)):
     from . import deliveries
     return deliveries.detail(db, store_id, day)
+
+
+@router.get("/ui/deliveries/by-article")
+def ui_deliveries_by_article(days: int = Query(7, ge=1, le=60), db: Session = Depends(get_db)):
+    """Доставено от НДК по артикул за последните N дни (Мистрал, вид 2): бройки и в колко магазина."""
+    from sqlalchemy import text as _t
+    since = datetime.now(_SOFIA).date() - timedelta(days=days)
+    rows = db.execute(_t("""SELECT article_id, SUM(qty_in), COUNT(DISTINCT store_id), MAX(day)
+                            FROM stock_movements WHERE optype = 2 AND qty_in > 0 AND day >= :d
+                            GROUP BY article_id"""), {"d": since}).all()
+    arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
+    return {"days": days, "since": since.isoformat(), "rows": [
+        {"sku": arts[a].sku, "name": arts[a].supplier_name or arts[a].name, "qty": float(q), "stores": int(n),
+         "last": d.strftime("%d.%m")} for a, q, n, d in rows if a in arts]}
