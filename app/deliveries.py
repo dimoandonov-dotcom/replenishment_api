@@ -25,8 +25,9 @@ def _bg(dt) -> date:
 
 
 def _delivered(db: Session, since: date) -> dict:
-    """(store, day) -> {article_id: qty} - само приходи (qty_in) от вид 2."""
+    """(store, day) -> {article_id: qty} - само приходи (qty_in) от вид 2, без амбалаж."""
     out = defaultdict(dict)
+    skip = {a.id for a in db.execute(select(m.Article)).scalars().all() if "АМБАЛАЖ" in (a.name or "").upper()}
     try:
         rows = db.execute(text("""SELECT store_id, article_id, day, qty_in FROM stock_movements
                                   WHERE optype = 2 AND qty_in > 0 AND day >= :d"""), {"d": since}).all()
@@ -34,6 +35,8 @@ def _delivered(db: Session, since: date) -> dict:
         db.rollback()
         return out
     for s, a, d, q in rows:
+        if a in skip:
+            continue
         out[(s, d)][a] = out[(s, d)].get(a, 0.0) + float(q)
     return out
 
