@@ -799,3 +799,36 @@ def quality_record(db: Session = Depends(get_db)):
 def quality_prune(db: Session = Depends(get_db)):
     from . import quality
     return {"deleted": quality.prune_snapshots(db)}
+
+
+# ---------------------------------------------------------------------------
+# Наличности в два момента (напр. преди и след ревизия)
+# ---------------------------------------------------------------------------
+
+@router.get("/ui/stock-compare")
+def ui_stock_compare(store_id: int, t1: str, t2: str, db: Session = Depends(get_db)):
+    """Наличност на всеки артикул от планограмата към t1 и към t2 (ISO, бг. време)."""
+    from sqlalchemy import text as _t
+    def at(ts: str) -> dict:
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_SOFIA)
+        rows = db.execute(_t("""
+            SELECT DISTINCT ON (article_id) article_id, quantity, captured_at
+            FROM stock_snapshots WHERE store_id = :s AND captured_at <= :t
+            ORDER BY article_id, captured_at DESC"""), {"s": store_id, "t": dt}).all()
+        return {a: (float(q), c) for a, q, c in rows}
+    a1, a2 = at(t1), at(t2)
+    arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
+    plano = set(db.execute(select(m.Planogram.article_id).where(m.Planogram.store_id == store_id)).scalars().all())
+    out = []
+    for aid in plano:
+        a = arts.get(aid)
+        if a is None:
+            continue
+        q1 = a1.get(aid, (None, None))[0]
+        q2 = a2.get(aid, (None, None))[0]
+        out.append({"sku": a.sku, "name": a.supplier_name or a.name, "before": q1, "after": q2,
+                    "diff": None if q1 is None or q2 is None else round(q2 - q1, 2)})
+    snap = lambda d: _fmt(max((c for _, c in d.values()), default=None))  # noqa: E731
+    return {"store_id": store_id, "t1_snapshot": snap(a1), "t2_snapshot": snap(a2), "rows": out}
