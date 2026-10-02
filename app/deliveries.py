@@ -1,8 +1,8 @@
 """
 Доставки от НДК (Мистрал, вид движение 2) срещу заявката на MinMaxAI.
 
-Доставка на ден D в магазин S се сравнява със заявката, която MinMaxAI е
-изчислил за S на D-1 (пускането в 15:00), и със заявката на Ани за D-1 (ако има).
+НДК доставя в същия ден. Доставка на ден D в магазин S се сравнява със
+заявката на MinMaxAI за D (пускане в 06:00) и със заявката на Ани от D сутринта.
 Така имаме сравнение с реално поръчаното/полученото, докато заработи изцяло
 сравнението с Ани, и „перо" за наличностите: поръчано, но не заведено като доставка.
 """
@@ -22,6 +22,12 @@ SOFIA = timezone(timedelta(hours=3))
 
 def _bg(dt) -> date:
     return dt.astimezone(SOFIA).date()
+
+
+def _for_day(dt) -> date:
+    """НДК доставя в същия ден: заявка до 12:00 -> доставка днес; следобедна (старото 15:00) -> утре."""
+    t = dt.astimezone(SOFIA)
+    return t.date() if t.hour < 12 else t.date() + timedelta(days=1)
 
 
 def _delivered(db: Session, since: date) -> dict:
@@ -48,7 +54,7 @@ def _ours(db: Session, since: date) -> dict:
         m.PurchaseOrder.created_at >= datetime.combine(since - timedelta(days=1), datetime.min.time(), SOFIA))
         .order_by(m.PurchaseOrder.created_at)).scalars().all()
     for po in pos:
-        out[(po.store_id, _bg(po.created_at) + timedelta(days=1))] = {l.article_id: l for l in po.lines}
+        out[(po.store_id, _for_day(po.created_at))] = {l.article_id: l for l in po.lines}
     return out
 
 
@@ -60,7 +66,7 @@ def _ani(db: Session, since: date) -> dict:
             m.ManualOrder.received_at >= datetime.combine(since - timedelta(days=1), datetime.min.time(), SOFIA))
             .order_by(m.ManualOrder.received_at)).scalars().all():
         ls = db.execute(select(m.ManualOrderLine).where(m.ManualOrderLine.order_id == o.id)).scalars().all()
-        out[(o.store_id, _bg(o.received_at) + timedelta(days=1))] = {
+        out[(o.store_id, _for_day(o.received_at))] = {
             skus[l.sku]: float(l.store_qty) for l in ls if l.sku in skus and float(l.store_qty) > 0}
     return out
 
