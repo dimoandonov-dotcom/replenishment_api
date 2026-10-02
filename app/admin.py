@@ -885,6 +885,11 @@ async def import_supplier_workbook(
     report["stores_matched"] = len(matched_stores)
     report["unmatched_store_columns"] = sorted(unmatched)
     report["planogram_unknown_skus"] = sorted(unknown_skus)[:50]
+    if placements:  # след всяко качване на планограма - само нейните артикули
+        po = planogram_only(db, True)
+        report["planogram_only"] = {"articles_deactivated": len(po["articles_deactivated"]),
+                                    "articles_reactivated": len(po["articles_reactivated"]),
+                                    "settings_removed": po["settings_removed"]}
     return report
 
 
@@ -911,3 +916,48 @@ def planogram_add(items: list[PlanogramItem], db: Session = Depends(get_db)):
         db.execute(insert(m.Planogram), new)
     db.commit()
     return {"added": len(new), "unknown_skus": sorted(set(unknown))}
+
+
+# ---------------------------------------------------------------------------
+# Само артикулите от планограмата
+# ---------------------------------------------------------------------------
+
+def planogram_only(db: Session, apply: bool = True) -> dict:
+    """
+    В системата остават само артикулите от планограмата:
+      - артикул, който не е в планограмата на нито един магазин -> неактивен;
+      - артикул от планограмата, който е неактивен -> активен;
+      - мин/макс за позиция извън планограмата на магазина -> изтрит (в дневника).
+    """
+    plano = set(db.execute(select(m.Planogram.store_id, m.Planogram.article_id)).all())
+    plano_arts = {a for _, a in plano}
+    deact, react = [], []
+    for a in db.execute(select(m.Article)).scalars().all():
+        if a.is_active and a.id not in plano_arts:
+            deact.append(a.sku)
+            if apply:
+                a.is_active = False
+        elif not a.is_active and a.id in plano_arts:
+            react.append(a.sku)
+            if apply:
+                a.is_active = True
+    removed = 0
+    for st in db.execute(select(m.StoreArticleSetting)).scalars().all():
+        if (st.store_id, st.article_id) not in plano:
+            removed += 1
+            if apply:
+                db.add(m.SettingsLog(store_id=st.store_id, article_id=st.article_id,
+                                     old_min=st.min_stock, old_max=st.max_stock,
+                                     new_min=None, new_max=None, source="rules",
+                                     reason="извън планограмата — изтрит"))
+                db.delete(st)
+    if apply:
+        db.commit()
+    return {"articles_deactivated": deact, "articles_reactivated": react,
+            "settings_removed": removed, "applied": apply}
+
+
+@router.post("/planogram/only")
+def planogram_only_endpoint(apply: bool = False, db: Session = Depends(get_db)):
+    """Само артикулите от планограмата. apply=false - само преглед."""
+    return planogram_only(db, apply)

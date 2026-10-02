@@ -375,7 +375,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <input type="search" id="aSearch" placeholder="Търси по код или име…" style="min-width:240px">
     <select id="aCat"><option value="">Всички категории</option></select>
     <select id="aFilter">
-      <option value="">Всички</option>
+      <option value="">От планограмата</option>
       <option value="promo">С активно промо</option>
       <option value="noprice">Без цена</option>
       <option value="noplano">Извън планограма</option>
@@ -425,7 +425,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <div id="nDetail"></div>
   <div class="head"><h2>По магазини</h2><span class="note">цъкни на магазин</span></div>
   <div class="scroll"><table>
-    <thead><tr><th>Магазин</th><th class="num">Продават се, а не се поръчват</th><th class="num">🚫 Не се поръчва</th><th class="num">⛔ Спрян 0-0</th><th class="num">❔ Без мин/макс</th><th class="num">📋 Извън планограма</th><th class="num">💤 Изваден</th><th class="num">Общо</th></tr></thead>
+    <thead><tr><th>Магазин</th><th class="num">Продават се, а не се поръчват</th><th class="num">🚫 Не се поръчва</th><th class="num">⛔ Спрян 0-0</th><th class="num">❔ Без мин/макс</th><th class="num">Общо</th></tr></thead>
     <tbody id="nBody"></tbody>
   </table></div>
 </section>
@@ -582,7 +582,7 @@ async function loadNordCard() {
     el.innerHTML = `<div class="imp" style="margin:18px 0 6px;border-left:6px solid #B8451A;display:flex;gap:18px;align-items:center;flex-wrap:wrap">
       <div style="flex:1 1 320px"><h3 style="margin:0 0 6px">⛔ Не се поръчват</h3>
         <p style="margin:0;line-height:1.6"><b style="font-size:20px;color:#B8451A">${fmtN(t.selling || 0)}</b> позиции магазин × артикул <b>се продават, а не се поръчват</b>
-        (спрени 0-0 ${fmtN(t.stopped || 0)} · извън планограмата ${fmtN(t.not_in_plano || 0)} · отбелязани ${fmtN(t.no_order || 0)}).<br>
+        (спрени 0-0 ${fmtN(t.stopped || 0)} · без мин/макс ${fmtN(t.no_minmax || 0)} · отбелязани ${fmtN(t.no_order || 0)}).<br>
         <span class="note">Най-много: ${top || "—"}</span></p></div>
       <button class="go" onclick="location.hash='#nord';setTimeout(()=>showNordList('selling'),600)">Виж ${fmtN(t.selling || 0)}-те →</button></div>`;
   } catch (e) { el.innerHTML = ""; }
@@ -743,8 +743,8 @@ function renderAssort() {
   const rows = ALIST.filter(a =>
     (!q || a.sku.includes(q) || (a.name || "").toUpperCase().includes(q)) &&
     (!cat || a.category === cat) &&
-    (!f || (f === "promo" && a.promo_price != null) || (f === "noprice" && a.delivery_price == null) ||
-      (f === "noplano" && !a.planogram_stores && a.is_active) || (f === "inactive" && !a.is_active) ||
+    ((!f && a.planogram_stores > 0) || (f === "promo" && a.promo_price != null) || (f === "noprice" && a.delivery_price == null) ||
+      (f === "noplano" && !a.planogram_stores) || (f === "inactive" && !a.is_active) ||
       (f === "noorder" && a.no_order) || (f === "noorderplano" && a.no_order && a.planogram_stores > 0)));
   $("aCount").textContent = `${rows.length} от ${ALIST.length}`;
   const lim = window._aLim || 150;
@@ -842,13 +842,12 @@ async function loadNord() {
   const d = await api("/ui/not-ordered"), t = d.totals || {};
   const tiles = [["ПРОДАВАТ СЕ, А НЕ СЕ ПОРЪЧВАТ", fmtN(t.selling || 0), "a", "позиции магазин × артикул", "selling"],
     ["🚫 НЕ СЕ ПОРЪЧВА", fmtN(t.no_order || 0), "", "отбелязани в асортимента", "no_order"], ["⛔ СПРЕНИ 0-0", fmtN(t.stopped || 0), "", "Viber правила / ръчно", "stopped"],
-    ["❔ БЕЗ МИН/МАКС", fmtN(t.no_minmax || 0), "", "по планограма", "no_minmax"], ["📋 ИЗВЪН ПЛАНОГРАМАТА", fmtN(t.not_in_plano || 0), "", "но се продават", "not_in_plano"],
-    ["💤 ИЗВАДЕНИ ОТ НДК", fmtN(t.inactive || 0), "", "друг доставчик / спрени", "inactive"]];
+    ["❔ БЕЗ МИН/МАКС", fmtN(t.no_minmax || 0), "", "по планограма", "no_minmax"]];
   $("nKpis").innerHTML = tiles.map(([l, v, c, s, k]) => `<div class="tile" data-k="${k}" style="cursor:pointer" title="Покажи списъка"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s} · <u>виж →</u></div></div>`).join("");
   document.querySelectorAll("#nKpis .tile[data-k]").forEach(el => el.onclick = () => showNordList(el.dataset.k));
   $("nBody").innerHTML = d.stores.map(r => `<tr data-s="${r.store_id}" style="cursor:pointer"><td class="name">${esc(r.store)}</td>
     <td class="num ${r.selling ? "low" : ""}"><b>${r.selling}</b></td><td class="num">${r.no_order}</td><td class="num">${r.stopped}</td>
-    <td class="num">${r.no_minmax}</td><td class="num">${r.not_in_plano}</td><td class="num">${r.inactive}</td><td class="num">${r.total}</td></tr>`).join("");
+    <td class="num">${r.no_minmax}</td><td class="num">${r.total}</td></tr>`).join("");
   document.querySelectorAll("#nBody tr[data-s]").forEach(tr => tr.onclick = () => showNord(+tr.dataset.s));
 }
 let NSTORE = null;

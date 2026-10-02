@@ -27,8 +27,6 @@ REASONS = {
     "no_order": "🚫 Отбелязан „Не се поръчва“",
     "stopped": "⛔ Спрян 0-0",
     "no_minmax": "❔ Без мин/макс",
-    "inactive": "💤 Изваден от НДК",
-    "not_in_plano": "📋 Продава се, но не е в планограмата",
 }
 
 
@@ -53,9 +51,8 @@ def store_rows(db: Session, store_id: int, arts=None, sales=None, plano_all=None
         s.article_id: s for s in db.execute(select(m.StoreArticleSetting)
                                             .where(m.StoreArticleSetting.store_id == store_id)).scalars().all()})
     stock = service.latest_stock_map(db, store_id)
-    sold_ids = {a for (s, a), v in sales.items() if s == store_id and v > 0}
     rows = []
-    for aid in plano | sold_ids:
+    for aid in plano:  # само артикулите от планограмата
         a = arts.get(aid)
         if a is None or "АМБАЛАЖ" in (a.name or "").upper():
             continue
@@ -64,16 +61,10 @@ def store_rows(db: Session, store_id: int, arts=None, sales=None, plano_all=None
         sold = sales.get((store_id, aid), 0.0)
         if a.no_order:
             reason = "no_order"
-        elif not a.is_active:
-            if not in_plano and sold <= 0:
-                continue
-            reason = "inactive"
-        elif in_plano and s is None:
+        elif s is None:
             reason = "no_minmax"
-        elif in_plano and float(s.max_stock) == 0:
+        elif float(s.max_stock) == 0:
             reason = "stopped"
-        elif not in_plano and sold > 0:
-            reason = "not_in_plano"
         else:
             continue
         cls, mn, mx = formula(sold)
