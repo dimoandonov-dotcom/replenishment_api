@@ -236,7 +236,7 @@ nav a:hover { transform:translateY(-2px); }
 nav a.on { background:var(--c,var(--amber)); color:#fff; box-shadow:0 8px 20px color-mix(in srgb,var(--c,var(--amber)) 40%,transparent); }
 nav a.on::before { background:#fff; box-shadow:0 0 0 3px rgba(255,255,255,.35); }
 nav a[data-tab="board"]{--c:#D9621C} nav a[data-tab="orders"]{--c:#2F7DD1} nav a[data-tab="assort"]{--c:#E9A23B}
-nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A} nav a[data-tab="qual"]{--c:#0EA5A4}
+nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A} nav a[data-tab="qual"]{--c:#0EA5A4} nav a[data-tab="anom"]{--c:#9F1239}
 
 /* ---------- бутони ---------- */
 button { border-radius:10px; border:1px solid var(--line-strong); background:var(--raised); font-family:var(--head); font-weight:700;
@@ -323,6 +323,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <a href="#assort" data-tab="assort">Асортимент и цени</a>
   <a href="#plano" data-tab="plano">Планограма</a>
   <a href="#qual" data-tab="qual">Качество</a>
+  <a href="#anom" data-tab="anom">Аномалии</a>
   <a href="#nord" data-tab="nord">Не се поръчват</a>
   <a href="#cmp" data-tab="cmp">Сравнение</a>
   <a href="#learn" data-tab="learn">Обучение</a>
@@ -431,6 +432,20 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <div class="scroll"><table>
     <thead><tr><th>Магазин</th><th class="num">Оценка</th><th class="num">Свършили</th><th class="num">Свръхзапас</th><th class="num">Под минимума</th><th class="num">Позиции</th></tr></thead>
     <tbody id="qBody"></tbody>
+  </table></div>
+</section>
+
+<!-- ============ АНОМАЛИИ ============ -->
+<section class="tab" id="tab-anom">
+  <p class="note" style="margin:0 0 14px;line-height:1.6">Всяка нощ се дърпат от Мистрал <b>всички движения</b> на НДК стоката (продажби, доставки, брак, корекции) и <b>резултатите от ревизиите</b>.
+  Тук са липсите и излишъците от ревизии, отрицателните наличности (продадено без заведена доставка) и „фантомната“ наличност (по Мистрал има, но не се продава от 4+ дни — вероятно я няма на рафта).</p>
+  <div class="bar"><select id="anDays"><option value="7">7 дни</option><option value="14" selected>14 дни</option><option value="30">30 дни</option></select><span class="note" id="anUntil"></span></div>
+  <div class="board" id="anKpis"></div>
+  <div id="anDetail"></div>
+  <div class="head"><h2>По магазини</h2><span class="note">най-голяма загуба отгоре · цъкни на магазин</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Магазин</th><th class="num">Липси €</th><th class="num">Излишъци €</th><th class="num">Нето €</th><th class="num">Липси бр. редове</th><th class="num">На минус</th><th class="num">Фантомни</th><th class="num">Брак</th></tr></thead>
+    <tbody id="anBody"></tbody>
   </table></div>
 </section>
 
@@ -571,7 +586,7 @@ const loaded = {};
 function show(tab) {
   document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + tab));
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, qual: loadQual, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, qual: loadQual, anom: loadAnom, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -904,6 +919,52 @@ function renderQual() {
   if (had) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
   $("qlClose").onclick = () => { $("qDetail").innerHTML = ""; };
   if ($("qlMore")) $("qlMore").onclick = () => { QL.lim += 200; renderQual(); };
+}
+
+
+/* ---------- аномалии ---------- */
+const ANK = { shortage: "bad", surplus: "warn", negative: "bad", phantom: "warn", writeoff: "off", correction: "off" };
+async function loadAnom() {
+  $("anDays").onchange = loadAnom;
+  const d = await api(`/ui/anomalies?days=${$("anDays").value}`), t = d.totals || {};
+  $("anUntil").textContent = d.data_until ? `данни до ${d.data_until}` : "";
+  const net = (t.shortage?.eur || 0) + (t.surplus?.eur || 0);
+  const tiles = [["НЕТО ОТ РЕВИЗИИ", fmtE(net) + " €", net < 0 ? "a" : "t", "липси + излишъци", ""],
+    ...Object.entries(d.kinds).filter(([k]) => (t[k]?.n || 0) > 0 || ["shortage", "surplus", "negative", "phantom"].includes(k))
+      .map(([k, l]) => [l.toUpperCase(), fmtN(t[k]?.n || 0), k === "shortage" || k === "negative" ? "a" : "", `${fmtN(t[k]?.qty || 0)} бр. · ${fmtE(t[k]?.eur || 0)} €`, k])];
+  $("anKpis").innerHTML = tiles.map(([l, v, c, sub, k]) => `<div class="tile" ${k ? `data-k="${k}" style="cursor:pointer"` : ""}><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${sub}${k ? " · <u>виж →</u>" : ""}</div></div>`).join("");
+  document.querySelectorAll("#anKpis .tile[data-k]").forEach(el => el.onclick = () => showAnom({ kind: el.dataset.k, title: d.kinds[el.dataset.k] }));
+  $("anBody").innerHTML = (d.stores || []).map(r => { const n = (r.shortage_eur || 0) + (r.surplus_eur || 0);
+    return `<tr data-s="${r.store_id}" style="cursor:pointer"><td class="name">${esc(r.store)}</td>
+    <td class="num low">${fmtE(r.shortage_eur)}</td><td class="num">${fmtE(r.surplus_eur)}</td><td class="num ${n < 0 ? "low" : ""}"><b>${fmtE(n)}</b></td>
+    <td class="num">${r.shortage_n}</td><td class="num">${r.negative_n}</td><td class="num">${r.phantom_n}</td><td class="num">${r.writeoff_n}</td></tr>`; }).join("")
+    || `<tr><td colspan="8" class="empty">Няма данни — първото дърпане е тази нощ в 02:30.</td></tr>`;
+  document.querySelectorAll("#anBody tr[data-s]").forEach(tr => tr.onclick = () => showAnom({ store_id: +tr.dataset.s, title: tr.firstElementChild.textContent }));
+}
+let AL = { rows: [], lim: 200 };
+async function showAnom({ kind, store_id, title }) {
+  $("anDetail").innerHTML = `<div class="empty loading">Зареждам…</div>`; $("anDetail").scrollIntoView({ behavior: "smooth" });
+  const q = new URLSearchParams({ days: $("anDays").value }); if (kind) q.set("kind", kind); if (store_id) q.set("store_id", store_id);
+  const d = await api(`/ui/anomalies/list?${q}`);
+  AL = { rows: d.rows.sort((a, b) => (a.eur || 0) - (b.eur || 0)), lim: 200, title, kinds: d.kinds };
+  renderAnom();
+}
+function renderAnom() {
+  const f = (($("alSearch") || {}).value || "").trim().toLowerCase(), had = document.activeElement && document.activeElement.id === "alSearch";
+  const rows = AL.rows.filter(r => !f || (r.store + " " + r.sku + " " + r.name).toLowerCase().includes(f)), shown = rows.slice(0, AL.lim);
+  $("anDetail").innerHTML = `<div class="head"><h2>${esc(AL.title)}</h2><span class="note">${fmtN(rows.length)} реда</span></div>
+  <div class="bar"><input type="search" id="alSearch" placeholder="Търси магазин, код или артикул" value="${esc(f)}" style="flex:1;min-width:200px"><button id="alClose">Затвори</button></div>
+  <div class="scroll"><table><thead><tr><th>Дата</th><th>Магазин</th><th>Код</th><th>Артикул</th><th>Вид</th><th class="num">Бройки</th><th class="num">€</th><th>Подробности</th></tr></thead><tbody>
+  ${shown.map(r => `<tr><td>${esc(r.day || "")}</td><td>${esc(r.store)}</td><td>${esc(r.sku)}</td><td class="name">${esc(r.name)}</td>
+    <td><span class="tag ${ANK[r.kind] || "off"}">${esc(AL.kinds[r.kind] || r.kind)}</span></td>
+    <td class="num ${r.qty < 0 ? "low" : ""}">${fmtN(r.qty)}</td><td class="num ${r.eur < 0 ? "low" : ""}">${fmtE(r.eur)}</td><td class="muted" style="font-size:12px">${esc(r.info || "")}</td></tr>`).join("")
+    || `<tr><td colspan="8" class="empty">Няма редове.</td></tr>`}
+  ${rows.length > AL.lim ? `<tr><td colspan="8" style="text-align:center;padding:14px"><button id="alMore">Покажи още (${fmtN(rows.length - AL.lim)})</button></td></tr>` : ""}
+  </tbody></table></div>`;
+  const inp = $("alSearch"); inp.oninput = () => { AL.lim = 200; renderAnom(); };
+  if (had) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+  $("alClose").onclick = () => { $("anDetail").innerHTML = ""; };
+  if ($("alMore")) $("alMore").onclick = () => { AL.lim += 200; renderAnom(); };
 }
 
 /* ---------- не се поръчват ---------- */
@@ -1259,6 +1320,7 @@ async function autoRefresh(force = false) {
     else if (tab === "orders" && !Object.keys(edits).length) await loadOrder();   // не губим незаписани корекции
     else if (tab === "cmp") await loadCmp();
     else if (tab === "qual") await loadQual();
+    else if (tab === "anom") await loadAnom();
     else if (tab === "nord") { await loadNord(); if (NSTORE) await showNord(NSTORE, true); }
     else if (tab === "learn") await loadLearn();
     else if (tab === "plano" && PDATA) await loadPlano();
