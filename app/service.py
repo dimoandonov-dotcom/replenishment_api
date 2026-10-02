@@ -92,8 +92,8 @@ def load_settings(
             continue
         if supplier_id is not None and sup_id != supplier_id:
             continue
-        if sup_id in plano_suppliers and article.id not in store_plano:
-            continue
+        if article.id not in store_plano:
+            continue  # само с „да" в планограмата на ТОЗИ магазин - без изключения
         if getattr(article, "no_order", False):
             continue  # отбелязан "Не се поръчва" - важи винаги
         out.append(
