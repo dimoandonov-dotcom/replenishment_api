@@ -317,3 +317,27 @@ def supplier_info(codes: list[int]) -> list[dict]:
             "ndk_last_delivery": str(ndk.get((r["loc"], r["code"]))) if ndk.get((r["loc"], r["code"])) else None,
         })
     return out
+
+
+def movement_types(days: int = 7, codes: list[int] | None = None) -> list[dict]:
+    """Какви видове движения има в MATERIALQTYLOG (за НДК артикулите) - за проучване."""
+    where_codes = f"AND l.MATERIALCODE IN ({','.join(str(int(c)) for c in codes)})" if codes else ""
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute(f"""
+            SELECT l.OPERATIONTYPE AS optype, COUNT(*) AS n,
+                   SUM(CASE WHEN l.QTY > 0 THEN l.QTY ELSE 0 END) AS qty_in,
+                   SUM(CASE WHEN l.QTY < 0 THEN -l.QTY ELSE 0 END) AS qty_out,
+                   COUNT(DISTINCT l.LOCATIONID) AS stores, MIN(l.OPERAIONNUM) AS ex_num,
+                   MIN(l.OPERATIONDATE) AS first_dt, MAX(l.OPERATIONDATE) AS last_dt
+            FROM MATERIALQTYLOG l
+            WHERE l.OPERATIONDATE >= DATEADD(day, -%s, GETDATE()) {where_codes}
+            GROUP BY l.OPERATIONTYPE ORDER BY n DESC""", (int(days),))
+        rows = [{k: (str(v) if v is not None else None) for k, v in r.items()} for r in cur.fetchall()]
+        # какъв документ стои зад всеки вид (ако има такъв в OPERATIONS)
+        for r in rows:
+            cur.execute("SELECT TOP 1 OPERATIONDOCTYPE, DOCUMENTTYPEID, PARTNERNAMEID, NOTE FROM OPERATIONS "
+                        "WHERE NUM = %s OR ID = %s", (int(float(r["ex_num"] or 0)), int(float(r["ex_num"] or 0))))
+            d = cur.fetchone()
+            r["operations_doc"] = {k: (str(v) if v is not None else None) for k, v in d.items()} if d else None
+    return rows

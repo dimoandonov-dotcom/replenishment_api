@@ -832,3 +832,16 @@ def ui_stock_compare(store_id: int, t1: str, t2: str, db: Session = Depends(get_
                     "diff": None if q1 is None or q2 is None else round(q2 - q1, 2)})
     snap = lambda d: _fmt(max((c for _, c in d.values()), default=None))  # noqa: E731
     return {"store_id": store_id, "t1_snapshot": snap(a1), "t2_snapshot": snap(a2), "rows": out}
+
+
+@router.get("/ui/mistral/movement-types")
+def mistral_movement_types(days: int = Query(7, ge=1, le=60), ndk_only: bool = True, db: Session = Depends(get_db)):
+    from . import mistral
+    codes = None
+    if ndk_only:
+        codes = [int(a.sku) for a in db.execute(select(m.Article).where(m.Article.is_active.is_(True))).scalars().all()
+                 if a.sku.isdigit()]
+    try:
+        return mistral.movement_types(days, codes)
+    except Exception as e:
+        raise HTTPException(502, f"Мистрал: {type(e).__name__}: {e}")
