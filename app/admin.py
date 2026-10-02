@@ -927,7 +927,7 @@ def planogram_only(db: Session, apply: bool = True) -> dict:
     В системата остават само артикулите от планограмата:
       - артикул, който не е в планограмата на нито един магазин -> неактивен;
       - артикул от планограмата, който е неактивен -> активен;
-      - мин/макс за позиция извън планограмата на магазина -> изтрит (в дневника).
+      Мин/макс не се пипат - те са изчислени по продажбите.
     """
     plano = set(db.execute(select(m.Planogram.store_id, m.Planogram.article_id)).all())
     plano_arts = {a for _, a in plano}
@@ -941,16 +941,7 @@ def planogram_only(db: Session, apply: bool = True) -> dict:
             react.append(a.sku)
             if apply:
                 a.is_active = True
-    removed = 0
-    for st in db.execute(select(m.StoreArticleSetting)).scalars().all():
-        if (st.store_id, st.article_id) not in plano:
-            removed += 1
-            if apply:
-                db.add(m.SettingsLog(store_id=st.store_id, article_id=st.article_id,
-                                     old_min=st.min_stock, old_max=st.max_stock,
-                                     new_min=None, new_max=None, source="rules",
-                                     reason="извън планограмата — изтрит"))
-                db.delete(st)
+    removed = 0  # мин/макс НЕ се трият - те са по продажбите (решение на Димо, 01.10)
     if apply:
         db.commit()
     return {"articles_deactivated": deact, "articles_reactivated": react,
