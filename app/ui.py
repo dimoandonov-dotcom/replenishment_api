@@ -601,7 +601,7 @@ def learning_run(apply: bool = True, db: Session = Depends(get_db)):
 
 
 @router.get("/ui/learning")
-def ui_learning(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db)):
+def ui_learning(days: int = Query(14, ge=1, le=90), source: str | None = None, db: Session = Depends(get_db)):
     from . import learning
     stores = {x.id: x.name for x in db.execute(select(m.Store)).scalars().all()}
     arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
@@ -613,7 +613,7 @@ def ui_learning(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db
                             .where(m.StoreArticleSetting.auto_adjust.is_(False))).scalars().all()
         if x.article_id in arts
     ]
-    return {"log": learning.recent_log(db, days), "locked": locked}
+    return {"log": learning.recent_log(db, days, 500, source), "locked": locked}
 
 
 class UnlockIn(BaseModel):

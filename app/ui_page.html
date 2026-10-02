@@ -491,6 +491,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
 <section class="tab" id="tab-learn">
   <div class="bar">
     <select id="lDays"><option value="1">Днес</option><option value="7">7 дни</option><option value="14" selected>14 дни</option><option value="30">30 дни</option></select>
+    <select id="lSrc"><option value="">Всички промени</option><option value="learning" selected>Само ученето</option><option value="manual">Само ръчните</option><option value="rules">Правила / импорт</option></select>
     <button id="lPreview">Какво би научил сега</button>
     <span class="msg" id="lMsg"></span>
   </div>
@@ -1239,7 +1240,7 @@ async function showCmp(id) {
 /* ---------- обучение ---------- */
 const SRC = { manual: ["ти", "warn"], learning: ["учене", ""], rules: ["правила", "off"], import: ["импорт", "off"], api: ["система", "off"] };
 function initLearn() {
-  $("lDays").onchange = loadLearn;
+  $("lDays").onchange = loadLearn; $("lSrc").onchange = loadLearn;
   $("lPreview").onclick = async () => {
     msg("lMsg", "Смятам (без да записвам)…");
     try { const r = await api("/learning/run?apply=false", { method: "POST" });
@@ -1250,7 +1251,7 @@ function initLearn() {
   loadLearn();
 }
 async function loadLearn() {
-  const d = await api(`/ui/learning?days=${$("lDays").value}`);
+  const d = await api(`/ui/learning?days=${$("lDays").value}&source=${$("lSrc").value}`);
   const by = s => d.log.filter(x => x.source === s).length;
   const up = d.log.filter(x => x.source === "learning" && (x.new_max ?? 0) > (x.old_max ?? 0)).length;
   const dn = d.log.filter(x => x.source === "learning" && (x.new_max ?? 0) < (x.old_max ?? 0)).length;

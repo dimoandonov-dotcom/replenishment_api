@@ -72,25 +72,31 @@ def _step(old: float, target: float) -> float:
 def run(db: Session, apply: bool = True) -> dict:
     started = datetime.now(timezone.utc)
     notes = []
-    # 1) свежи данни
-    try:
-        from . import mistral
-        if mistral.configured():
-            mistral.sync_sales(db, DAYS)
-            mistral.sync_stock(db)
-    except Exception as e:  # учим по наличните данни
-        notes.append(f"Мистрал: {type(e).__name__}")
-
-    # снимка на качеството за вчера (наличностите в 02:30 = края на деня) + почистване
-    try:
-        from . import quality
-        notes.append(f"качество: {quality.record(db, datetime.now(SOFIA).date() - timedelta(days=1))['pct_ok']}%")
-        notes.append(f"изчистени стари наличности: {quality.prune_snapshots(db)}")
-        from . import anomalies
-        notes.append(f"движения/ревизии: {anomalies.sync(db, 14)}")
-    except Exception as e:
-        db.rollback()
-        notes.append(f"качество: {type(e).__name__}")
+    # 1) свежи данни + нощни задачи - само при истинското учене (apply=True);
+    #    пробата („Какво би научил сега") не дърпа и не записва нищо
+    if apply:
+        try:
+            from . import mistral
+            if mistral.configured():
+                mistral.sync_sales(db, DAYS)
+                mistral.sync_stock(db)
+        except Exception as e:  # учим по наличните данни
+            notes.append(f"Мистрал: {type(e).__name__}")
+        # снимка на качеството за вчера (наличностите в 02:30 = края на деня) + почистване
+        try:
+            from . import quality
+            notes.append(f"качество: {quality.record(db, datetime.now(SOFIA).date() - timedelta(days=1))['pct_ok']}%")
+            notes.append(f"изчистени стари наличности: {quality.prune_snapshots(db)}")
+        except Exception as e:
+            db.rollback()
+            notes.append(f"качество: {type(e).__name__}")
+        # движения и ревизии: последните 3 дни (по-старите вече са в базата)
+        try:
+            from . import anomalies
+            notes.append(f"движения/ревизии: {anomalies.sync(db, 3)}")
+        except Exception as e:
+            db.rollback()
+            notes.append(f"аномалии: {type(e).__name__}")
 
     today = datetime.now(SOFIA).date()
     since = today - timedelta(days=DAYS)
@@ -245,12 +251,13 @@ def run(db: Session, apply: bool = True) -> dict:
     }
 
 
-def recent_log(db: Session, days: int = 14, limit: int = 500) -> list[dict]:
+def recent_log(db: Session, days: int = 14, limit: int = 500, source: str | None = None) -> list[dict]:
     since = datetime.now(timezone.utc) - timedelta(days=days)
     stores = {s.id: s.name for s in db.execute(select(m.Store)).scalars().all()}
     arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
     rows = db.execute(
-        select(m.SettingsLog).where(m.SettingsLog.created_at >= since)
+        select(m.SettingsLog).where(m.SettingsLog.created_at >= since,
+                                    *( [m.SettingsLog.source == source] if source else []))
         .order_by(m.SettingsLog.created_at.desc()).limit(limit)
     ).scalars().all()
     f = lambda v: float(v) if v is not None else None  # noqa: E731
