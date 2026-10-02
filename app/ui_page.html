@@ -471,7 +471,14 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <button id="cUp">Качи</button>
     <span class="msg" id="cMsg"></span>
   </div>
-  <div class="board" id="cKpis"></div>
+  <div class="head"><h2>📦 Доставки от НДК срещу MinMaxAI</h2><span class="note">реално доставеното (Мистрал) ↔ какво бихме поръчали предния ден в 15:00</span></div>
+  <div class="board" id="dKpis"></div>
+  <div id="dDetail"></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Доставка</th><th>Магазин</th><th class="num">Съвпадат</th><th class="num">Само доставено</th><th class="num">Само MinMaxAI</th><th class="num">Доставено бр.</th><th class="num">MinMaxAI бр.</th><th class="num">Доставено €</th><th class="num">MinMaxAI €</th></tr></thead>
+    <tbody id="dBody"></tbody>
+  </table></div>
+  <div class="board" id="cKpis" style="margin-top:28px"></div>
   <div class="head"><h2>Заявки на магазините</h2><span class="note">идват автоматично от anindk при „Свали Excel“</span></div>
   <div class="scroll"><table>
     <thead><tr><th>Магазин</th><th>Получена</th><th class="num">Съвпадат</th><th class="num">Само магазин</th><th class="num">Само MinMaxAI</th><th class="num">Без „да“</th><th class="num">Еднакво к-во</th><th class="num">Магазин €</th><th class="num">MinMaxAI €</th></tr></thead>
@@ -1085,8 +1092,53 @@ function renderNordList() {
 }
 
 /* ---------- сравнение ---------- */
+
+/* ---------- доставки от НДК срещу MinMaxAI ---------- */
+async function loadDeliv() {
+  const days = Math.max(7, +$("cDays").value);
+  const d = await api(`/ui/deliveries?days=${days}`), t = d.totals || {};
+  const tiles = [["СЪВПАДЕНИЕ", (t.match_pct || 0) + "%", "a", "от доставените редове ги има и при MinMaxAI"],
+    ["ДОСТАВКИ", fmtN(t.days || 0), "t", "магазин × ден с наша заявка"], ["САМО ДОСТАВЕНО", fmtN(t.only_delivered || 0), "", "доставено, а ние не бихме"],
+    ["САМО MinMaxAI", fmtN(t.only_ours || 0), "", "бихме поръчали, не е доставено"], ["ДОСТАВЕНО", `${fmtN(t.delivered_units || 0)} бр.`, "", fmtE(t.delivered_eur || 0) + " €"],
+    ["MinMaxAI", `${fmtN(t.our_units || 0)} бр.`, "", fmtE(t.our_eur || 0) + " €"],
+    ["ПОРЪЧАНО, НЕ ЗАВЕДЕНО", fmtN(t.ordered_not_delivered || 0), "", "наша заявка без доставка в Мистрал"]];
+  $("dKpis").innerHTML = tiles.map(([l, v, c, s]) => `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("");
+  $("dBody").innerHTML = d.rows.map(r => `<tr data-s="${r.store_id}" data-d="${r.iso}" style="cursor:pointer"><td>${r.day}</td><td class="name">${esc(r.store)}
+      ${r.has_ours ? "" : '<span class="tag off" title="Няма наша заявка от предния ден">без наша</span>'}${r.has_ani ? ' <span class="tag">Ани</span>' : ""}
+      ${r.has_ours && !r.delivered_lines ? ' <span class="tag bad" title="Наша заявка, но няма заведена доставка">няма доставка</span>' : ""}</td>
+    <td class="num">${r.both}</td><td class="num">${r.only_delivered}</td><td class="num">${r.only_ours}</td>
+    <td class="num">${fmtN(r.delivered_units)}</td><td class="num">${fmtN(r.our_units)}</td><td class="num">${fmtE(r.delivered_eur)}</td><td class="num">${fmtE(r.our_eur)}</td></tr>`).join("")
+    || `<tr><td colspan="9" class="empty">Още няма доставки за периода — данните се дърпат всяка нощ в 02:30.</td></tr>`;
+  document.querySelectorAll("#dBody tr[data-s]").forEach(tr => tr.onclick = () => showDeliv(+tr.dataset.s, tr.dataset.d));
+}
+async function showDeliv(storeId, day) {
+  $("dDetail").innerHTML = `<div class="empty loading">Зареждам…</div>`; $("dDetail").scrollIntoView({ behavior: "smooth" });
+  const d = await api(`/ui/deliveries/${storeId}/${day}`);
+  const tag = n => n === "и двамата" ? "" : n === "различно количество" ? "warn" : (n || "").startsWith("само MinMaxAI") ? "" : "bad";
+  const lbl = n => (n || "").replace("само магазин", "само доставено");
+  const v = {}; d.lines.forEach(l => { if (Math.abs(l.diff) >= 0.01) v[l.verdict] = (v[l.verdict] || 0) + 1; });
+  $("dDetail").innerHTML = `<div class="head"><h2>${esc(d.store)} · доставка ${d.day}</h2><span class="note">${d.has_ours ? "срещу заявката на MinMaxAI от предния ден" : "няма наша заявка от предния ден"}</span></div>
+  <div class="totals"><span>По продажбите по-близо: MinMaxAI <b>${v["MinMaxAI"] || 0}</b></span><span>доставката <b>${v["Ани"] || 0}</b></span><span>равни <b>${v["равни"] || 0}</b></span><span>без „да“ <b>${v["планограма"] || 0}</b></span>
+  <button id="dClose" style="margin-left:auto">Затвори</button></div>
+  <div class="scroll"><table><thead><tr><th>Код</th><th>Артикул</th><th class="num">Доставено</th><th class="num">MinMaxAI</th><th class="num">Ани</th><th class="num">Нал. в 15:00</th><th class="num">Мин</th><th class="num">Макс</th><th class="num">Прод./ден</th><th>Защо</th></tr></thead><tbody id="dRows">
+  ${d.lines.map((l, i) => { const has = Math.abs(l.diff) >= 0.01;
+    return `<tr data-i="${i}" style="${has ? "cursor:pointer" : ""}"><td>${esc(l.sku)}</td><td class="name">${has ? "▸ " : ""}${esc(l.name)}</td>
+    <td class="num"><b>${fmtN(l.delivered)}</b></td><td class="num">${fmtN(l.ours)}</td><td class="num">${l.ani == null ? "—" : fmtN(l.ani)}</td>
+    <td class="num">${fmtN(l.stock)}</td><td class="num">${fmtN(l.min)}</td><td class="num">${fmtN(l.max)}</td><td class="num">${fmtN(l.sales_per_day)}</td>
+    <td><span class="tag ${tag(l.note)}">${esc(lbl(l.note))}</span></td></tr>
+    <tr id="dx${i}" style="display:none"><td colspan="10" style="background:var(--paper)">
+      <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;padding:10px 4px;position:sticky;left:0;max-width:min(1100px, calc(100vw - 48px))">
+      <div style="flex:1 1 420px;min-width:0">${salesChart(l.series, d.days, l.stock, l.min, l.max)}</div>
+      <div style="flex:1 1 280px;font-family:var(--head);font-size:14px;line-height:1.6"><b>Защо има разлика</b><br>${esc(l.explain)}</div></div></td></tr>`; }).join("")
+    || `<tr><td colspan="10" class="empty">Няма редове.</td></tr>`}</tbody></table></div>`;
+  document.querySelectorAll("#dRows tr[data-i]").forEach(tr => { const i = +tr.dataset.i; if (Math.abs(d.lines[i].diff) >= 0.01)
+    tr.onclick = () => { const r = $("dx" + i); r.style.display = r.style.display === "none" ? "" : "none"; }; });
+  $("dClose").onclick = () => { $("dDetail").innerHTML = ""; };
+}
+
 function initCmp() {
-  $("cDays").onchange = loadCmp;
+  $("cDays").onchange = () => { loadCmp(); loadDeliv(); };
+  loadDeliv();
   $("cXls").onclick = () => download(`/ui/compare/export?days=${$("cDays").value}`).catch(e => msg("cMsg", e.message, false));
   $("cUp").onclick = async () => {
     const fs = $("cFiles").files; if (!fs.length) { msg("cMsg", "Избери файлове.", false); return; }
@@ -1318,7 +1370,7 @@ async function autoRefresh(force = false) {
   try {
     if (tab === "board") await loadBoard();
     else if (tab === "orders" && !Object.keys(edits).length) await loadOrder();   // не губим незаписани корекции
-    else if (tab === "cmp") await loadCmp();
+    else if (tab === "cmp") { await loadCmp(); await loadDeliv(); }
     else if (tab === "qual") await loadQual();
     else if (tab === "anom") await loadAnom();
     else if (tab === "nord") { await loadNord(); if (NSTORE) await showNord(NSTORE, true); }

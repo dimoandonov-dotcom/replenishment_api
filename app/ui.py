@@ -874,3 +874,19 @@ def ui_anomalies_list(kind: str | None = None, store_id: int | None = None,
     rows = [r for r in anomalies.items(db, days, store_id) if not kind or r["kind"] == kind]
     rows.sort(key=lambda r: (r["eur"], r["qty"]))
     return {"count": len(rows), "rows": rows, "kinds": anomalies.KIND}
+
+
+# ---------------------------------------------------------------------------
+# Доставки от НДК (Мистрал) срещу заявките на MinMaxAI
+# ---------------------------------------------------------------------------
+
+@router.get("/ui/deliveries")
+def ui_deliveries(days: int = Query(14, ge=1, le=60), db: Session = Depends(get_db)):
+    from . import deliveries
+    return deliveries.summary(db, days)
+
+
+@router.get("/ui/deliveries/{store_id}/{day}")
+def ui_delivery_detail(store_id: int, day: str, db: Session = Depends(get_db)):
+    from . import deliveries
+    return deliveries.detail(db, store_id, day)
