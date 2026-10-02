@@ -137,11 +137,23 @@ def detail(db: Session, store_id: int, day: str) -> dict:
         fake = SimpleNamespace(store_qty=dq, api_qty=oq, stock=st, min_stock=mn, max_stock=mx, note=note)
         ex = compare.explain(fake, series.get(a.sku))
         txt = ex["text"].replace("Ани поръчва", "Доставено е").replace("по Ани", "по доставката")
+        verdict = ex["verdict"]
+        aq = A.get(aid)
+        if dq == 0 and oq > 0:
+            if aq:  # Ани го е поръчала - просто още не е заведено като доставка
+                note = "поръчано от Ани — още не е заведено"
+                verdict = "чака"
+                txt = txt.replace("; Ани не го е поръчала.", f"; Ани също го е поръчала ({compare._fmt(aq)} бр.).")
+                txt = txt.split(" След доставка:")[0] + (
+                    f" Доставката още не е заведена в Мистрал — ако не се появи до края на деня, "
+                    f"значи не е доставено или не е заведено.")
+            else:
+                txt = txt.replace("; Ани не го е поръчала.", "; Ани не го е поръчала и не е доставено.")
         out.append({"sku": a.sku, "name": a.supplier_name or a.name, "delivered": dq, "ours": oq,
                     "ani": A.get(aid), "stock": st, "min": mn, "max": mx, "note": note,
-                    "series": series.get(a.sku, [0.0] * 14), "explain": txt, "verdict": ex["verdict"],
+                    "series": series.get(a.sku, [0.0] * 14), "explain": txt, "verdict": verdict,
                     "sales_per_day": ex["sdp"], "diff": oq - dq})
     out.sort(key=lambda r: (abs(r["diff"]) < 0.01, -abs(r["diff"]), r["name"] or ""))
     days14 = [(d - timedelta(days=15 - i)).strftime("%d.%m") for i in range(14)]
     return {"store": db.get(m.Store, store_id).name, "day": d.strftime("%d.%m.%Y"), "days": days14,
-            "has_ours": bool(O), "lines": out}
+            "has_ours": bool(O), "is_today": d >= datetime.now(SOFIA).date(), "lines": out}
