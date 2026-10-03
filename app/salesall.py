@@ -395,7 +395,8 @@ def top_by_group(db: Session, days: int = 14, store_id: int | None = None, n: in
     for g in sorted(groups, key=lambda g: -tot[g]):
         rows = groups[g][:n]
         for x in rows:
-            x["alert"] = ("свършил" if x["stock"] <= 0 else
+            deep = x["stock"] < -3 * (x["per_day"] or 0) * max(x["stores"], 1) / max(x["stores"], 1)
+            x["alert"] = (None if deep else "свършил" if x["stock"] <= 0 else
                           "ниска" if x["cover_days"] is not None and x["cover_days"] < LOW_COVER_DAYS else None)
         out.append({"group": g, "rev": round(tot[g], 2), "articles": len(groups[g]), "top": rows})
     return {"ready": True, "from": a["from"], "to": a["to"], "store": a["store"], "groups": out}
@@ -415,6 +416,16 @@ def low_stock_alerts(db: Session, days: int = 14, n: int = TOP_N, cover: float =
             continue
         g = meta.get(c, (None, "Без група"))[1]
         per[(st, g)].append((v[1], c, v))
+    # артикули, при които наличността реално не се води (доставките не се завеждат):
+    # на минус в поне половината магазини, където се продават -> не са сигнал за свършване
+    neg, sold_in = defaultdict(int), defaultdict(int)
+    for (st, c), v in psa.items():
+        if v[0] > 0:
+            sold_in[c] += 1
+            if stock.get((st, c), 0.0) < 0:
+                neg[c] += 1
+    untracked = {c for c in sold_in if sold_in[c] >= 3 and neg[c] >= 0.5 * sold_in[c]}
+    skipped = 0
     alerts = []
     for (st, g), items in per.items():
         items.sort(key=lambda x: -x[0])
@@ -424,6 +435,11 @@ def low_stock_alerts(db: Session, days: int = 14, n: int = TOP_N, cover: float =
                 continue
             q = stock.get((st, c), 0.0)
             cd = q / pdy if pdy else None
+            # дълбок минус (над 3 дни продажби) или артикул без водена наличност -> не е свършване
+            if c in untracked or q < -3 * pdy:
+                if q <= 0:
+                    skipped += 1
+                continue
             if q <= 0 or (cd is not None and cd < cover):
                 nm, _, sub, sup = meta.get(c, (str(c), g, "", ""))
                 rev_day = v[1] / days
@@ -436,4 +452,5 @@ def low_stock_alerts(db: Session, days: int = 14, n: int = TOP_N, cover: float =
     return {"ready": True, "from": since.strftime("%d.%m"), "to": last.strftime("%d.%m"), "cover_threshold": cover,
             "total": len(alerts), "out": out_n, "low": len(alerts) - out_n,
             "lost_rev_per_day": round(sum(a["rev_per_day"] for a in alerts if a["status"] == "свършил"), 2),
-            "stores": len({a["store_id"] for a in alerts}), "rows": alerts[:1500]}
+            "stores": len({a["store_id"] for a in alerts}), "untracked_articles": len(untracked),
+            "untracked_positions": skipped, "rows": alerts[:1500]}

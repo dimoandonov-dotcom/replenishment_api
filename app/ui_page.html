@@ -933,7 +933,8 @@ async function loadAlerts() {
   const d = await api("/ui/analytics/all/alerts?days=14");
   if (!d.ready) { $("alBody").innerHTML = `<tr><td colspan="9" class="empty">Данните още се дърпат…</td></tr>`; return; }
   $("alKpis").innerHTML = [["СВЪРШИЛИ ТОП АРТИКУЛИ", fmtN(d.out), "a", "наличност 0 или минус"], ["НИСКА НАЛИЧНОСТ", fmtN(d.low), "", `стига за под ${fmtN(d.cover_threshold)} дни`],
-    ["ИЗГУБЕН ОБОРОТ НА ДЕН", fmtE(d.lost_rev_per_day) + " €", "a", "от свършилите"], ["МАГАЗИНИ", fmtN(d.stores), "", "със сигнали"]]
+    ["ИЗГУБЕН ОБОРОТ НА ДЕН", fmtE(d.lost_rev_per_day) + " €", "a", "от свършилите"], ["МАГАЗИНИ", fmtN(d.stores), "", "със сигнали"],
+    ["НАЛИЧНОСТТА НЕ СЕ ВОДИ", fmtN(d.untracked_articles || 0) + " арт.", "", `дълбок минус — незаведени доставки (${fmtN(d.untracked_positions || 0)} позиции, не се броят)`]]
     .map(([l, v, c, s]) => `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("");
   AL_ROWS = d.rows; fillStores($("alStore"));
   const gs = [...new Set(d.rows.map(r => r.group))].sort();
