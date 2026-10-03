@@ -434,12 +434,18 @@ def low_stock_alerts(db: Session, days: int = 14, n: int = TOP_N, cover: float =
     recent = {(st, c): float(q or 0) for st, c, q in db.execute(text(
         "SELECT store_id, code, SUM(qty) FROM sa_sales WHERE day > :d GROUP BY store_id, code"),
         {"d": last - timedelta(days=2)}).all()}
+    # последна продажба (за колко дни поред няма продажби до последния ден с данни)
+    last_sale = {(st, c): d for st, c, d in db.execute(text(
+        "SELECT store_id, code, MAX(day) FROM sa_sales WHERE qty > 0 AND day >= :f GROUP BY store_id, code"),
+        {"f": since}).all()}
+    import math
     skipped = 0
     alerts = []
     for (st, g), items in per.items():
         items.sort(key=lambda x: -x[0])
         for rank, (rev, c, v) in enumerate(items[:n], 1):
-            pdy = v[3] / rdays if rdays else 0          # продажби на ден (последната половина)
+            # обичайна скорост: по-голямото от средното за целия период и за втората половина
+            pdy = max(v[0] / days, (v[3] / rdays) if rdays else 0)
             if pdy <= 0:
                 continue
             q = stock.get((st, c), 0.0)
@@ -453,19 +459,32 @@ def low_stock_alerts(db: Session, days: int = 14, n: int = TOP_N, cover: float =
                 nm, _, sub, sup = meta.get(c, (str(c), g, "", ""))
                 rev_day = v[1] / days
                 sold2 = recent.get((st, c), 0.0)        # продадено последните 2 дни
+                ls = last_sale.get((st, c))
+                gap = (last - ls).days if ls else days   # дни поред без продажба до последния ден с данни
+                # шанс да няма нито една продажба за толкова дни, АКО стоката е на рафта (Поасон)
+                p0 = math.exp(-pdy * gap) if gap > 0 else 1.0
+                need = math.ceil(math.log(20) / pdy) if pdy > 0 else None   # дни без продажба за 95% сигурност
                 if q <= 0:
-                    check = ("продава се въпреки минуса — стоката е там, доставката не е заведена" if q < 0 and sold2 > 0
-                             else "свършил вчера — продаде последните бройки" if q == 0 and sold2 > 0
-                             else "наистина свършил — няма продажби 2 дни")
-                    verdict = "грешна наличност" if q < 0 and sold2 > 0 else "реално"
+                    if q < 0 and sold2 > 0:
+                        check, verdict = "продава се въпреки минуса — стоката е там, доставката не е заведена", "грешна наличност"
+                    elif q == 0 and sold2 > 0:
+                        check, verdict = "свършил вчера — продаде последните бройки", "реално"
+                    elif p0 < 0.05:
+                        check, verdict = (f"сигурно свършил — {gap} дни без продажба, а обикновено продава "
+                                          f"{pdy:.1f}/ден (шанс това да е случайно: {100 * p0:.0f}%)"), "реално"
+                    else:
+                        check, verdict = (f"не може да се каже — {gap} дни без продажба е нормално при "
+                                          f"{pdy:.1f}/ден; сигурно ще е след {need} дни без продажба"), "несигурно"
                 else:
                     check, verdict = "ще свърши скоро", "реално"
                 alerts.append({"store_id": st, "store": stores[st], "group": g, "rank": rank, "code": c,
                                "name": nm or str(c), "supplier": sup, "per_day": round(pdy, 1), "stock": round(q, 1),
                                "cover_days": round(cd, 1) if cd is not None and q > 0 else 0,
                                "status": "свършил" if q <= 0 else "ниска", "rev_per_day": round(rev_day, 2),
-                               "sold_2d": round(sold2, 1), "check": check, "verdict": verdict})
-    alerts.sort(key=lambda a: (a["status"] != "свършил", a["verdict"] != "реално", -a["rev_per_day"]))
+                               "sold_2d": round(sold2, 1), "days_no_sale": gap if q <= 0 else None,
+                               "check": check, "verdict": verdict})
+    order = {"реално": 0, "несигурно": 1, "грешна наличност": 2}
+    alerts.sort(key=lambda a: (a["status"] != "свършил", order.get(a["verdict"], 3), -a["rev_per_day"]))
     out_n = sum(1 for a in alerts if a["status"] == "свършил")
     wrong = [a for a in alerts if a["verdict"] == "грешна наличност"]
     real_out = [a for a in alerts if a["status"] == "свършил" and a["verdict"] == "реално"]
@@ -473,6 +492,7 @@ def low_stock_alerts(db: Session, days: int = 14, n: int = TOP_N, cover: float =
             "total": len(alerts), "out": out_n, "low": len(alerts) - out_n,
             "lost_rev_per_day": round(sum(a["rev_per_day"] for a in real_out), 2),
             "real_out": len(real_out), "wrong_stock": len(wrong),
+            "uncertain": sum(1 for a in alerts if a["verdict"] == "несигурно"),
             "real_out_none_2d": sum(1 for a in real_out if a["sold_2d"] == 0),
             "stores": len({a["store_id"] for a in alerts}), "untracked_articles": len(untracked),
             "untracked_positions": skipped, "rows": alerts[:1500],

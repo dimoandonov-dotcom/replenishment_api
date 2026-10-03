@@ -933,8 +933,9 @@ async function loadAlerts() {
   const d = await api("/ui/analytics/all/alerts?days=14");
   if (!d.ready) { $("alBody").innerHTML = `<tr><td colspan="9" class="empty">Данните още се дърпат…</td></tr>`; return; }
   AL_UNTR = d.untracked || [];
-  $("alKpis").innerHTML = [["РЕАЛНО СВЪРШИЛИ", fmtN(d.real_out), "a", `от ${fmtN(d.out)} на 0/минус · ${fmtN(d.real_out_none_2d)} без продажби 2 дни`, "out"],
-    ["ГРЕШНА НАЛИЧНОСТ", fmtN(d.wrong_stock), "", "на минус, а се продават — доставката не е заведена", "wrong"], ["НИСКА НАЛИЧНОСТ", fmtN(d.low), "", `стига за под ${fmtN(d.cover_threshold)} дни`, "low"],
+  $("alKpis").innerHTML = [["РЕАЛНО СВЪРШИЛИ", fmtN(d.real_out), "a", `сигурно или вчера свършили · от ${fmtN(d.out)} на 0/минус`, "out"],
+    ["ГРЕШНА НАЛИЧНОСТ", fmtN(d.wrong_stock), "", "на минус, а се продават — доставката не е заведена", "wrong"],
+    ["НЕ МОЖЕ ДА СЕ КАЖЕ", fmtN(d.uncertain || 0), "", "бавни артикули — още малко дни без продажба, за да е сигурно", "unsure"], ["НИСКА НАЛИЧНОСТ", fmtN(d.low), "", `стига за под ${fmtN(d.cover_threshold)} дни`, "low"],
     ["ИЗГУБЕН ОБОРОТ НА ДЕН", fmtE(d.lost_rev_per_day) + " €", "a", "само от реално свършилите", "lost"], ["МАГАЗИНИ", fmtN(d.stores), "", "със сигнали", "stores"],
     ["НАЛИЧНОСТТА НЕ СЕ ВОДИ", fmtN(d.untracked_articles || 0) + " арт.", "", `дълбок минус — незаведени доставки (${fmtN(d.untracked_positions || 0)} позиции, не се броят)`, "untracked"]]
     .map(([l, v, c, s, k]) => `<div class="tile" data-al="${k}" style="cursor:pointer"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s} · <u>виж →</u></div></div>`).join("");
@@ -947,9 +948,9 @@ async function loadAlerts() {
 }
 function alTile(k) {
   const tbl = $("alBody").closest("table");
-  if (k === "out" || k === "low" || k === "lost" || k === "wrong") {
+  if (k === "out" || k === "low" || k === "lost" || k === "wrong" || k === "unsure") {
     $("alStatus").value = k === "low" ? "ниска" : "свършил"; $("alStore").value = "";
-    AL_SORT = k === "lost" ? "lost" : ""; AL_VERD = k === "wrong" ? "грешна наличност" : (k === "out" || k === "lost") ? "реално" : "";
+    AL_SORT = k === "lost" ? "lost" : ""; AL_VERD = k === "wrong" ? "грешна наличност" : k === "unsure" ? "несигурно" : (k === "out" || k === "lost") ? "реално" : "";
     renderAlerts();
   } else if (k === "stores") {
     const by = {};
@@ -966,7 +967,7 @@ function alTile(k) {
   }
   tbl.scrollIntoView({ behavior: "smooth", block: "start" });
 }
-const AL_HEAD = `<tr><th>Магазин</th><th>Артикул</th><th>Група</th><th class="num">№ в групата</th><th class="num">Продава /ден</th><th class="num">Наличност</th><th class="num">Стига за (дни)</th><th>Състояние</th><th class="num">Продадени 2 дни</th><th>Проверка с продажбите</th><th class="num">Оборот /ден €</th></tr>`;
+const AL_HEAD = `<tr><th>Магазин</th><th>Артикул</th><th>Група</th><th class="num">№ в групата</th><th class="num">Продава /ден</th><th class="num">Наличност</th><th class="num">Стига за (дни)</th><th>Състояние</th><th class="num">Дни без продажба</th><th>Проверка с продажбите</th><th class="num">Оборот /ден €</th></tr>`;
 function renderAlerts() {
   $("alBody").closest("table").querySelector("thead").innerHTML = AL_HEAD;
   const st = $("alStore").value, g = $("alGroup").value, ss = $("alStatus").value;
@@ -974,8 +975,8 @@ function renderAlerts() {
   if (AL_SORT === "lost") rows = rows.slice().sort((a, b) => b.rev_per_day - a.rev_per_day);
   $("alBody").innerHTML = rows.slice(0, 400).map(r => `<tr><td>${esc(r.store)}</td><td class="name">${esc(r.name)}</td><td class="muted">${esc(r.group)}</td>
     <td class="num">${r.rank}</td><td class="num">${fmtN(r.per_day)}</td><td class="num ${r.stock <= 0 ? "low" : ""}">${fmtN(r.stock)}</td>
-    <td class="num">${r.status === "свършил" ? "—" : fmtN(r.cover_days)}</td><td>${statusTag(r.status)}</td><td class="num">${fmtN(r.sold_2d)}</td>
-    <td style="font-size:12.5px">${r.verdict === "грешна наличност" ? '<span class="tag warn">грешна наличност</span> ' : ""}${esc(r.check || "")}</td><td class="num">${fmtE(r.rev_per_day)}</td></tr>`).join("")
+    <td class="num">${r.status === "свършил" ? "—" : fmtN(r.cover_days)}</td><td>${statusTag(r.status)}</td><td class="num">${r.days_no_sale == null ? "—" : r.days_no_sale}</td>
+    <td style="font-size:12.5px">${r.verdict === "грешна наличност" ? '<span class="tag warn">грешна наличност</span> ' : r.verdict === "несигурно" ? '<span class="tag off">несигурно</span> ' : ""}${esc(r.check || "")}</td><td class="num">${fmtE(r.rev_per_day)}</td></tr>`).join("")
     + (rows.length > 400 ? `<tr><td colspan="11" class="note">… и още ${fmtN(rows.length - 400)} — филтрирай по магазин или група</td></tr>` : "")
     || `<tr><td colspan="9" class="empty">Няма сигнали 🎉</td></tr>`;
 }
