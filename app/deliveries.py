@@ -77,12 +77,12 @@ def summary(db: Session, days: int = 14) -> dict:
     stores = {s.id: s.name for s in db.execute(select(m.Store)).scalars().all()}
     price = lambda aid: float(getattr(arts.get(aid), "delivery_price", None) or 0)  # noqa: E731
     rows, tot = [], defaultdict(float)
-    for key in sorted(set(dl) | set(ours), key=lambda k: (k[1], stores.get(k[0], "")), reverse=True):
+    for key in sorted(set(dl) | set(ours) | set(ani), key=lambda k: (k[1], stores.get(k[0], "")), reverse=True):
         s, d = key
         if d < since:
             continue
         D, O = dl.get(key, {}), {a: float(l.ordered_quantity) for a, l in ours.get(key, {}).items() if l.ordered_quantity > 0}
-        if not D and not O:
+        if not D and not O and key not in ani:
             continue
         both = len(set(D) & set(O))
         r = {"store_id": s, "store": stores.get(s, s), "day": d.strftime("%d.%m.%Y"), "iso": d.isoformat(),
