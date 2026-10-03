@@ -127,8 +127,10 @@ def history(db: Session, days: int = 30) -> list[dict]:
     return [{"day": d.strftime("%d.%m"), **(j if isinstance(j, dict) else json.loads(j))["totals"]} for d, j in rows]
 
 
-def prune_snapshots(db: Session, keep_days: int = 2) -> int:
-    """Наличностите на 30 мин: за дните преди последните keep_days пазим само последната за деня."""
+def prune_snapshots(db: Session, keep_days: int = 0, max_days: int = 60) -> int:
+    """Пазим само последната наличност за всеки ден и не по-стари от max_days."""
+    old = db.execute(text("DELETE FROM stock_snapshots WHERE captured_at < now() - make_interval(days => :d)"),
+                     {"d": max_days}).rowcount or 0
     r = db.execute(text("""
         DELETE FROM stock_snapshots s USING (
           SELECT id FROM (
@@ -139,4 +141,4 @@ def prune_snapshots(db: Session, keep_days: int = 2) -> int:
           ) x WHERE rn > 1
         ) d WHERE s.id = d.id"""), {"k": keep_days})
     db.commit()
-    return r.rowcount or 0
+    return old + (r.rowcount or 0)

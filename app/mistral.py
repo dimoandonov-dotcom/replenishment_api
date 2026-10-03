@@ -140,6 +140,13 @@ def sync_stock(db, only_store_id: int | None = None) -> dict:
     ]
     if batch:
         db.execute(insert(m.StockSnapshot), batch)
+        # пазим само ПОСЛЕДНАТА наличност за деня (иначе базата расте с ~600 хил. реда/ден)
+        from sqlalchemy import text as _text
+        db.execute(_text("""
+            DELETE FROM stock_snapshots
+            WHERE store_id = ANY(:sids) AND captured_at < :now
+              AND (captured_at AT TIME ZONE 'Europe/Sofia')::date = (CAST(:now AS timestamptz) AT TIME ZONE 'Europe/Sofia')::date"""),
+            {"sids": list({b["store_id"] for b in batch}), "now": now})
         db.commit()
     return {
         "inserted": len(batch),
