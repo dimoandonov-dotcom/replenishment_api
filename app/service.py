@@ -205,6 +205,9 @@ def calculate_for_store(
     respect_schedule=True -> само доставчици, за които днес е ден за заявка.
     """
     settings = load_settings(db, store_id, supplier_id)
+    # промо режим: временно вдигане на мин/макс за артикулите в кампания
+    from . import promo as _promo
+    settings = _promo.apply(settings, _promo.active(db, order_date))
     schedules = load_schedules(db, store_id)
 
     if respect_schedule:

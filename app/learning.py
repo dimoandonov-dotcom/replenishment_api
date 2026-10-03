@@ -106,14 +106,31 @@ def run(db: Session, apply: bool = True) -> dict:
         return {"applied": False, "changes": 0, "counts": {}, "ani_unconfirmed": [],
                 "sample": [], "notes": notes + [f"няма свежи продажби (последна дата {last_sale})"],
                 "at": datetime.now(SOFIA).strftime("%d.%m.%Y %H:%M"), "seconds": 0}
+    # промо дните не се учат: за промо артикулите продажбите се смятат само от
+    # дните извън кампанията и се мащабират до 14 дни
+    from . import promo as _promo
+    pdays = _promo.promo_days(db)
     sales = defaultdict(float)
-    for sid, aid, q in db.execute(
-        select(m.SalesHistory.store_id, m.SalesHistory.article_id,
+    for sid, aid, d, q in db.execute(
+        select(m.SalesHistory.store_id, m.SalesHistory.article_id, m.SalesHistory.sale_date,
                func.sum(m.SalesHistory.quantity_sold))
         .where(m.SalesHistory.sale_date >= since)
-        .group_by(m.SalesHistory.store_id, m.SalesHistory.article_id)
+        .group_by(m.SalesHistory.store_id, m.SalesHistory.article_id, m.SalesHistory.sale_date)
     ).all():
-        sales[(sid, aid)] = float(q or 0)
+        if aid in pdays and any(a <= d <= b for a, b in pdays[aid]):
+            continue
+        sales[(sid, aid)] += float(q or 0)
+    for aid, periods in pdays.items():
+        promo_n = sum(1 for i in range(DAYS) if any(a <= since + timedelta(days=i) <= b for a, b in periods))
+        if 0 < promo_n < DAYS:
+            k = DAYS / (DAYS - promo_n)
+            for key in [x for x in sales if x[1] == aid]:
+                sales[key] *= k
+    if apply:
+        try:
+            _promo.measure(db)   # обнови реалния ефект на промоциите
+        except Exception:
+            db.rollback()
 
     arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
     sku2id = {a.sku: a.id for a in arts.values()}

@@ -913,3 +913,33 @@ def ui_deliveries_by_article(days: int = Query(7, ge=1, le=60), db: Session = De
     return {"days": days, "since": since.isoformat(), "rows": [
         {"sku": arts[a].sku, "name": arts[a].supplier_name or arts[a].name, "qty": float(q), "stores": int(n),
          "last": d.strftime("%d.%m")} for a, q, n, d in rows if a in arts]}
+
+
+# ---------------------------------------------------------------------------
+# Промоции (брошури) - временно вдигане на мин/макс
+# ---------------------------------------------------------------------------
+
+class PromoIn(BaseModel):
+    name: str
+    start: date
+    end: date
+    skus: list[str]
+
+
+@router.post("/promos")
+def promos_create(payload: PromoIn, db: Session = Depends(get_db)):
+    from . import promo
+    return promo.create(db, payload.name, payload.start, payload.end, payload.skus)
+
+
+@router.get("/ui/promos")
+def ui_promos(db: Session = Depends(get_db)):
+    from . import promo
+    return {"promos": promo.listing(db), "measured": promo.measure(db)}
+
+
+@router.delete("/promos/{promo_id}")
+def promos_delete(promo_id: int, db: Session = Depends(get_db)):
+    from sqlalchemy import text as _t
+    db.execute(_t("DELETE FROM promotions WHERE id=:p"), {"p": promo_id}); db.commit()
+    return {"deleted": promo_id}
