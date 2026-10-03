@@ -63,7 +63,9 @@ def _ours(db: Session, since: date) -> dict:
     return out
 
 
-def _ani(db: Session, since: date) -> dict:
+def _ani_full(db: Session, since: date) -> dict:
+    """(store, delivery_day) -> {article_id: ManualOrderLine} - заявката на Ани и
+    това, което MinMaxAI би поръчал в СЪЩАТА секунда (api_qty, stock, min, max)."""
     out = {}
     skus = {a.sku: a.id for a in db.execute(select(m.Article)).scalars().all()}
     for o in db.execute(select(m.ManualOrder).where(
@@ -71,14 +73,19 @@ def _ani(db: Session, since: date) -> dict:
             m.ManualOrder.received_at >= datetime.combine(since - timedelta(days=1), datetime.min.time(), SOFIA))
             .order_by(m.ManualOrder.received_at)).scalars().all():
         ls = db.execute(select(m.ManualOrderLine).where(m.ManualOrderLine.order_id == o.id)).scalars().all()
-        out[(o.store_id, _for_day(o.received_at))] = {
-            skus[l.sku]: float(l.store_qty) for l in ls if l.sku in skus and float(l.store_qty) > 0}
+        out[(o.store_id, _for_day(o.received_at))] = {skus[l.sku]: l for l in ls if l.sku in skus}
     return out
+
+
+def _ani(db: Session, since: date) -> dict:
+    return {k: {a: float(l.store_qty) for a, l in v.items() if float(l.store_qty) > 0}
+            for k, v in _ani_full(db, since).items()}
 
 
 def summary(db: Session, days: int = 14) -> dict:
     since = datetime.now(SOFIA).date() - timedelta(days=days)
-    dl, ours, ani = _delivered(db, since), _ours(db, since), _ani(db, since)
+    dl, ours, anif = _delivered(db, since), _ours(db, since), _ani_full(db, since)
+    ani = {k: {a: float(l.store_qty) for a, l in v.items() if float(l.store_qty) > 0} for k, v in anif.items()}
     arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
     stores = {s.id: s.name for s in db.execute(select(m.Store)).scalars().all()}
     price = lambda aid: float(getattr(arts.get(aid), "delivery_price", None) or 0)  # noqa: E731
@@ -87,12 +94,17 @@ def summary(db: Session, days: int = 14) -> dict:
         s, d = key
         if d < since:
             continue
-        D, O = dl.get(key, {}), {a: float(l.ordered_quantity) for a, l in ours.get(key, {}).items() if l.ordered_quantity > 0}
+        D = dl.get(key, {})
+        if key in anif:   # MinMaxAI в същата секунда като Ани - честното сравнение
+            O = {a: float(l.api_qty) for a, l in anif[key].items() if float(l.api_qty) > 0}
+        else:             # няма заявка на Ани -> сутрешното пускане на MinMaxAI
+            O = {a: float(l.ordered_quantity) for a, l in ours.get(key, {}).items() if l.ordered_quantity > 0}
         if not D and not O and key not in ani:
             continue
         both = len(set(D) & set(O))
         r = {"store_id": s, "store": stores.get(s, s), "day": d.strftime("%d.%m.%Y"), "iso": d.isoformat(),
-             "has_ours": key in ours, "has_ani": key in ani, "delivered_lines": len(D), "our_lines": len(O),
+             "has_ours": key in ours or key in anif, "has_ani": key in ani,
+             "basis": "в момента на Ани" if key in anif else ("06:00" if key in ours else ""), "delivered_lines": len(D), "our_lines": len(O),
              "both": both, "only_delivered": len(set(D) - set(O)), "only_ours": len(set(O) - set(D)),
              "delivered_units": round(sum(D.values()), 1), "our_units": round(sum(O.values()), 1),
              "delivered_eur": round(sum(q * price(a) for a, q in D.items()), 2),
@@ -117,8 +129,13 @@ def detail(db: Session, store_id: int, day: str) -> dict:
     d = date.fromisoformat(day)
     since = d
     D = _delivered(db, since).get((store_id, d), {})
-    O = _ours(db, since).get((store_id, d), {})
-    A = _ani(db, since).get((store_id, d), {})
+    AF = _ani_full(db, since).get((store_id, d), {})
+    A = {a: float(l.store_qty) for a, l in AF.items() if float(l.store_qty) > 0}
+    if AF:   # нашето = в същата секунда като Ани
+        O = {a: SimpleNamespace(ordered_quantity=float(l.api_qty), current_stock=l.stock,
+                                min_stock=l.min_stock, max_stock=l.max_stock) for a, l in AF.items()}
+    else:
+        O = _ours(db, since).get((store_id, d), {})
     arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
     plano = set(db.execute(select(m.Planogram.article_id).where(m.Planogram.store_id == store_id)).scalars().all())
     sett = {x.article_id: x for x in db.execute(select(m.StoreArticleSetting)
@@ -131,10 +148,10 @@ def detail(db: Session, store_id: int, day: str) -> dict:
             continue
         ln = O.get(aid)
         dq, oq = D.get(aid, 0.0), float(ln.ordered_quantity) if ln else 0.0
-        st = float(ln.current_stock) if ln else None
+        st = float(ln.current_stock) if ln is not None and ln.current_stock is not None else None
         s = sett.get(aid)
-        mn = float(ln.min_stock) if ln else (float(s.min_stock) if s else None)
-        mx = float(ln.max_stock) if ln else (float(s.max_stock) if s else None)
+        mn = float(ln.min_stock) if ln is not None and ln.min_stock is not None else (float(s.min_stock) if s else None)
+        mx = float(ln.max_stock) if ln is not None and ln.max_stock is not None else (float(s.max_stock) if s else None)
         if dq > 0 and oq > 0:
             note = "и двамата" if abs(dq - oq) < 0.01 else "различно количество"
         elif dq > 0:
@@ -164,4 +181,4 @@ def detail(db: Session, store_id: int, day: str) -> dict:
     out.sort(key=lambda r: (abs(r["diff"]) < 0.01, -abs(r["diff"]), r["name"] or ""))
     days14 = [(d - timedelta(days=15 - i)).strftime("%d.%m") for i in range(14)]
     return {"store": db.get(m.Store, store_id).name, "day": d.strftime("%d.%m.%Y"), "days": days14,
-            "has_ours": bool(O), "is_today": d >= datetime.now(SOFIA).date(), "lines": out}
+            "has_ours": bool(O), "basis": "в момента на Ани" if AF else "06:00", "is_today": d >= datetime.now(SOFIA).date(), "lines": out}

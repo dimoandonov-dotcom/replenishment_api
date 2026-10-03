@@ -1139,7 +1139,7 @@ async function showDeliv(storeId, day) {
   const tag = n => n === "и двамата" ? "" : n === "различно количество" ? "warn" : (n || "").startsWith("поръчано от Ани") ? "warn" : (n || "").startsWith("само MinMaxAI") ? "" : "bad";
   const lbl = n => (n || "").replace("само магазин", "само доставено");
   const v = {}; d.lines.forEach(l => { if (Math.abs(l.diff) >= 0.01) v[l.verdict] = (v[l.verdict] || 0) + 1; });
-  $("dDetail").innerHTML = `<div class="head"><h2>${esc(d.store)} · доставка ${d.day}</h2><span class="note">${d.has_ours ? "срещу MinMaxAI от 06:00 и Ани от предния ден" : "няма заявка на MinMaxAI за деня"}</span></div>
+  $("dDetail").innerHTML = `<div class="head"><h2>${esc(d.store)} · доставка ${d.day}</h2><span class="note">${d.has_ours ? (d.basis === "в момента на Ани" ? "Ани срещу MinMaxAI в същата секунда (по нейната наличност)" : "срещу MinMaxAI от 06:00") : "няма заявка на MinMaxAI за деня"}</span></div>
   <div class="totals"><span>По продажбите по-близо: MinMaxAI <b>${v["MinMaxAI"] || 0}</b></span><span>доставката <b>${v["Ани"] || 0}</b></span><span>равни <b>${v["равни"] || 0}</b></span><span>без „да“ <b>${v["планограма"] || 0}</b></span>
   <span>поръчани от Ани, още не заведени <b>${v["чака"] || 0}</b></span>
   <button id="dClose" style="margin-left:auto">Затвори</button></div>
