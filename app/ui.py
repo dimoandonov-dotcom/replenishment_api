@@ -125,11 +125,13 @@ def ui_login(payload: LoginIn, request: Request, db: Session = Depends(get_db)):
 
 @router.get("/ui/me")
 def ui_me(request: Request, db: Session = Depends(get_db)):
+    from . import main as _main
     user = getattr(request.state, "user", None)
     if not user:
-        return {"user": None, "name": "система"}
+        return {"user": None, "name": "система", "analytics": True}
     u = db.get(m.AppUser, user)
-    return {"user": user, "name": u.display_name if u else "Димо"}
+    return {"user": user, "name": u.display_name if u else "Димо",
+            "analytics": user.lower() in _main.analytics_users()}
 
 
 class UserIn(BaseModel):

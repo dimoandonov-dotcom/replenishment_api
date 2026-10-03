@@ -1590,7 +1590,9 @@ document.querySelectorAll("nav a").forEach(a => a.onclick = () => {
 });
 fetch("/ui/summary").then(r => {
   if (r.status === 401) { showLogin(); return; }
-  api("/ui/me").then(m => { const w = document.getElementById("whoami"); if (w && m.name) w.textContent = "👤 " + m.name; }).catch(() => {});
+  api("/ui/me").then(m => { const w = document.getElementById("whoami"); if (w && m.name) w.textContent = "👤 " + m.name;
+    if (!m.analytics) { const a = document.querySelector('nav a[data-tab="anal"]'); if (a) a.remove();
+      const t = document.getElementById("tab-anal"); if (t) t.remove(); if (location.hash === "#anal") location.hash = "#board"; } }).catch(() => {});
   show((location.hash || "#board").slice(1));
   updateFresh();
 });

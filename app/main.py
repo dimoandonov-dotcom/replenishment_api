@@ -124,7 +124,20 @@ async def _require_auth(request: Request, call_next):
             from fastapi.responses import RedirectResponse
             return RedirectResponse("/?next=/presentation", status_code=302)  # първо вход, после файла
         return JSONResponse(status_code=401, content={"detail": "Нужен е вход"})
+    # „Анализи" - само за определени потребители (по подразбиране Димо и Асен);
+    # с API ключ (системни задачи) - разрешено
+    p = request.url.path
+    if p.startswith("/ui/analytics") or p.startswith("/analytics"):
+        user = getattr(request.state, "user", None)
+        if user is not None and user.lower() not in analytics_users():
+            return JSONResponse(status_code=403, content={"detail": "Нямате достъп до „Анализи“"})
     return await call_next(request)
+
+
+def analytics_users() -> set[str]:
+    import os as __os
+    raw = __os.getenv("ANALYTICS_USERS", "dimo,asen")
+    return {x.strip().lower() for x in raw.split(",") if x.strip()}
 
 
 # anindk.netlify.app праща копие на заявките на магазините (CORS)
