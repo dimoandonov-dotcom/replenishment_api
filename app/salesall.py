@@ -430,6 +430,10 @@ def low_stock_alerts(db: Session, days: int = 14, n: int = TOP_N, cover: float =
     # на минус в половината магазини, или 0/минус в 80% от тях (кафе на чаша, топла точка, промо пакети)
     untracked = {c for c in sold_in if sold_in[c] >= 3 and
                  (neg[c] >= 0.5 * sold_in[c] or nonpos[c] >= 0.8 * sold_in[c])}
+    # проверка с продажбите: продава ли се въпреки „0/минус"? -> стоката е на рафта, грешна е наличността
+    recent = {(st, c): float(q or 0) for st, c, q in db.execute(text(
+        "SELECT store_id, code, SUM(qty) FROM sa_sales WHERE day > :d GROUP BY store_id, code"),
+        {"d": last - timedelta(days=2)}).all()}
     skipped = 0
     alerts = []
     for (st, g), items in per.items():
@@ -448,15 +452,28 @@ def low_stock_alerts(db: Session, days: int = 14, n: int = TOP_N, cover: float =
             if q <= 0 or (cd is not None and cd < cover):
                 nm, _, sub, sup = meta.get(c, (str(c), g, "", ""))
                 rev_day = v[1] / days
+                sold2 = recent.get((st, c), 0.0)        # продадено последните 2 дни
+                if q <= 0:
+                    check = ("продава се въпреки минуса — стоката е там, доставката не е заведена" if q < 0 and sold2 > 0
+                             else "свършил вчера — продаде последните бройки" if q == 0 and sold2 > 0
+                             else "наистина свършил — няма продажби 2 дни")
+                    verdict = "грешна наличност" if q < 0 and sold2 > 0 else "реално"
+                else:
+                    check, verdict = "ще свърши скоро", "реално"
                 alerts.append({"store_id": st, "store": stores[st], "group": g, "rank": rank, "code": c,
                                "name": nm or str(c), "supplier": sup, "per_day": round(pdy, 1), "stock": round(q, 1),
                                "cover_days": round(cd, 1) if cd is not None and q > 0 else 0,
-                               "status": "свършил" if q <= 0 else "ниска", "rev_per_day": round(rev_day, 2)})
-    alerts.sort(key=lambda a: (a["status"] != "свършил", -a["rev_per_day"]))
+                               "status": "свършил" if q <= 0 else "ниска", "rev_per_day": round(rev_day, 2),
+                               "sold_2d": round(sold2, 1), "check": check, "verdict": verdict})
+    alerts.sort(key=lambda a: (a["status"] != "свършил", a["verdict"] != "реално", -a["rev_per_day"]))
     out_n = sum(1 for a in alerts if a["status"] == "свършил")
+    wrong = [a for a in alerts if a["verdict"] == "грешна наличност"]
+    real_out = [a for a in alerts if a["status"] == "свършил" and a["verdict"] == "реално"]
     return {"ready": True, "from": since.strftime("%d.%m"), "to": last.strftime("%d.%m"), "cover_threshold": cover,
             "total": len(alerts), "out": out_n, "low": len(alerts) - out_n,
-            "lost_rev_per_day": round(sum(a["rev_per_day"] for a in alerts if a["status"] == "свършил"), 2),
+            "lost_rev_per_day": round(sum(a["rev_per_day"] for a in real_out), 2),
+            "real_out": len(real_out), "wrong_stock": len(wrong),
+            "real_out_none_2d": sum(1 for a in real_out if a["sold_2d"] == 0),
             "stores": len({a["store_id"] for a in alerts}), "untracked_articles": len(untracked),
             "untracked_positions": skipped, "rows": alerts[:1500],
             "untracked": sorted([{"code": c, "name": (meta.get(c) or (str(c),))[0] or str(c),
