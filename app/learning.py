@@ -90,6 +90,13 @@ def run(db: Session, apply: bool = True) -> dict:
         except Exception as e:
             db.rollback()
             notes.append(f"качество: {type(e).__name__}")
+        # продажби/наличности/промоции на ВСИЧКИ доставчици (за анализите)
+        try:
+            from . import salesall
+            notes.append(f"всички доставчици: {salesall.sync(db, 3)}")
+        except Exception as e:
+            db.rollback()
+            notes.append(f"всички доставчици: {type(e).__name__}")
         # движения и ревизии: последните 3 дни (по-старите вече са в базата)
         try:
             from . import anomalies

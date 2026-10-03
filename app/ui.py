@@ -977,3 +977,38 @@ def ui_an_group(name: str, days: int = Query(14, ge=4, le=60), db: Session = Dep
 def ui_probe_sales_all(day_offset: int = Query(1, ge=1, le=30), db: Session = Depends(get_db)):
     from . import mistral
     return mistral.probe_sales_all(db, day_offset)
+
+
+# ---------------------------------------------------------------------------
+# Анализи - всички доставчици
+# ---------------------------------------------------------------------------
+
+@router.post("/analytics/sync-all")
+def an_sync_all(days: int = Query(30, ge=1, le=60)):
+    from . import salesall
+    return salesall.start_background(days)
+
+
+@router.get("/ui/analytics/all/status")
+def an_all_status():
+    from . import salesall
+    return salesall.status()
+
+
+@router.get("/ui/analytics/all")
+def an_all(days: int = Query(14, ge=4, le=60), by: str = Query("grp", pattern="^(grp|supplier|store)$"),
+           db: Session = Depends(get_db)):
+    from . import salesall
+    return salesall.overview(db, days, by)
+
+
+@router.get("/ui/analytics/all/detail")
+def an_all_detail(by: str, key: str, days: int = Query(14, ge=4, le=60), db: Session = Depends(get_db)):
+    from . import salesall
+    return salesall.detail(db, by, key, days)
+
+
+@router.get("/ui/analytics/all/promos")
+def an_all_promos(db: Session = Depends(get_db)):
+    from . import salesall
+    return salesall.promos(db)
