@@ -40,6 +40,16 @@ def _ensure(db: Session):
     db.commit()
 
 
+def _bulk(db: Session, sql: str, rows: list[tuple]):
+    """Бързо групово вмъкване (psycopg2 execute_values)."""
+    if not rows:
+        return
+    from psycopg2.extras import execute_values
+    raw = db.connection().connection
+    with raw.cursor() as c:
+        execute_values(c, sql, rows, page_size=5000)
+
+
 def status() -> dict:
     return dict(_job)
 
@@ -74,14 +84,11 @@ def _sync(db: Session, days: int):
                 if sid is None:
                     continue
                 code = int(r["code"])
-                batch.append({"s": sid, "c": code, "d": d, "q": float(r["q"] or 0),
-                              "r": float(r["rev"] or 0), "k": float(r["cost"] or 0)})
+                batch.append((sid, code, d, float(r["q"] or 0), float(r["rev"] or 0), float(r["cost"] or 0)))
                 if r["nid"]: names[code] = int(r["nid"])
                 if r["cid"]: cats[code] = (r["loc"], int(r["cid"]))
                 if r["pid"]: parts[code] = int(r["pid"])
-            for j in range(0, len(batch), 5000):
-                db.execute(text("INSERT INTO sa_sales(store_id, code, day, qty, rev, cost) VALUES (:s,:c,:d,:q,:r,:k)"),
-                           batch[j:j + 5000])
+            _bulk(db, "INSERT INTO sa_sales(store_id, code, day, qty, rev, cost) VALUES %s", batch)
             db.commit()
         # речници: имена, групи, доставчици
         _job["progress"] = "имена, групи, доставчици"
@@ -118,9 +125,11 @@ def _sync(db: Session, days: int):
         st = [{"s": locs[r["loc"]], "c": int(r["code"]), "q": float(r["q"] or 0), "p": float(r["p"] or 0)}
               for r in cur.fetchall() if r["loc"] in locs]
         db.execute(text("TRUNCATE sa_stock"))
-        for j in range(0, len(st), 5000):
-            db.execute(text("""INSERT INTO sa_stock(store_id, code, qty, cost) VALUES (:s,:c,:q,:p)
-                               ON CONFLICT (store_id, code) DO UPDATE SET qty = sa_stock.qty + EXCLUDED.qty"""), st[j:j + 5000])
+        agg = {}
+        for x in st:
+            k = (x["s"], x["c"]); q, p = agg.get(k, (0.0, 0.0)); agg[k] = (q + x["q"], max(p, x["p"]))
+        _bulk(db, "INSERT INTO sa_stock(store_id, code, qty, cost) VALUES %s",
+              [(k[0], k[1], v[0], v[1]) for k, v in agg.items()])
         db.commit()
         # промоции от Мистрал
         _job["progress"] = "промоции"
