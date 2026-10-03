@@ -1045,3 +1045,13 @@ def ui_db_size(db: Session = Depends(get_db)):
                             FROM pg_stat_user_tables ORDER BY 2 DESC LIMIT 15""")).all()
     return {"total_mb": round(total / 1048576, 1),
             "tables": [{"table": r[0], "mb": round(r[1] / 1048576, 1), "rows": r[2]} for r in rows]}
+
+
+@router.post("/admin/vacuum")
+def admin_vacuum(table: str = Query("stock_snapshots", pattern="^(stock_snapshots|sa_sales|sa_stock|stock_movements)$")):
+    """Връща празното място от изтрити редове на диска (VACUUM FULL)."""
+    from .db import engine
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+        from sqlalchemy import text as _t
+        c.execute(_t(f"VACUUM FULL ANALYZE {table}"))
+    return {"ok": True, "table": table}
