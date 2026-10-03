@@ -1,8 +1,8 @@
 """
 Доставки от НДК (Мистрал, вид движение 2) срещу заявката на MinMaxAI.
 
-НДК доставя на следващия ден. Доставка на ден D в магазин S се сравнява със
-заявката на MinMaxAI от D-1 (пускане в 06:00) и със заявката на Ани от D-1.
+Доставка на ден D в магазин S се сравнява със заявката на MinMaxAI от D, 06:00
+(поръчва за същия ден) и със заявката на Ани от D-1 (тя поръчва за следващия ден).
 Така имаме сравнение с реално поръчаното/полученото, докато заработи изцяло
 сравнението с Ани, и „перо" за наличностите: поръчано, но не заведено като доставка.
 """
@@ -25,8 +25,14 @@ def _bg(dt) -> date:
 
 
 def _for_day(dt) -> date:
-    """НДК доставя на СЛЕДВАЩИЯ ден: заявка днес -> доставка утре."""
+    """Заявка на Ани: прави се сутринта ЗА СЛЕДВАЩИЯ ден (в петък - за събота)."""
     return dt.astimezone(SOFIA).date() + timedelta(days=1)
+
+
+def _ours_day(dt) -> date:
+    """Заявка на MinMaxAI: в 06:00 ЗА СЪЩИЯ ДЕН; старите следобедни (15:00) - за следващия."""
+    t = dt.astimezone(SOFIA)
+    return t.date() if t.hour < 12 else t.date() + timedelta(days=1)
 
 
 def _delivered(db: Session, since: date) -> dict:
@@ -53,7 +59,7 @@ def _ours(db: Session, since: date) -> dict:
         m.PurchaseOrder.created_at >= datetime.combine(since - timedelta(days=1), datetime.min.time(), SOFIA))
         .order_by(m.PurchaseOrder.created_at)).scalars().all()
     for po in pos:
-        out[(po.store_id, _for_day(po.created_at))] = {l.article_id: l for l in po.lines}
+        out[(po.store_id, _ours_day(po.created_at))] = {l.article_id: l for l in po.lines}
     return out
 
 

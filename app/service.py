@@ -204,11 +204,16 @@ def calculate_for_store(
     schedules = load_schedules(db, store_id)
 
     if respect_schedule:
+        # MinMaxAI поръчва в 06:00 ЗА СЪЩИЯ ДЕН: днес се поръчва за магазините,
+        # които имат доставка днес (SAME_DAY_DELIVERY=0 -> старият модел „ден за заявка").
+        import os as _os
+        same_day = _os.getenv("SAME_DAY_DELIVERY", "1") != "0"
+        wd = order_date.isoweekday()
         allowed = {
             sup
             for (st, sup), entries in schedules.items()
             if any(
-                e.order_weekday == order_date.isoweekday() for e in entries
+                (e.delivery_weekday if same_day else e.order_weekday) == wd for e in entries
             )
         }
         settings = [s for s in settings if s.supplier_id in allowed]
