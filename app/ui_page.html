@@ -1662,6 +1662,12 @@ document.querySelectorAll("nav a").forEach(a => a.onclick = () => {
 fetch("/ui/summary").then(r => {
   if (r.status === 401) { showLogin(); return; }
   api("/ui/me").then(m => { const w = document.getElementById("whoami"); if (w && m.name) w.textContent = "👤 " + m.name;
+    if (m.analytics_only) {   // профил само за „Анализи"
+      document.querySelectorAll('nav a').forEach(a => { if (a.dataset.tab !== "anal") a.remove(); });
+      document.querySelectorAll('section.tab').forEach(t => { if (t.id !== "tab-anal") t.remove(); });
+      ["kpis", "freshInfo"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
+      if (location.hash !== "#anal") location.hash = "#anal";
+    }
     if (!m.analytics) { const a = document.querySelector('nav a[data-tab="anal"]'); if (a) a.remove();
       const t = document.getElementById("tab-anal"); if (t) t.remove(); if (location.hash === "#anal") location.hash = "#board"; } }).catch(() => {});
   show((location.hash || "#board").slice(1));

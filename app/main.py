@@ -127,6 +127,12 @@ async def _require_auth(request: Request, call_next):
     # „Анализи" - само за определени потребители (по подразбиране Димо и Асен);
     # с API ключ (системни задачи) - разрешено
     p = request.url.path
+    # профили „само Анализи" (напр. Теди): виждат само раздела „Анализи", без промени
+    user0 = getattr(request.state, "user", None)
+    if user0 is not None and user0.lower() in analytics_only_users():
+        ok = (request.method == "GET" and (p.startswith("/ui/analytics") or p in ("/", "/ui/me", "/stores")))
+        if not ok:
+            return JSONResponse(status_code=403, content={"detail": "Профилът е само за „Анализи“"})
     if p.startswith("/ui/analytics") or p.startswith("/analytics"):
         user = getattr(request.state, "user", None)
         if user is not None and user.lower() not in analytics_users():
@@ -136,7 +142,13 @@ async def _require_auth(request: Request, call_next):
 
 def analytics_users() -> set[str]:
     import os as __os
-    raw = __os.getenv("ANALYTICS_USERS", "dimo,asen")
+    raw = __os.getenv("ANALYTICS_USERS", "dimo,asen,tedi")
+    return {x.strip().lower() for x in raw.split(",") if x.strip()}
+
+
+def analytics_only_users() -> set[str]:
+    import os as __os
+    raw = __os.getenv("ANALYTICS_ONLY_USERS", "tedi")
     return {x.strip().lower() for x in raw.split(",") if x.strip()}
 
 
