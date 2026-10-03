@@ -472,7 +472,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <button id="cUp">Качи</button>
     <span class="msg" id="cMsg"></span>
   </div>
-  <div class="head"><h2>📦 Доставки от НДК срещу MinMaxAI</h2><span class="note">реално доставеното (Мистрал) ↔ заявката на MinMaxAI за деня (06:00) и на Ани</span></div>
+  <div class="head"><h2>📦 Доставки от НДК срещу MinMaxAI</h2><span class="note">реално доставеното (Мистрал) ↔ заявките от предния ден: MinMaxAI (06:00) и Ани</span></div>
   <div class="board" id="dKpis"></div>
   <div id="dDetail"></div>
   <div class="scroll"><table>
@@ -519,7 +519,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <span class="msg" id="syncMsg"></span>
   </div>
 
-  <div class="head"><h2>Пускане на заявки</h2><span class="note">автоматично понеделник–петък в 06:00 (НДК доставя в същия ден)</span></div>
+  <div class="head"><h2>Пускане на заявки</h2><span class="note">автоматично неделя–петък в 06:00 (НДК доставя на следващия ден)</span></div>
   <div class="bar">
     <button class="go" id="runNow">Пусни заявки сега</button>
     <label class="note"><input type="checkbox" id="runSched" checked> само за магазините с доставка утре</label>
@@ -1125,7 +1125,7 @@ async function loadDeliv() {
     ["ПОРЪЧАНО, НЕ ЗАВЕДЕНО", fmtN(t.ordered_not_delivered || 0), "", "наша заявка без доставка в Мистрал"]];
   $("dKpis").innerHTML = tiles.map(([l, v, c, s]) => `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("");
   $("dBody").innerHTML = d.rows.map(r => `<tr data-s="${r.store_id}" data-d="${r.iso}" style="cursor:pointer"><td>${r.day}</td><td class="name">${esc(r.store)}
-      ${r.has_ours ? "" : '<span class="tag off" title="Няма наша заявка за деня">без наша</span>'}${r.has_ani ? ' <span class="tag">Ани</span>' : ""}
+      ${r.has_ours ? "" : '<span class="tag off" title="Няма наша заявка от предния ден">без наша</span>'}${r.has_ani ? ' <span class="tag">Ани</span>' : ""}
       ${r.has_ours && !r.delivered_lines ? ' <span class="tag bad" title="Наша заявка, но няма заведена доставка">няма доставка</span>' : ""}</td>
     <td class="num">${r.both}</td><td class="num">${r.only_delivered}</td><td class="num">${r.only_ours}</td>
     <td class="num">${fmtN(r.delivered_units)}</td><td class="num">${fmtN(r.our_units)}</td><td class="num">${fmtE(r.delivered_eur)}</td><td class="num">${fmtE(r.our_eur)}</td></tr>`).join("")
@@ -1138,7 +1138,7 @@ async function showDeliv(storeId, day) {
   const tag = n => n === "и двамата" ? "" : n === "различно количество" ? "warn" : (n || "").startsWith("поръчано от Ани") ? "warn" : (n || "").startsWith("само MinMaxAI") ? "" : "bad";
   const lbl = n => (n || "").replace("само магазин", "само доставено");
   const v = {}; d.lines.forEach(l => { if (Math.abs(l.diff) >= 0.01) v[l.verdict] = (v[l.verdict] || 0) + 1; });
-  $("dDetail").innerHTML = `<div class="head"><h2>${esc(d.store)} · доставка ${d.day}</h2><span class="note">${d.has_ours ? "срещу заявката на MinMaxAI за деня" : "няма наша заявка за деня"}</span></div>
+  $("dDetail").innerHTML = `<div class="head"><h2>${esc(d.store)} · доставка ${d.day}</h2><span class="note">${d.has_ours ? "срещу заявките от предния ден" : "няма наша заявка от предния ден"}</span></div>
   <div class="totals"><span>По продажбите по-близо: MinMaxAI <b>${v["MinMaxAI"] || 0}</b></span><span>доставката <b>${v["Ани"] || 0}</b></span><span>равни <b>${v["равни"] || 0}</b></span><span>без „да“ <b>${v["планограма"] || 0}</b></span>
   <span>поръчани от Ани, още не заведени <b>${v["чака"] || 0}</b></span>
   <button id="dClose" style="margin-left:auto">Затвори</button></div>
