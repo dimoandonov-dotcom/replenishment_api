@@ -163,11 +163,15 @@ def promo_report(db: Session) -> dict:
                 continue
             series[d] += q
             per[a][0 if d < s else 1] += q
+        # свършил = наличност <= 0 в магазин, който го води (с „да") и където се продава
+        plano = set(db.execute(select(m.Planogram.store_id, m.Planogram.article_id)
+                               .where(m.Planogram.article_id.in_(aids))).all())
+        sold_st = {(st, a) for st, a, d, q in rows if q > 0}
         outs = defaultdict(set)
         for st, a, d in db.execute(text("""SELECT store_id, article_id, (captured_at AT TIME ZONE 'Europe/Sofia')::date
                                            FROM stock_snapshots WHERE quantity <= 0 AND article_id = ANY(:a)
                                            AND captured_at >= :s"""), {"a": aids, "s": s}).all():
-            if st in stores:
+            if st in stores and (st, a) in plano and (st, a) in sold_st and not arts[a].no_order:
                 outs[a].add(st)
         items = []
         for a in aids:
