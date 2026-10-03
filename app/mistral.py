@@ -356,7 +356,8 @@ def probe_sales_all(db, day_offset: int = 1) -> dict:
     t = time.time()
     with connect() as conn:
         cur = conn.cursor()
-        locs = _locations(db, cur)
+        from .anomalies import _loc_map
+        locs = _loc_map(db, cur)
         cur.execute(f"""
             SELECT COUNT(*) AS n, COUNT(DISTINCT c.MATERIALCODE) AS arts, SUM(c.QTY) AS qty,
                    SUM(c.QTY * c.SALEPRICE) AS rev, COUNT(DISTINCT c.LASTPARTNERNAMEID) AS sups,
