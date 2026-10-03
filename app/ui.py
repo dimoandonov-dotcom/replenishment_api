@@ -943,3 +943,31 @@ def promos_delete(promo_id: int, db: Session = Depends(get_db)):
     from sqlalchemy import text as _t
     db.execute(_t("DELETE FROM promotions WHERE id=:p"), {"p": promo_id}); db.commit()
     return {"deleted": promo_id}
+
+
+# ---------------------------------------------------------------------------
+# Анализи: брошура и групи
+# ---------------------------------------------------------------------------
+
+@router.get("/ui/analytics/promo")
+def ui_an_promo(db: Session = Depends(get_db)):
+    from . import analytics
+    return analytics.promo_report(db)
+
+
+@router.get("/ui/analytics/promo/{promo_id}/{sku}")
+def ui_an_promo_article(promo_id: int, sku: str, db: Session = Depends(get_db)):
+    from . import analytics
+    return analytics.promo_article_stores(db, sku, promo_id)
+
+
+@router.get("/ui/analytics/groups")
+def ui_an_groups(days: int = Query(14, ge=4, le=60), db: Session = Depends(get_db)):
+    from . import analytics
+    return analytics.groups(db, days)
+
+
+@router.get("/ui/analytics/group")
+def ui_an_group(name: str, days: int = Query(14, ge=4, le=60), db: Session = Depends(get_db)):
+    from . import analytics
+    return analytics.group_detail(db, name, days)
