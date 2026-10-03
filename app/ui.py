@@ -1034,3 +1034,14 @@ def an_all_alerts(days: int = Query(14, ge=4, le=60), cover: float = Query(2.0, 
                   db: Session = Depends(get_db)):
     from . import salesall
     return salesall.low_stock_alerts(db, days, 10, cover)
+
+
+@router.get("/ui/db-size")
+def ui_db_size(db: Session = Depends(get_db)):
+    """Размер на базата и на най-големите таблици (MB)."""
+    from sqlalchemy import text as _t
+    total = db.execute(_t("SELECT pg_database_size(current_database())")).scalar()
+    rows = db.execute(_t("""SELECT relname, pg_total_relation_size(relid), n_live_tup
+                            FROM pg_stat_user_tables ORDER BY 2 DESC LIMIT 15""")).all()
+    return {"total_mb": round(total / 1048576, 1),
+            "tables": [{"table": r[0], "mb": round(r[1] / 1048576, 1), "rows": r[2]} for r in rows]}
