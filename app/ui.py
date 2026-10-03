@@ -971,3 +971,9 @@ def ui_an_groups(days: int = Query(14, ge=4, le=60), db: Session = Depends(get_d
 def ui_an_group(name: str, days: int = Query(14, ge=4, le=60), db: Session = Depends(get_db)):
     from . import analytics
     return analytics.group_detail(db, name, days)
+
+
+@router.get("/ui/mistral/probe-sales-all")
+def ui_probe_sales_all(day_offset: int = Query(1, ge=1, le=30), db: Session = Depends(get_db)):
+    from . import mistral
+    return mistral.probe_sales_all(db, day_offset)

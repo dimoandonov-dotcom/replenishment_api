@@ -348,3 +348,22 @@ def movement_types(days: int = 7, codes: list[int] | None = None) -> list[dict]:
             d = cur.fetchone()
             r["operations_doc"] = {k: (str(v) if v is not None else None) for k, v in d.items()} if d else None
     return rows
+
+
+def probe_sales_all(db, day_offset: int = 1) -> dict:
+    """Само четене: колко реда/артикули/обороти има за един ден за ВСИЧКИ доставчици."""
+    import time
+    t = time.time()
+    with connect() as conn:
+        cur = conn.cursor()
+        locs = _locations(db, cur)
+        cur.execute(f"""
+            SELECT COUNT(*) AS n, COUNT(DISTINCT c.MATERIALCODE) AS arts, SUM(c.QTY) AS qty,
+                   SUM(c.QTY * c.SALEPRICE) AS rev, COUNT(DISTINCT c.LASTPARTNERNAMEID) AS sups,
+                   COUNT(DISTINCT CAST(c.LOCATIONID AS varchar) + '-' + CAST(c.MATERIALCODE AS varchar)) AS pairs
+            FROM SALE s WITH (NOLOCK)
+            JOIN SALECONTENT c WITH (NOLOCK) ON c.NUM = s.NUM AND c.LOCATIONID = s.LOCATIONID
+            WHERE s.REPORTINGDATE = CAST(DATEADD(day, -{int(day_offset)}, GETDATE()) AS date)
+              AND s.LOCATIONID IN ({','.join(map(str, locs))})""")
+        r = cur.fetchone()
+    return {k: (float(v) if v is not None else None) for k, v in r.items()} | {"seconds": round(time.time() - t, 1)}
