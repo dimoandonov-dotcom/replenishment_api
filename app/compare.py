@@ -453,7 +453,7 @@ def explain_order_line(l, series: list[float] | None) -> str:
         rnd = q // pack
         rule = ("до X.5 се закръгля надолу" if packs - int(packs) <= 0.5 else "над X.5 се закръгля нагоре")
         if packs < 1 and rnd == 1:
-            rule = "под минимума винаги поне 1 опаковка"
+            rule = "нуждата е малка, но стоката ще свърши до следващата доставка → 1 опаковка"
         parts.append(f"Това са {_fmt(round(packs, 2))} опаковки по {pack} бр. → {rule} → {rnd} опак. = {q} бр.")
     else:
         parts.append(f"Поръчва се на брой: {q} бр.")

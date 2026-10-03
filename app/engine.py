@@ -135,6 +135,11 @@ def needs_reorder(
     return current_stock < min_stock
 
 
+# Колко дни продажби трябва да покрива наличността, за да НЕ поръчваме цяла
+# опаковка заради малка нужда (≈ до следващата доставка + резерв).
+MIN_PACK_COVER_DAYS = 2.0
+
+
 def calculate_line(
     setting: ArticleSetting,
     current_stock: float,
@@ -142,6 +147,7 @@ def calculate_line(
     closure_adjustment: float = 0.0,
     notes: str = "",
     mode: str = "below_min",
+    avg_daily_sales: float | None = None,
 ) -> OrderLine | None:
     """
     Изчислява един ред от заявка. Връща None, ако не се налага поръчка.
@@ -161,11 +167,20 @@ def calculate_line(
 
     suggested = max(max_target - current_stock, 0.0)
 
-    # Под минимума сме -> гарантираме поне една опаковка.
-    # При ежедневно допълване над минимума малките нужди се натрупват.
+    # Под минимума, но нуждата е под половин опаковка: цяла опаковка се поръчва
+    # САМО ако стоката ще свърши до следващата доставка - иначе трупаме запас
+    # (напр. 6 бр. при продажби 1 бр. на 2 седмици = 3 месеца запас).
     below_min = current_stock < setting.min_stock
+    force = below_min
+    if below_min and avg_daily_sales is not None:
+        if avg_daily_sales <= 0:
+            force = False                      # не се продава - не трупаме
+        elif current_stock <= 0:
+            force = True                       # свършил е и се продава - рафтът да не е празен
+        else:
+            force = current_stock < avg_daily_sales * MIN_PACK_COVER_DAYS
     ordered = round_up_to_pack(
-        suggested, setting.pack_size, force_min_pack=below_min
+        suggested, setting.pack_size, force_min_pack=force
     )
 
     if ordered <= 0:
@@ -418,6 +433,7 @@ def generate_order_lines(
             closure_adjustment=adjustment,
             notes=notes,
             mode=mode,
+            avg_daily_sales=avg_daily_sales.get((s.store_id, s.article_id), 0.0),
         )
         if line:
             result.lines.append(line)

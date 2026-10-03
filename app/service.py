@@ -184,10 +184,14 @@ def load_avg_daily_sales(
         .where(m.SalesHistory.store_id == store_id)
         .group_by(m.SalesHistory.article_id)
     )
+    # средно на ден за целия прозорец (14 дни история), а не само за дните с продажби -
+    # иначе 1 бутилка за 2 седмици изглежда като 1 бр./ден
+    from datetime import date as _d, timedelta as _td
+    since = _d.today() - _td(days=14)
+    stmt = stmt.where(m.SalesHistory.sale_date >= since)
     out = {}
     for row in db.execute(stmt).all():
-        dc = row.day_count or 1
-        out[(store_id, row.article_id)] = float(row.total or 0) / dc
+        out[(store_id, row.article_id)] = max(float(row.total or 0), 0.0) / 14.0
     return out
 def calculate_for_store(
     db: Session,
