@@ -208,6 +208,8 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
         for sid, aid, d, op, qin in db.execute(q, {"d": dsince}).all():
             if (store_id and sid != store_id) or sid not in stores or aid not in arts:
                 continue
+            if "АМБАЛАЖ" in name(aid).upper():
+                continue   # бутилки/каси - винаги големи бройки, не са стока
             qin = float(qin)
             ordered = ani_q.get((sid, d), {}).get(aid)
             m_ = mx.get((sid, aid), 0.0)
