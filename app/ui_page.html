@@ -422,6 +422,20 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
 
 <!-- ============ АНАЛИЗИ ============ -->
 <section class="tab" id="tab-anal">
+  <div class="bar"><button id="anScopeAll" class="go">Всички фирми</button><button id="anScopeNdk">Само НДК (с промо режима)</button>
+    <span class="note" id="anAllNote"></span></div>
+  <div id="anAll">
+    <div class="board" id="aaKpis"></div>
+    <div class="head"><h2>📣 Промоции от Мистрал</h2><span class="note">всички фирми · ефект спрямо 14-те дни преди промото</span></div>
+    <div id="aaPromo"></div>
+    <div class="head" style="margin-top:22px"><h2>📊 Продажби и наличности</h2>
+      <div class="bar" style="margin:0"><select id="aaBy"><option value="grp">по групи</option><option value="supplier">по доставчици</option><option value="store">по магазини</option></select>
+      <select id="aaDays"><option value="7">7 дни</option><option value="14" selected>14 дни</option><option value="30">30 дни</option></select></div></div>
+    <div class="scroll"><table><thead><tr><th id="aaCol">Група</th><th class="num">Оборот €</th><th class="num">Дял</th><th class="num">Марж</th><th class="num">Тенденция</th><th class="num">Бройки</th><th class="num">Артикули</th><th class="num">Наличност €</th><th class="num">Дни запас</th></tr></thead>
+    <tbody id="aaBody"></tbody></table></div>
+    <div id="aaDetail"></div>
+  </div>
+  <div id="anNdk" style="display:none">
   <div class="head"><h2>📣 Брошура / промоции</h2><span class="note">ефект спрямо 14-те дни преди кампанията</span></div>
   <div id="anPromo"></div>
   <div id="anPromoDetail"></div>
@@ -431,6 +445,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <div class="scroll"><table><thead><tr><th>Група</th><th class="num">Продажби бр.</th><th class="num">Дял</th><th class="num">Тенденция</th><th class="num">Стойност €</th><th class="num">Наличност бр.</th><th class="num">Наличност €</th><th class="num">Дни запас</th><th>Ход по дни</th></tr></thead>
   <tbody id="anGBody"></tbody></table></div>
   <div id="anGDetail"></div>
+  </div>
 </section>
 
 <!-- ============ КАЧЕСТВО ============ -->
@@ -609,7 +624,7 @@ const loaded = {};
 function show(tab) {
   document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + tab));
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: loadAnal, qual: loadQual, anom: loadAnom, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: loadAnom, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -893,6 +908,56 @@ function renderPlano() {
 
 
 
+
+
+/* ---------- анализи: всички фирми ---------- */
+let AA_BY = "grp";
+async function loadAll() {
+  $("aaBy").onchange = () => { AA_BY = $("aaBy").value; loadAllTable(); };
+  $("aaDays").onchange = loadAllTable;
+  const st = await api("/ui/analytics/all/status").catch(() => ({}));
+  $("anAllNote").textContent = st.running ? `⏳ дърпам данни от Мистрал: ${st.progress}` : "";
+  await loadAllTable();
+  const p = await api("/ui/analytics/all/promos");
+  $("aaPromo").innerHTML = !p.ready ? `<div class="empty">Данните още се дърпат…</div>` : (p.campaigns || []).map((c, ci) => `
+    <details class="card" style="margin-bottom:10px;padding:12px 14px" ${ci === 0 ? "open" : ""}>
+      <summary style="cursor:pointer;font-weight:700">${c.active ? "🟢" : "⚪"} ${c.start} – ${c.end} · ${c.items} артикула · продадени ${fmtN(c.units)} бр. (${c.extra_units >= 0 ? "+" : ""}${fmtN(c.extra_units)} над обичайното) · ${fmtE(c.rev)} €</summary>
+      <div class="scroll" style="margin-top:10px"><table><thead><tr><th>Артикул</th><th>Група</th><th>Доставчик</th><th class="num">Промо цена</th><th class="num">Преди /ден</th><th class="num">В промо /ден</th><th class="num">Ефект</th><th class="num">Оборот €</th><th class="num">Марж</th><th class="num">Свършил в</th></tr></thead><tbody>
+      ${c.rows.map(r => `<tr><td class="name">${esc(r.name)}</td><td class="muted">${esc(r.group || "")}</td><td class="muted">${esc(r.supplier || "")}</td>
+        <td class="num">${fmtE(r.promo_price)}</td><td class="num">${fmtN(r.before_per_day)}</td><td class="num"><b>${fmtN(r.during_per_day)}</b></td>
+        <td class="num">${r.uplift == null ? "—" : `<b style="color:${r.uplift >= 1.3 ? "var(--teal)" : r.uplift < 0.95 ? "var(--danger)" : "var(--slate)"}">×${fmtN(r.uplift)}</b>`}</td>
+        <td class="num">${fmtE(r.rev)}</td><td class="num">${r.margin_pct == null ? "—" : fmtN(r.margin_pct) + "%"}</td><td class="num ${r.stores_out ? "low" : ""}">${r.stores_out}</td></tr>`).join("")}
+      </tbody></table></div></details>`).join("") + `<p class="note">Данни до ${p.data_until || "—"}. „Свършил в“ — магазини с наличност 0 или минус сега.</p>`;
+}
+async function loadAllTable() {
+  const d = await api(`/ui/analytics/all?days=${$("aaDays").value}&by=${AA_BY}`);
+  if (!d.ready) { $("aaBody").innerHTML = `<tr><td colspan="9" class="empty">Данните още се дърпат от Мистрал…</td></tr>`; return; }
+  const t = d.totals;
+  $("aaKpis").innerHTML = [["ОБОРОТ", fmtE(t.rev) + " €", "t", `${d.from}–${d.to}`], ["МАРЖ", fmtE(t.margin) + " €", "a", `${fmtN(t.margin_pct)}% от оборота`],
+    ["ПРОДАДЕНИ", fmtN(t.units) + " бр.", "", "всички доставчици"]].map(([l, v, c, s]) => `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("");
+  $("aaCol").textContent = { grp: "Група", supplier: "Доставчик", store: "Магазин" }[AA_BY];
+  $("aaBody").innerHTML = d.rows.map(r => `<tr data-k="${esc(String(r.key))}" style="cursor:pointer"><td class="name"><b>▸ ${esc(String(r.name))}</b></td>
+    <td class="num">${fmtE(r.rev)}</td><td class="num">${fmtN(r.share)}%</td><td class="num">${r.margin_pct == null ? "—" : fmtN(r.margin_pct) + "%"}</td>
+    <td class="num">${trendTag(r.trend)}</td><td class="num">${fmtN(r.units)}</td><td class="num">${fmtN(r.articles)}</td><td class="num">${fmtE(r.stock_eur)}</td>
+    <td class="num ${r.cover_days != null && r.cover_days > 30 ? "low" : ""}">${fmtN(r.cover_days)}</td></tr>`).join("");
+  document.querySelectorAll("#aaBody tr[data-k]").forEach(tr => tr.onclick = () => showAllDetail(tr.dataset.k, tr.firstElementChild.textContent.replace("▸", "").trim()));
+}
+async function showAllDetail(key, title) {
+  $("aaDetail").innerHTML = `<div class="empty loading">Зареждам…</div>`; $("aaDetail").scrollIntoView({ behavior: "smooth" });
+  const d = await api(`/ui/analytics/all/detail?by=${AA_BY}&key=${encodeURIComponent(key)}&days=${$("aaDays").value}`);
+  $("aaDetail").innerHTML = `<div class="head"><h2>${esc(title)} · ${d.from}–${d.to}</h2><button id="aaClose">Затвори</button></div>
+    <div class="scroll"><table><thead><tr><th>Артикул</th><th>Подгрупа</th><th>Доставчик</th><th class="num">Оборот €</th><th class="num">Бройки</th><th class="num">Марж</th><th class="num">Тенденция</th><th class="num">Наличност</th><th class="num">Дни запас</th></tr></thead><tbody>
+    ${d.articles.map(a => `<tr><td class="name">${esc(a.name)}</td><td class="muted">${esc(a.sub || "")}</td><td class="muted">${esc(a.supplier || "")}</td><td class="num">${fmtE(a.rev)}</td><td class="num">${fmtN(a.units)}</td>
+      <td class="num">${a.margin_pct == null ? "—" : fmtN(a.margin_pct) + "%"}</td><td class="num">${trendTag(a.trend)}</td><td class="num">${fmtN(a.stock)}</td>
+      <td class="num ${a.cover_days != null && a.cover_days > 30 ? "low" : ""}">${fmtN(a.cover_days)}</td></tr>`).join("")}</tbody></table></div>`;
+  $("aaClose").onclick = () => $("aaDetail").innerHTML = "";
+}
+function initAnalScope() {
+  const set = all => { $("anAll").style.display = all ? "" : "none"; $("anNdk").style.display = all ? "none" : "";
+    $("anScopeAll").className = all ? "go" : ""; $("anScopeNdk").className = all ? "" : "go"; if (all) loadAll(); else loadAnal(); };
+  $("anScopeAll").onclick = () => set(true); $("anScopeNdk").onclick = () => set(false);
+  set(true);
+}
 
 /* ---------- анализи ---------- */
 function spark(vals, w = 160, h = 34, mark = -1) {
@@ -1467,7 +1532,7 @@ async function autoRefresh(force = false) {
     else if (tab === "orders" && !Object.keys(edits).length) await loadOrder();   // не губим незаписани корекции
     else if (tab === "cmp") { await loadCmp(); await loadDeliv(); }
     else if (tab === "qual") await loadQual();
-    else if (tab === "anal") await loadAnal();
+    else if (tab === "anal") { if ($("anAll").style.display !== "none") await loadAll(); else await loadAnal(); }
     else if (tab === "anom") await loadAnom();
     else if (tab === "nord") { await loadNord(); if (NSTORE) await showNord(NSTORE, true); }
     else if (tab === "learn") await loadLearn();
