@@ -308,3 +308,132 @@ def promos(db: Session) -> dict:
                     "extra_units": sum(r["extra_units"] for r in rows), "rev": round(sum(r["rev"] for r in rows), 2),
                     "rows": rows[:300]})
     return {"ready": True, "data_until": last.strftime("%d.%m.%Y"), "campaigns": out}
+
+
+# ------------------------------------------------------------------ топ артикули и аларми
+LOW_COVER_DAYS = 2.0
+TOP_N = 10
+
+
+def _store_names(db):
+    return {s.id: s.name for s in db.execute(select(m.Store).where(m.Store.is_active.is_(True))).scalars()}
+
+
+def _per_store_article(db, days: int, store_id: int | None = None):
+    """(store, code) -> [бройки, оборот, себестойност, бройки последна половина, бройки първа половина]."""
+    since, last, half = _window(db, days)
+    if not since:
+        return None, None, None, {}
+    q = """SELECT s.store_id, s.code, SUM(s.qty), SUM(s.rev), SUM(s.cost),
+                  SUM(CASE WHEN s.day >= :h THEN s.qty ELSE 0 END), SUM(CASE WHEN s.day < :h THEN s.qty ELSE 0 END)
+           FROM sa_sales s WHERE s.day BETWEEN :f AND :t""" + (" AND s.store_id = :sid" if store_id else "") + \
+        " GROUP BY s.store_id, s.code"
+    out = {(st, c): [float(a or 0), float(b or 0), float(k or 0), float(r or 0), float(p or 0)]
+           for st, c, a, b, k, r, p in db.execute(text(q), {"f": since, "t": last, "h": half, "sid": store_id}).all()}
+    return since, last, half, out
+
+
+def _arts_meta(db):
+    return {c: (n, g, s, sup) for c, n, g, s, sup in db.execute(text(
+        "SELECT code, name, grp, sub, supplier FROM sa_articles")).all()}
+
+
+def _stock_map(db, store_id: int | None = None):
+    q = "SELECT store_id, code, qty FROM sa_stock" + (" WHERE store_id = :s" if store_id else "")
+    return {(st, c): float(q_ or 0) for st, c, q_ in db.execute(text(q), {"s": store_id}).all()}
+
+
+def articles(db: Session, days: int = 14, store_id: int | None = None, group: str | None = None,
+             limit: int = 500) -> dict:
+    """Анализ по артикули: веригата или един магазин."""
+    _ensure(db)
+    since, last, half, psa = _per_store_article(db, days, store_id)
+    if not since:
+        return {"ready": False}
+    meta, stock = _arts_meta(db), _stock_map(db, store_id)
+    rdays = (last - half).days + 1
+    agg = defaultdict(lambda: [0.0] * 5)
+    stores_sold = defaultdict(int)
+    for (st, c), v in psa.items():
+        a = agg[c]
+        for i in range(5):
+            a[i] += v[i]
+        if v[0] > 0:
+            stores_sold[c] += 1
+    stk = defaultdict(float)
+    for (st, c), q in stock.items():
+        stk[c] += max(q, 0)
+    rows = []
+    for c, (q, r, k, qr, qp) in agg.items():
+        n, g, sub, sup = meta.get(c, (str(c), "Без група", "", ""))
+        if group and g != group:
+            continue
+        pdy = qr / rdays if rdays else 0
+        rows.append({"code": c, "name": n or str(c), "group": g, "sub": sub, "supplier": sup, "units": round(q),
+                     "rev": round(r, 2), "margin_pct": round(100 * (r - k) / r, 1) if r else None,
+                     "trend": round(100 * (qr - qp) / qp, 1) if qp else None, "per_day": round(pdy, 2),
+                     "stock": round(stk.get(c, 0)), "cover_days": round(stk.get(c, 0) / pdy, 1) if pdy else None,
+                     "stores": stores_sold.get(c, 0)})
+    rows.sort(key=lambda x: -x["rev"])
+    for i, x in enumerate(rows, 1):
+        x["rank"] = i
+    return {"ready": True, "from": since.strftime("%d.%m"), "to": last.strftime("%d.%m"),
+            "store": _store_names(db).get(store_id) if store_id else "Всички магазини",
+            "count": len(rows), "rows": rows[:limit]}
+
+
+def top_by_group(db: Session, days: int = 14, store_id: int | None = None, n: int = TOP_N) -> dict:
+    """Топ N артикула (по оборот) във всяка група - за веригата или за един магазин."""
+    a = articles(db, days, store_id, None, 100000)
+    if not a.get("ready"):
+        return {"ready": False}
+    groups = defaultdict(list)
+    for r in a["rows"]:
+        groups[r["group"]].append(r)
+    tot = {g: sum(x["rev"] for x in rows) for g, rows in groups.items()}
+    out = []
+    for g in sorted(groups, key=lambda g: -tot[g]):
+        rows = groups[g][:n]
+        for x in rows:
+            x["alert"] = ("свършил" if x["stock"] <= 0 else
+                          "ниска" if x["cover_days"] is not None and x["cover_days"] < LOW_COVER_DAYS else None)
+        out.append({"group": g, "rev": round(tot[g], 2), "articles": len(groups[g]), "top": rows})
+    return {"ready": True, "from": a["from"], "to": a["to"], "store": a["store"], "groups": out}
+
+
+def low_stock_alerts(db: Session, days: int = 14, n: int = TOP_N, cover: float = LOW_COVER_DAYS) -> dict:
+    """Аларма: топ N артикула във всяка група на всеки магазин, които са свършили или стигат за < cover дни."""
+    _ensure(db)
+    since, last, half, psa = _per_store_article(db, days)
+    if not since:
+        return {"ready": False}
+    meta, stock, stores = _arts_meta(db), _stock_map(db), _store_names(db)
+    rdays = (last - half).days + 1
+    per = defaultdict(list)   # (store, group) -> [(rev, code, v)]
+    for (st, c), v in psa.items():
+        if st not in stores:
+            continue
+        g = meta.get(c, (None, "Без група"))[1]
+        per[(st, g)].append((v[1], c, v))
+    alerts = []
+    for (st, g), items in per.items():
+        items.sort(key=lambda x: -x[0])
+        for rank, (rev, c, v) in enumerate(items[:n], 1):
+            pdy = v[3] / rdays if rdays else 0          # продажби на ден (последната половина)
+            if pdy <= 0:
+                continue
+            q = stock.get((st, c), 0.0)
+            cd = q / pdy if pdy else None
+            if q <= 0 or (cd is not None and cd < cover):
+                nm, _, sub, sup = meta.get(c, (str(c), g, "", ""))
+                rev_day = v[1] / days
+                alerts.append({"store_id": st, "store": stores[st], "group": g, "rank": rank, "code": c,
+                               "name": nm or str(c), "supplier": sup, "per_day": round(pdy, 1), "stock": round(q, 1),
+                               "cover_days": round(cd, 1) if cd is not None and q > 0 else 0,
+                               "status": "свършил" if q <= 0 else "ниска", "rev_per_day": round(rev_day, 2)})
+    alerts.sort(key=lambda a: (a["status"] != "свършил", -a["rev_per_day"]))
+    out_n = sum(1 for a in alerts if a["status"] == "свършил")
+    return {"ready": True, "from": since.strftime("%d.%m"), "to": last.strftime("%d.%m"), "cover_threshold": cover,
+            "total": len(alerts), "out": out_n, "low": len(alerts) - out_n,
+            "lost_rev_per_day": round(sum(a["rev_per_day"] for a in alerts if a["status"] == "свършил"), 2),
+            "stores": len({a["store_id"] for a in alerts}), "rows": alerts[:1500]}

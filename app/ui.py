@@ -1014,3 +1014,23 @@ def an_all_detail(by: str, key: str, days: int = Query(14, ge=4, le=60), db: Ses
 def an_all_promos(db: Session = Depends(get_db)):
     from . import salesall
     return salesall.promos(db)
+
+
+@router.get("/ui/analytics/all/articles")
+def an_all_articles(days: int = Query(14, ge=4, le=60), store_id: int | None = None, group: str | None = None,
+                    db: Session = Depends(get_db)):
+    from . import salesall
+    return salesall.articles(db, days, store_id, group)
+
+
+@router.get("/ui/analytics/all/top")
+def an_all_top(days: int = Query(14, ge=4, le=60), store_id: int | None = None, db: Session = Depends(get_db)):
+    from . import salesall
+    return salesall.top_by_group(db, days, store_id)
+
+
+@router.get("/ui/analytics/all/alerts")
+def an_all_alerts(days: int = Query(14, ge=4, le=60), cover: float = Query(2.0, ge=0.5, le=14),
+                  db: Session = Depends(get_db)):
+    from . import salesall
+    return salesall.low_stock_alerts(db, days, 10, cover)

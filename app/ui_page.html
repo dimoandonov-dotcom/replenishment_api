@@ -426,10 +426,20 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <span class="note" id="anAllNote"></span></div>
   <div id="anAll">
     <div class="board" id="aaKpis"></div>
+    <div class="head"><h2>🚨 Ниска наличност на топ артикули</h2><span class="note">топ 10 във всяка група на всеки магазин · свършили или стигат за под 2 дни</span></div>
+    <div class="board" id="alKpis"></div>
+    <div class="bar"><select id="alStore"><option value="">Всички магазини</option></select><select id="alGroup"><option value="">Всички групи</option></select>
+      <select id="alStatus"><option value="">Свършили и ниски</option><option value="свършил">Само свършили</option><option value="ниска">Само ниски</option></select></div>
+    <div class="scroll" style="max-height:520px;overflow:auto"><table><thead><tr><th>Магазин</th><th>Артикул</th><th>Група</th><th class="num">№ в групата</th><th class="num">Продава /ден</th><th class="num">Наличност</th><th class="num">Стига за (дни)</th><th>Състояние</th><th class="num">Оборот /ден €</th></tr></thead>
+    <tbody id="alBody"></tbody></table></div>
+    <div class="head" style="margin-top:22px"><h2>🏆 Топ 10 артикула по групи</h2>
+      <select id="tpStore"><option value="">Всички магазини (общо)</option></select></div>
+    <div id="tpBody"></div>
     <div class="head"><h2>📣 Промоции от Мистрал</h2><span class="note">всички фирми · ефект спрямо 14-те дни преди промото</span></div>
     <div id="aaPromo"></div>
     <div class="head" style="margin-top:22px"><h2>📊 Продажби и наличности</h2>
-      <div class="bar" style="margin:0"><select id="aaBy"><option value="grp">по групи</option><option value="supplier">по доставчици</option><option value="store">по магазини</option></select>
+      <div class="bar" style="margin:0"><select id="aaBy"><option value="grp">по групи</option><option value="article">по артикули</option><option value="supplier">по доставчици</option><option value="store">по магазини</option></select>
+      <select id="aaStore" style="display:none"><option value="">Всички магазини</option></select>
       <select id="aaDays"><option value="7">7 дни</option><option value="14" selected>14 дни</option><option value="30">30 дни</option></select></div></div>
     <div class="scroll"><table><thead><tr><th id="aaCol">Група</th><th class="num">Оборот €</th><th class="num">Дял</th><th class="num">Марж</th><th class="num">Тенденция</th><th class="num">Бройки</th><th class="num">Артикули</th><th class="num">Наличност €</th><th class="num">Дни запас</th></tr></thead>
     <tbody id="aaBody"></tbody></table></div>
@@ -910,10 +920,69 @@ function renderPlano() {
 
 
 
+
+/* ---------- топ артикули, аларми, анализ по артикули ---------- */
+let AL_ROWS = [], STORES_LIST = null;
+async function storesList() {
+  if (!STORES_LIST) STORES_LIST = (await api("/stores")).filter(s => s.is_active).sort((a, b) => a.name.localeCompare(b.name, "bg"));
+  return STORES_LIST;
+}
+function fillStores(sel) { if (sel.options.length > 1) return; STORES_LIST.forEach(s => sel.insertAdjacentHTML("beforeend", `<option value="${s.id}">${esc(s.name)}</option>`)); }
+const statusTag = st => st === "свършил" ? '<span class="tag bad">свършил</span>' : st === "ниска" ? '<span class="tag warn">ниска</span>' : "";
+async function loadAlerts() {
+  const d = await api("/ui/analytics/all/alerts?days=14");
+  if (!d.ready) { $("alBody").innerHTML = `<tr><td colspan="9" class="empty">Данните още се дърпат…</td></tr>`; return; }
+  $("alKpis").innerHTML = [["СВЪРШИЛИ ТОП АРТИКУЛИ", fmtN(d.out), "a", "наличност 0 или минус"], ["НИСКА НАЛИЧНОСТ", fmtN(d.low), "", `стига за под ${fmtN(d.cover_threshold)} дни`],
+    ["ИЗГУБЕН ОБОРОТ НА ДЕН", fmtE(d.lost_rev_per_day) + " €", "a", "от свършилите"], ["МАГАЗИНИ", fmtN(d.stores), "", "със сигнали"]]
+    .map(([l, v, c, s]) => `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("");
+  AL_ROWS = d.rows; fillStores($("alStore"));
+  const gs = [...new Set(d.rows.map(r => r.group))].sort();
+  if ($("alGroup").options.length <= 1) gs.forEach(g => $("alGroup").insertAdjacentHTML("beforeend", `<option>${esc(g)}</option>`));
+  ["alStore", "alGroup", "alStatus"].forEach(id => $(id).onchange = renderAlerts);
+  renderAlerts();
+}
+function renderAlerts() {
+  const st = $("alStore").value, g = $("alGroup").value, ss = $("alStatus").value;
+  const rows = AL_ROWS.filter(r => (!st || String(r.store_id) === st) && (!g || r.group === g) && (!ss || r.status === ss));
+  $("alBody").innerHTML = rows.slice(0, 400).map(r => `<tr><td>${esc(r.store)}</td><td class="name">${esc(r.name)}</td><td class="muted">${esc(r.group)}</td>
+    <td class="num">${r.rank}</td><td class="num">${fmtN(r.per_day)}</td><td class="num ${r.stock <= 0 ? "low" : ""}">${fmtN(r.stock)}</td>
+    <td class="num">${r.status === "свършил" ? "—" : fmtN(r.cover_days)}</td><td>${statusTag(r.status)}</td><td class="num">${fmtE(r.rev_per_day)}</td></tr>`).join("")
+    + (rows.length > 400 ? `<tr><td colspan="9" class="note">… и още ${fmtN(rows.length - 400)} — филтрирай по магазин или група</td></tr>` : "")
+    || `<tr><td colspan="9" class="empty">Няма сигнали 🎉</td></tr>`;
+}
+async function loadTop() {
+  fillStores($("tpStore")); $("tpStore").onchange = loadTop;
+  const sid = $("tpStore").value;
+  const d = await api(`/ui/analytics/all/top?days=14${sid ? "&store_id=" + sid : ""}`);
+  if (!d.ready) { $("tpBody").innerHTML = `<div class="empty">Данните още се дърпат…</div>`; return; }
+  $("tpBody").innerHTML = `<p class="note">${esc(d.store)} · продажби ${d.from}–${d.to} · наличност сега</p>` + d.groups.map((g, i) => `
+    <details class="card" style="margin-bottom:8px;padding:10px 14px" ${i < 3 ? "open" : ""}>
+      <summary style="cursor:pointer;font-weight:700">${esc(g.group)} · ${fmtE(g.rev)} € · ${g.articles} артикула
+        ${g.top.some(x => x.alert) ? `<span class="tag bad" style="margin-left:6px">${g.top.filter(x => x.alert).length} с ниска наличност</span>` : ""}</summary>
+      <div class="scroll" style="margin-top:8px"><table><thead><tr><th class="num">№</th><th>Артикул</th><th>Доставчик</th><th class="num">Оборот €</th><th class="num">Бройки</th><th class="num">Продава /ден</th><th class="num">Марж</th><th class="num">Тенденция</th><th class="num">Наличност</th><th class="num">Стига за (дни)</th><th></th></tr></thead><tbody>
+      ${g.top.map((x, k) => `<tr><td class="num">${k + 1}</td><td class="name">${esc(x.name)}</td><td class="muted">${esc(x.supplier || "")}</td><td class="num">${fmtE(x.rev)}</td><td class="num">${fmtN(x.units)}</td>
+        <td class="num">${fmtN(x.per_day)}</td><td class="num">${x.margin_pct == null ? "—" : fmtN(x.margin_pct) + "%"}</td><td class="num">${trendTag(x.trend)}</td>
+        <td class="num ${x.stock <= 0 ? "low" : ""}">${fmtN(x.stock)}</td><td class="num">${fmtN(x.cover_days)}</td><td>${statusTag(x.alert)}</td></tr>`).join("")}
+      </tbody></table></div></details>`).join("");
+}
+async function loadArticlesView() {
+  fillStores($("aaStore"));
+  const sid = $("aaStore").value;
+  const d = await api(`/ui/analytics/all/articles?days=${$("aaDays").value}${sid ? "&store_id=" + sid : ""}`);
+  $("aaCol").textContent = "Артикул";
+  $("aaBody").innerHTML = d.rows.slice(0, 300).map(r => `<tr><td class="name"><b>${r.rank}.</b> ${esc(r.name)}<div class="muted" style="font-size:11px">${esc(r.group)} · ${esc(r.supplier || "")}</div></td>
+    <td class="num">${fmtE(r.rev)}</td><td class="num">${fmtN(r.per_day)}/ден</td><td class="num">${r.margin_pct == null ? "—" : fmtN(r.margin_pct) + "%"}</td>
+    <td class="num">${trendTag(r.trend)}</td><td class="num">${fmtN(r.units)}</td><td class="num">${fmtN(r.stores)} маг.</td><td class="num ${r.stock <= 0 ? "low" : ""}">${fmtN(r.stock)} бр.</td>
+    <td class="num ${r.cover_days != null && r.cover_days < 2 ? "low" : ""}">${fmtN(r.cover_days)}</td></tr>`).join("") + `<tr><td colspan="9" class="note">Показани топ 300 от ${fmtN(d.count)} артикула · ${esc(d.store)}</td></tr>`;
+}
+
 /* ---------- анализи: всички фирми ---------- */
 let AA_BY = "grp";
 async function loadAll() {
-  $("aaBy").onchange = () => { AA_BY = $("aaBy").value; loadAllTable(); };
+  await storesList();
+  $("aaBy").onchange = () => { AA_BY = $("aaBy").value; $("aaStore").style.display = AA_BY === "article" ? "" : "none"; loadAllTable(); };
+  $("aaStore").onchange = loadAllTable;
+  loadAlerts(); loadTop();
   $("aaDays").onchange = loadAllTable;
   const st = await api("/ui/analytics/all/status").catch(() => ({}));
   $("anAllNote").textContent = st.running ? `⏳ дърпам данни от Мистрал: ${st.progress}` : "";
@@ -930,6 +999,7 @@ async function loadAll() {
       </tbody></table></div></details>`).join("") + `<p class="note">Данни до ${p.data_until || "—"}. „Свършил в“ — магазини с наличност 0 или минус сега.</p>`;
 }
 async function loadAllTable() {
+  if (AA_BY === "article") return loadArticlesView();
   const d = await api(`/ui/analytics/all?days=${$("aaDays").value}&by=${AA_BY}`);
   if (!d.ready) { $("aaBody").innerHTML = `<tr><td colspan="9" class="empty">Данните още се дърпат от Мистрал…</td></tr>`; return; }
   const t = d.totals;
