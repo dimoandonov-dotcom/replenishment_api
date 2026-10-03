@@ -102,7 +102,9 @@ def summary(db: Session, days: int = 14) -> dict:
             for k in ("both", "only_delivered", "only_ours", "delivered_units", "our_units", "delivered_eur", "our_eur"):
                 tot[k] += r[k]
             tot["days"] += 1
-        if key in ours and not D and O:
+        # доставките от Мистрал се дърпат нощем -> днешният ден още не е пълен
+        r["pending"] = d >= datetime.now(SOFIA).date()
+        if key in ours and not D and O and not r["pending"]:
             tot["ordered_not_delivered"] += 1
     lines = tot["both"] + tot["only_delivered"]
     tot["match_pct"] = round(100 * tot["both"] / lines, 1) if lines else 0.0
