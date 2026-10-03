@@ -458,4 +458,9 @@ def low_stock_alerts(db: Session, days: int = 14, n: int = TOP_N, cover: float =
             "total": len(alerts), "out": out_n, "low": len(alerts) - out_n,
             "lost_rev_per_day": round(sum(a["rev_per_day"] for a in alerts if a["status"] == "свършил"), 2),
             "stores": len({a["store_id"] for a in alerts}), "untracked_articles": len(untracked),
-            "untracked_positions": skipped, "rows": alerts[:1500]}
+            "untracked_positions": skipped, "rows": alerts[:1500],
+            "untracked": sorted([{"code": c, "name": (meta.get(c) or (str(c),))[0] or str(c),
+                                  "group": (meta.get(c) or (None, "Без група"))[1],
+                                  "stores_sold": sold_in[c], "stores_negative": neg[c], "stores_zero_or_neg": nonpos[c],
+                                  "rev": round(sum(v[1] for (st, cc), v in psa.items() if cc == c), 2)}
+                                 for c in untracked], key=lambda x: -x["rev"])[:400]}
