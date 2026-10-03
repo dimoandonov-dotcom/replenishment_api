@@ -507,6 +507,7 @@ class ManualOrderIn(BaseModel):
     lines: list[ManualLine]
     text: str | None = None
     source: str = "anindk"
+    made_at: datetime | None = None   # кога е направена (за закъснели копия)
 
 
 @router.post("/compare/manual-order")
@@ -515,7 +516,7 @@ def compare_manual_order(payload: ManualOrderIn, db: Session = Depends(get_db)):
     from . import compare
     return compare.record(db, payload.store,
                           [l.model_dump() for l in payload.lines],
-                          payload.text, payload.source)
+                          payload.text, payload.source, payload.made_at)
 
 
 @router.post("/compare/upload")
@@ -530,15 +531,23 @@ async def compare_upload(files: list[UploadFile] = File(...), db: Session = Depe
     out = []
     for f in files:
         wb = openpyxl.load_workbook(BytesIO(await f.read()), data_only=True)
-        ws = wb.worksheets[0]
-        lines = []
-        for r in ws.iter_rows(min_row=2, values_only=True, max_col=5):
-            if r and r[0] is not None and isinstance(r[3], (int, float)):
-                lines.append({"sku": str(int(r[0])) if isinstance(r[0], (int, float)) else str(r[0]),
-                              "name": r[1], "qty": float(r[3])})
-        store = (f.filename or "").rsplit(".", 1)[0]
-        res = compare.record(db, store, lines, None, "upload")
-        out.append({"file": f.filename, **res})
+        # файлът от anindk („Заявки_….xlsx") има по един лист за магазин;
+        # иначе - един лист, магазинът е в името на файла
+        multi = len(wb.worksheets) > 1 or not wb.worksheets[0].title.lower().startswith("sheet")
+        for ws in wb.worksheets:
+            title = ws.title.strip()
+            if "капачки" in title.lower():
+                continue
+            lines = []
+            for r in ws.iter_rows(min_row=2, values_only=True, max_col=5):
+                if r and r[0] is not None and len(r) > 3 and isinstance(r[3], (int, float)):
+                    lines.append({"sku": str(int(r[0])) if isinstance(r[0], (int, float)) else str(r[0]),
+                                  "name": r[1], "qty": float(r[3])})
+            if not lines:
+                continue
+            store = title if multi else (f.filename or "").rsplit(".", 1)[0]
+            res = compare.record(db, store, lines, None, "upload")
+            out.append({"file": f.filename, "sheet": title, **res})
     return out
 
 

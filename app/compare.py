@@ -58,13 +58,19 @@ def _fresh_stock(db: Session, store_id: int | None) -> datetime | None:
 
 
 def record(db: Session, store_raw: str, lines: list[dict], raw_text: str | None,
-           source: str = "anindk") -> dict:
-    """lines: [{sku, name, qty}] - заявката на магазина в бройки."""
+           source: str = "anindk", made_at: datetime | None = None) -> dict:
+    """lines: [{sku, name, qty}] - заявката на магазина в бройки.
+    made_at - кога Ани е направила заявката (при закъсняло копие от опашката)."""
     store_id = resolve_store(db, store_raw)
     stock_at = _fresh_stock(db, store_id)
     order = m.ManualOrder(store_id=store_id, store_raw=store_raw.strip(),
                           raw_text=(raw_text or "")[:20000] or None,
                           source=source, stock_at=stock_at)
+    if made_at is not None:
+        if made_at.tzinfo is None:
+            made_at = made_at.replace(tzinfo=timezone.utc)
+        if timedelta(0) <= datetime.now(timezone.utc) - made_at <= timedelta(days=3):
+            order.received_at = made_at
     db.add(order)
     db.flush()
 
