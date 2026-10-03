@@ -98,8 +98,8 @@ def _sync(db: Session, days: int):
             cur.execute(f"SELECT ID, MATERIAL FROM MATERIALNAME WHERE ID IN ({','.join(map(str, ids[j:j+1000]))})")
             nm.update({r["ID"]: r["MATERIAL"] for r in cur.fetchall()})
         # група: кодът при артикула (MATERIAL.CATEGORY, напр. "1.76.") -> име/път от CATEGORY
-        cur.execute("SELECT CATEGORY AS code, MAX(FULLNAME) AS full, MAX(NAME) AS name FROM CATEGORY GROUP BY CATEGORY")
-        cname = {(r["code"] or "").strip(): ((r["full"] or "").strip() or (r["name"] or "").strip()) for r in cur.fetchall()}
+        cur.execute("SELECT CATEGORY AS code, MAX(FULLNAME) AS fname, MAX(NAME) AS cname FROM CATEGORY GROUP BY CATEGORY")
+        cname = {(r["code"] or "").strip(): ((r["fname"] or "").strip() or (r["cname"] or "").strip()) for r in cur.fetchall()}
         cur.execute(f"""SELECT MATERIALCODE AS code, MAX(CATEGORY) AS cat, MAX(SEARCHNAME) AS nm
                         FROM MATERIAL WITH (NOLOCK) WHERE LOCATIONID IN ({L}) GROUP BY MATERIALCODE""")
         mcat = {int(r["code"]): ((r["cat"] or "").strip(), r["nm"]) for r in cur.fetchall()}
