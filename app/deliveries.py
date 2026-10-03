@@ -104,7 +104,8 @@ def summary(db: Session, days: int = 14) -> dict:
             tot["days"] += 1
         # доставките от Мистрал се дърпат нощем -> днешният ден още не е пълен
         r["pending"] = d >= datetime.now(SOFIA).date()
-        if key in ours and not D and O and not r["pending"]:
+        # само реалните заявки (на Ани) - нашите още не се пращат към НДК
+        if key in ani and not D and not r["pending"]:
             tot["ordered_not_delivered"] += 1
     lines = tot["both"] + tot["only_delivered"]
     tot["match_pct"] = round(100 * tot["both"] / lines, 1) if lines else 0.0

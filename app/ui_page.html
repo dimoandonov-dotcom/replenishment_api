@@ -1122,12 +1122,12 @@ async function loadDeliv() {
     ["ДОСТАВКИ", fmtN(t.days || 0), "t", "магазин × ден с наша заявка"], ["САМО ДОСТАВЕНО", fmtN(t.only_delivered || 0), "", "доставено, а ние не бихме"],
     ["САМО MinMaxAI", fmtN(t.only_ours || 0), "", "бихме поръчали, не е доставено"], ["ДОСТАВЕНО", `${fmtN(t.delivered_units || 0)} бр.`, "", fmtE(t.delivered_eur || 0) + " €"],
     ["MinMaxAI", `${fmtN(t.our_units || 0)} бр.`, "", fmtE(t.our_eur || 0) + " €"],
-    ["ПОРЪЧАНО, НЕ ЗАВЕДЕНО", fmtN(t.ordered_not_delivered || 0), "", "заявка без доставка в Мистрал (приключили дни)"]];
+    ["ПОРЪЧАНО, НЕ ЗАВЕДЕНО", fmtN(t.ordered_not_delivered || 0), "", "заявка на Ани без доставка в Мистрал (приключили дни)"]];
   $("dKpis").innerHTML = tiles.map(([l, v, c, s]) => `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("");
   $("dBody").innerHTML = d.rows.map(r => `<tr data-s="${r.store_id}" data-d="${r.iso}" style="cursor:pointer"><td>${r.day}</td><td class="name">${esc(r.store)}
       ${r.has_ours ? "" : '<span class="tag off" title="Няма заявка на MinMaxAI за деня">без наша</span>'}${r.has_ani ? ' <span class="tag">Ани</span>' : ""}
       ${r.pending ? ' <span class="tag off" title="Доставките за днес се дърпат от Мистрал през нощта">⏳ чака доставка</span>'
-        : (r.has_ours || r.has_ani) && !r.delivered_lines ? ' <span class="tag bad" title="Има заявка, но няма заведена доставка">няма доставка</span>' : ""}</td>
+        : r.has_ani && !r.delivered_lines ? ' <span class="tag bad" title="Ани е поръчала, но няма заведена доставка">няма доставка</span>' : ""}</td>
     <td class="num">${r.both}</td><td class="num">${r.only_delivered}</td><td class="num">${r.only_ours}</td>
     <td class="num">${fmtN(r.delivered_units)}</td><td class="num">${fmtN(r.our_units)}</td><td class="num">${fmtE(r.delivered_eur)}</td><td class="num">${fmtE(r.our_eur)}</td></tr>`).join("")
     || `<tr><td colspan="9" class="empty">Още няма доставки за периода — данните се дърпат всяка нощ в 02:30.</td></tr>`;
