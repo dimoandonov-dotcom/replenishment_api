@@ -418,13 +418,18 @@ def low_stock_alerts(db: Session, days: int = 14, n: int = TOP_N, cover: float =
         per[(st, g)].append((v[1], c, v))
     # артикули, при които наличността реално не се води (доставките не се завеждат):
     # на минус в поне половината магазини, където се продават -> не са сигнал за свършване
-    neg, sold_in = defaultdict(int), defaultdict(int)
+    neg, nonpos, sold_in = defaultdict(int), defaultdict(int), defaultdict(int)
     for (st, c), v in psa.items():
         if v[0] > 0:
             sold_in[c] += 1
-            if stock.get((st, c), 0.0) < 0:
+            q = stock.get((st, c), 0.0)
+            if q < 0:
                 neg[c] += 1
-    untracked = {c for c in sold_in if sold_in[c] >= 3 and neg[c] >= 0.5 * sold_in[c]}
+            if q <= 0:
+                nonpos[c] += 1
+    # на минус в половината магазини, или 0/минус в 80% от тях (кафе на чаша, топла точка, промо пакети)
+    untracked = {c for c in sold_in if sold_in[c] >= 3 and
+                 (neg[c] >= 0.5 * sold_in[c] or nonpos[c] >= 0.8 * sold_in[c])}
     skipped = 0
     alerts = []
     for (st, g), items in per.items():
