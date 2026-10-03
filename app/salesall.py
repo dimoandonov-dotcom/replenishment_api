@@ -97,18 +97,30 @@ def _sync(db: Session, days: int):
         for j in range(0, len(ids), 1000):
             cur.execute(f"SELECT ID, MATERIAL FROM MATERIALNAME WHERE ID IN ({','.join(map(str, ids[j:j+1000]))})")
             nm.update({r["ID"]: r["MATERIAL"] for r in cur.fetchall()})
-        cur.execute(f"SELECT ID, LOCATIONID, FULLNAME FROM CATEGORY WHERE LOCATIONID IN ({L})")
-        cf = {(r["LOCATIONID"], int(r["ID"])): (r["FULLNAME"] or "") for r in cur.fetchall()}
+        # група: кодът при артикула (MATERIAL.CATEGORY, напр. "1.76.") -> име/път от CATEGORY
+        cur.execute("SELECT CATEGORY AS code, MAX(FULLNAME) AS full, MAX(NAME) AS name FROM CATEGORY GROUP BY CATEGORY")
+        cname = {(r["code"] or "").strip(): ((r["full"] or "").strip() or (r["name"] or "").strip()) for r in cur.fetchall()}
+        cur.execute(f"""SELECT MATERIALCODE AS code, MAX(CATEGORY) AS cat, MAX(SEARCHNAME) AS nm
+                        FROM MATERIAL WITH (NOLOCK) WHERE LOCATIONID IN ({L}) GROUP BY MATERIALCODE""")
+        mcat = {int(r["code"]): ((r["cat"] or "").strip(), r["nm"]) for r in cur.fetchall()}
         pn = {}
         pids = sorted(set(parts.values()))
         for j in range(0, len(pids), 1000):
             cur.execute(f"SELECT ID, PARTNERNAME FROM PARTNERNAME WHERE ID IN ({','.join(map(str, pids[j:j+1000]))})")
             pn.update({r["ID"]: r["PARTNERNAME"] for r in cur.fetchall()})
+
+        def path(code: str) -> list[str]:
+            full = cname.get(code, "")
+            if full:
+                return [x.strip() for x in full.strip("/").split("/") if x.strip()]
+            parts_ = [p for p in code.split(".") if p]      # "1.76." -> ["1.", "1.76."]
+            return [cname.get(".".join(parts_[:i + 1]) + ".", "") for i in range(len(parts_)) if cname.get(".".join(parts_[:i + 1]) + ".")]
+
         arts = []
-        for code in set(names) | set(cats) | set(parts):
-            full = cf.get(cats.get(code, (None, None)), "")
-            seg = [x.strip() for x in full.strip("/").split("/") if x.strip()]
-            arts.append({"c": code, "n": nm.get(names.get(code)), "g": seg[0] if seg else "Без група",
+        for code in set(names) | set(parts) | set(mcat):
+            cat, mnm = mcat.get(code, ("", None))
+            seg = path(cat) if cat else []
+            arts.append({"c": code, "n": nm.get(names.get(code)) or mnm, "g": seg[0] if seg else "Без група",
                          "s": seg[1] if len(seg) > 1 else (seg[0] if seg else "Без група"),
                          "p": pn.get(parts.get(code)) or "Неизвестен"})
         for j in range(0, len(arts), 2000):
