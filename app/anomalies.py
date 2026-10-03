@@ -35,6 +35,7 @@ KIND = {
     "negative": "Отрицателна наличност", "phantom": "Фантомна наличност",
     "writeoff": "Брак / отписване", "correction": "Ръчни корекции надолу",
     "undelivered": "Незаведена доставка", "short_delivery": "Непълна доставка",
+    "suspicious_delivery": "Подозрително голяма доставка (OCR?)",
 }
 PHANTOM_DAYS = 4
 
@@ -194,6 +195,35 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
                 out.append({"kind": "phantom", "store_id": sid, "store": stores[sid], "sku": sku(aid), "name": name(aid),
                             "qty": st, "eur": round(st * price(aid), 2), "day": today.strftime("%d.%m"),
                             "info": f"продаваше {sum(ser[:-PHANTOM_DAYS]) / (14 - PHANTOM_DAYS):.1f}/ден, от {PHANTOM_DAYS} дни 0 продажби"})
+
+    # подозрително големи доставки / корекции нагоре - типично при грешно OCR въвеждане
+    try:
+        from . import deliveries as _dl
+        dsince = today - timedelta(days=days)
+        ani_q = _dl._ani(db, dsince)
+        mx = {(x.store_id, x.article_id): float(x.max_stock)
+              for x in db.execute(select(m.StoreArticleSetting)).scalars().all()}
+        q = text("""SELECT store_id, article_id, day, optype, qty_in FROM stock_movements
+                    WHERE optype IN (2, 38) AND qty_in >= 50 AND day >= :d""")
+        for sid, aid, d, op, qin in db.execute(q, {"d": dsince}).all():
+            if (store_id and sid != store_id) or sid not in stores or aid not in arts:
+                continue
+            qin = float(qin)
+            ordered = ani_q.get((sid, d), {}).get(aid)
+            m_ = mx.get((sid, aid), 0.0)
+            why = None
+            if ordered and qin > 3 * ordered:
+                why = f"поръчано {ordered:g} бр., заведено {qin:g} бр. ({qin / ordered:.0f}×)"
+            elif not ordered and m_ > 0 and qin > 4 * m_:
+                why = f"заведено {qin:g} бр. при макс {m_:g} в магазина ({qin / m_:.0f}×)"
+            elif m_ == 0 and qin >= 100:
+                why = f"заведено {qin:g} бр., а артикулът няма мин/макс в магазина"
+            if why:
+                out.append({"kind": "suspicious_delivery", "store_id": sid, "store": stores[sid], "sku": sku(aid),
+                            "name": name(aid), "qty": qin, "eur": round(qin * price(aid), 2), "day": d.strftime("%d.%m"),
+                            "info": ("доставка: " if op == 2 else "корекция нагоре: ") + why})
+    except Exception:
+        db.rollback()
 
     # поръчано от Ани -> доставено ли е и заведено в Мистрал? (само завършени дни)
     try:
