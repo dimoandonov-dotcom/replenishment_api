@@ -957,7 +957,7 @@ async function loadTop() {
   const d = await api(`/ui/analytics/all/top?days=14${sid ? "&store_id=" + sid : ""}`);
   if (!d.ready) { $("tpBody").innerHTML = `<div class="empty">Данните още се дърпат…</div>`; return; }
   $("tpBody").innerHTML = `<p class="note">${esc(d.store)} · продажби ${d.from}–${d.to} · наличност сега</p>` + d.groups.map((g, i) => `
-    <details class="card" style="margin-bottom:8px;padding:10px 14px" ${i < 3 ? "open" : ""}>
+    <details class="card" style="margin-bottom:8px;padding:10px 14px">
       <summary style="cursor:pointer;font-weight:700">${esc(g.group)} · ${fmtE(g.rev)} € · ${g.articles} артикула
         ${g.top.some(x => x.alert) ? `<span class="tag bad" style="margin-left:6px">${g.top.filter(x => x.alert).length} с ниска наличност</span>` : ""}</summary>
       <div class="scroll" style="margin-top:8px"><table><thead><tr><th class="num">№</th><th>Артикул</th><th>Доставчик</th><th class="num">Оборот €</th><th class="num">Бройки</th><th class="num">Продава /ден</th><th class="num">Марж</th><th class="num">Тенденция</th><th class="num">Наличност</th><th class="num">Стига за (дни)</th><th></th></tr></thead><tbody>
@@ -990,7 +990,7 @@ async function loadAll() {
   await loadAllTable();
   const p = await api("/ui/analytics/all/promos");
   $("aaPromo").innerHTML = !p.ready ? `<div class="empty">Данните още се дърпат…</div>` : (p.campaigns || []).map((c, ci) => `
-    <details class="card" style="margin-bottom:10px;padding:12px 14px" ${ci === 0 ? "open" : ""}>
+    <details class="card" style="margin-bottom:10px;padding:12px 14px">
       <summary style="cursor:pointer;font-weight:700">${c.active ? "🟢" : "⚪"} ${c.start} – ${c.end} · ${c.items} артикула · продадени ${fmtN(c.units)} бр. (${c.extra_units >= 0 ? "+" : ""}${fmtN(c.extra_units)} над обичайното) · ${fmtE(c.rev)} €</summary>
       <div class="scroll" style="margin-top:10px"><table><thead><tr><th>Артикул</th><th>Група</th><th>Доставчик</th><th class="num">Промо цена</th><th class="num">Преди /ден</th><th class="num">В промо /ден</th><th class="num">Ефект</th><th class="num">Оборот €</th><th class="num">Марж</th><th class="num">Свършил в</th></tr></thead><tbody>
       ${c.rows.map(r => `<tr><td class="name">${esc(r.name)}</td><td class="muted">${esc(r.group || "")}</td><td class="muted">${esc(r.supplier || "")}</td>
