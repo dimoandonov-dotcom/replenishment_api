@@ -1236,7 +1236,7 @@ async function loadNord() {
   const d = await api("/ui/not-ordered"), t = d.totals || {};
   const tiles = [["ПРОДАВАТ СЕ, А НЕ СЕ ПОРЪЧВАТ", fmtN(t.selling || 0), "a", "позиции магазин × артикул", "selling"],
     ["🚫 НЕ СЕ ПОРЪЧВА", fmtN(t.no_order || 0), "", "отбелязани в асортимента", "no_order"], ["⛔ СПРЕНИ 0-0", fmtN(t.stopped || 0), "", "Viber правила / ръчно", "stopped"],
-    ["❔ БЕЗ МИН/МАКС", fmtN(t.no_minmax || 0), "", "по планограма", "no_minmax"]];
+    ["❔ БЕЗ МИН/МАКС", fmtN(t.no_minmax || 0), "", "по планограма", "no_minmax"], ["🐢 БАВНИ НА ОПАКОВКИ", fmtN(t.slow_pack || 0), "", "1 опаковка стига за над 21 дни — решаваш ти", "slow_pack"]];
   $("nKpis").innerHTML = tiles.map(([l, v, c, s, k]) => `<div class="tile" data-k="${k}" style="cursor:pointer" title="Покажи списъка"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s} · <u>виж →</u></div></div>`).join("");
   document.querySelectorAll("#nKpis .tile[data-k]").forEach(el => el.onclick = () => showNordList(el.dataset.k));
   $("nBody").innerHTML = d.stores.map(r => `<tr data-s="${r.store_id}" style="cursor:pointer"><td class="name">${esc(r.store)}</td>

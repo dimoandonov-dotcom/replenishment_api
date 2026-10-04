@@ -26,6 +26,7 @@ SOFIA = timezone(timedelta(hours=3))
 REASONS = {
     "no_order": "🚫 Отбелязан „Не се поръчва“",
     "stopped": "⛔ Спрян 0-0",
+    "slow_pack": "🐢 Бавен: 1 опаковка стига за над 21 дни",
     "no_minmax": "❔ Без мин/макс",
 }
 
@@ -41,6 +42,13 @@ def _sales14(db: Session, store_id: int | None = None) -> dict:
     return {(s, a): max(float(v or 0), 0.0) for s, a, v in db.execute(q).all()}
 
 
+_PIECE_CACHE = {"at": 0.0, "ids": set()}
+
+
+def _piece():
+    return _PIECE_CACHE["ids"]
+
+
 def store_rows(db: Session, store_id: int, arts=None, sales=None, plano_all=None, settings_all=None) -> list[dict]:
     from .learning import formula, _capped
     arts = arts or {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
@@ -51,6 +59,9 @@ def store_rows(db: Session, store_id: int, arts=None, sales=None, plano_all=None
         s.article_id: s for s in db.execute(select(m.StoreArticleSetting)
                                             .where(m.StoreArticleSetting.store_id == store_id)).scalars().all()})
     stock = service.latest_stock_map(db, store_id)
+    import time as _time
+    if _time.time() - _PIECE_CACHE["at"] > 600:
+        _PIECE_CACHE.update(at=_time.time(), ids=service.piece_orderable(db))
     rows = []
     for aid in plano:  # само артикулите от планограмата
         a = arts.get(aid)
@@ -66,7 +77,16 @@ def store_rows(db: Session, store_id: int, arts=None, sales=None, plano_all=None
         elif float(s.max_stock) == 0:
             reason = "stopped"
         else:
-            continue
+            # бавен артикул на цели опаковки, който е под минимума, а не се поръчва автоматично
+            from .engine import MAX_PACK_COVER_DAYS
+            sdp = sold / 14
+            st_q = stock.get(aid)
+            pk = int(getattr(a, "pack_size", 1) or 1)
+            if (pk > 1 and sdp > 0 and pk / sdp > MAX_PACK_COVER_DAYS and st_q is not None
+                    and st_q < float(s.min_stock) and aid not in _piece()):
+                reason = "slow_pack"
+            else:
+                continue
         cls, mn, mx = formula(sold)
         if (_capped(a.name) or _capped(a.supplier_name or "")) and mx > 3:
             mn, mx = min(mn, 3), 3
@@ -76,6 +96,7 @@ def store_rows(db: Session, store_id: int, arts=None, sales=None, plano_all=None
             "in_planogram": in_plano, "sold_14d": round(sold, 1), "per_day": round(sold / 14, 2),
             "stock": stock.get(aid), "no_order_reason": a.no_order_reason, "no_order_by": a.no_order_by,
             "suggest_min": mn if sold > 0 else None, "suggest_max": mx if sold > 0 else None,
+            "pack_days": round(int(getattr(a, "pack_size", 1) or 1) / (sold / 14), 0) if sold > 0 else None,
         })
     rows.sort(key=lambda r: (r["reason"] == "inactive", -r["sold_14d"], r["reason"], r["name"] or ""))
     return rows

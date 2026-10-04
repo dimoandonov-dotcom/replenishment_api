@@ -208,6 +208,11 @@ def calculate_for_store(
     # промо режим: временно вдигане на мин/макс за артикулите в кампания
     from . import promo as _promo
     settings = _promo.apply(settings, _promo.active(db, order_date))
+    # артикули, които НДК приема на брой (спиртни + каквото Ани поръчва на брой) -> без закръгляне до опаковка
+    piece = piece_orderable(db)
+    for s_ in settings:
+        if s_.article_id in piece:
+            s_.pack_size = 1
     schedules = load_schedules(db, store_id)
 
     if respect_schedule:
@@ -358,3 +363,26 @@ def run_dispatch(
     db.commit()
     return run
 
+
+_PIECE_CATS = ("ВОДКА", "ДЖИН", "МАСТИКА", "УИСКИ", "РАКИЯ", "МЕНТА", "СПИРТНИ", "РОМ", "КОНЯК", "ЛИКЬОР", "УЗО", "ВЕРМУТ")
+
+
+def piece_orderable(db) -> set[int]:
+    """Артикули, които се поръчват на брой: спиртните напитки + тези, които Ани поръчва
+    не на цели опаковки (в поне половината си заявки, при поне 2 заявки)."""
+    from sqlalchemy import text as _t
+    out = set()
+    arts = db.execute(select(m.Article)).scalars().all()
+    for a in arts:
+        if any(k in (a.category or "").upper() for k in _PIECE_CATS):
+            out.add(a.id)
+    try:
+        rows = db.execute(_t("""SELECT a.id, COUNT(*), SUM(CASE WHEN a.pack_size > 1 AND MOD(CAST(l.store_qty AS INT), a.pack_size) <> 0 THEN 1 ELSE 0 END)
+                                FROM manual_order_lines l JOIN articles a ON a.sku = l.sku
+                                WHERE l.store_qty > 0 GROUP BY a.id""")).all()
+        for aid, n, k in rows:
+            if n >= 2 and (k or 0) >= 0.5 * n:
+                out.add(aid)
+    except Exception:
+        db.rollback()
+    return out

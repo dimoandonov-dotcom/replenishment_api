@@ -138,6 +138,8 @@ def needs_reorder(
 # Колко дни продажби трябва да покрива наличността, за да НЕ поръчваме цяла
 # опаковка заради малка нужда (≈ до следващата доставка + резерв).
 MIN_PACK_COVER_DAYS = 2.0
+# Бавен артикул: цяла опаковка се поръчва автоматично само ако стига за до толкова дни продажби
+MAX_PACK_COVER_DAYS = 21.0
 
 
 def calculate_line(
@@ -179,6 +181,10 @@ def calculate_line(
             force = True                       # свършил е и се продава - рафтът да не е празен
         else:
             force = current_stock < avg_daily_sales * MIN_PACK_COVER_DAYS
+        # бавен артикул, който се поръчва само на цели опаковки: ако една опаковка стига
+        # за повече от MAX_PACK_COVER_DAYS дни - не се поръчва автоматично (решава човек)
+        if force and setting.pack_size > 1 and setting.pack_size / avg_daily_sales > MAX_PACK_COVER_DAYS:
+            force = False
     ordered = round_up_to_pack(
         suggested, setting.pack_size, force_min_pack=force
     )
