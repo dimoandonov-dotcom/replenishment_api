@@ -56,9 +56,14 @@ def _capped(name: str) -> bool:
     return bool(wine or hard)
 
 
+VERY_SLOW = 0.15   # под 0.15 бр./ден (по-малко от 2 бр. за 14 дни): само 1 бройка на рафта
+
+
 def formula(sold: float) -> tuple[str, int, int]:
     sdp = max(sold, 0) / DAYS
     cls = next(c for c, th, _ in CLASSES if sdp >= th)
+    if 0 < sdp < VERY_SLOW:
+        return cls, 1, 2
     cover = dict((c, cv) for c, _, cv in CLASSES)[cls]
     mn = max(math.ceil(sdp * (L + R) + Z * math.sqrt(D * sdp * (L + R))), MIN_SHELF)
     return cls, mn, mn + math.ceil(sdp * cover)
