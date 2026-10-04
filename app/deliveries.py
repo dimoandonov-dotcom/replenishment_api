@@ -82,9 +82,29 @@ def _ani(db: Session, since: date) -> dict:
             for k, v in _ani_full(db, since).items()}
 
 
+def _times(db: Session, since: date) -> tuple[dict, dict]:
+    """(store, delivery_day) -> кога е направена заявката: (MinMaxAI, Ани)."""
+    ours, ani = {}, {}
+    for po in db.execute(select(m.PurchaseOrder).where(
+            m.PurchaseOrder.created_at >= datetime.combine(since - timedelta(days=1), datetime.min.time(), SOFIA))
+            .order_by(m.PurchaseOrder.created_at)).scalars().all():
+        ours[(po.store_id, _ours_day(po.created_at))] = po.created_at
+    for o in db.execute(select(m.ManualOrder).where(
+            m.ManualOrder.store_id.isnot(None),
+            m.ManualOrder.received_at >= datetime.combine(since - timedelta(days=1), datetime.min.time(), SOFIA))
+            .order_by(m.ManualOrder.received_at)).scalars().all():
+        ani[(o.store_id, _for_day(o.received_at))] = o.received_at
+    return ours, ani
+
+
+def _fmt_t(t) -> str | None:
+    return t.astimezone(SOFIA).strftime("%d.%m %H:%M") if t else None
+
+
 def summary(db: Session, days: int = 14) -> dict:
     since = datetime.now(SOFIA).date() - timedelta(days=days)
     dl, ours, anif = _delivered(db, since), _ours(db, since), _ani_full(db, since)
+    t_ours, t_ani = _times(db, since)
     ani = {k: {a: float(l.store_qty) for a, l in v.items() if float(l.store_qty) > 0} for k, v in anif.items()}
     arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
     stores = {s.id: s.name for s in db.execute(select(m.Store)).scalars().all()}
@@ -104,7 +124,8 @@ def summary(db: Session, days: int = 14) -> dict:
         both = len(set(D) & set(O))
         r = {"store_id": s, "store": stores.get(s, s), "day": d.strftime("%d.%m.%Y"), "iso": d.isoformat(),
              "has_ours": key in ours or key in anif, "has_ani": key in ani,
-             "basis": "в момента на Ани" if key in anif else ("06:00" if key in ours else ""), "delivered_lines": len(D), "our_lines": len(O),
+             "basis": "в момента на Ани" if key in anif else ("06:00" if key in ours else ""),
+             "ani_at": _fmt_t(t_ani.get(key)), "ours_at": _fmt_t(t_ours.get(key)), "delivered_lines": len(D), "our_lines": len(O),
              "both": both, "only_delivered": len(set(D) - set(O)), "only_ours": len(set(O) - set(D)),
              "delivered_units": round(sum(D.values()), 1), "our_units": round(sum(O.values()), 1),
              "delivered_eur": round(sum(q * price(a) for a, q in D.items()), 2),
@@ -181,4 +202,5 @@ def detail(db: Session, store_id: int, day: str) -> dict:
     out.sort(key=lambda r: (abs(r["diff"]) < 0.01, -abs(r["diff"]), r["name"] or ""))
     days14 = [(d - timedelta(days=15 - i)).strftime("%d.%m") for i in range(14)]
     return {"store": db.get(m.Store, store_id).name, "day": d.strftime("%d.%m.%Y"), "days": days14,
+            "ani_at": _fmt_t(_times(db, d)[1].get((store_id, d))), "ours_at": _fmt_t(_times(db, d)[0].get((store_id, d))),
             "has_ours": bool(O), "basis": "в момента на Ани" if AF else "06:00", "is_today": d >= datetime.now(SOFIA).date(), "lines": out}
