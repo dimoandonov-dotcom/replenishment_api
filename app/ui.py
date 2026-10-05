@@ -1062,3 +1062,39 @@ def admin_vacuum(table: str = Query("stock_snapshots", pattern="^(stock_snapshot
 def orders_recalc_run(run_id: int, db: Session = Depends(get_db)):
     """Преизчислява пускане по наличността от часа му, с текущите правила."""
     return service.recalc_run(db, run_id)
+
+
+@router.get("/ui/negative-selling")
+def ui_negative_selling(days: int = Query(3, ge=1, le=14), db: Session = Depends(get_db)):
+    """НДК артикули с наличност под нула, които продължават да се продават (последните N дни с данни)."""
+    from sqlalchemy import text as _t
+    last = db.execute(select(func.max(m.SalesHistory.sale_date))).scalar()
+    if not last:
+        return {"rows": []}
+    rec = {(s_, a): float(q or 0) for s_, a, q in db.execute(select(
+        m.SalesHistory.store_id, m.SalesHistory.article_id, func.sum(m.SalesHistory.quantity_sold))
+        .where(m.SalesHistory.sale_date > last - timedelta(days=days))
+        .group_by(m.SalesHistory.store_id, m.SalesHistory.article_id)).all()}
+    s14 = {(s_, a): float(q or 0) for s_, a, q in db.execute(select(
+        m.SalesHistory.store_id, m.SalesHistory.article_id, func.sum(m.SalesHistory.quantity_sold))
+        .where(m.SalesHistory.sale_date > last - timedelta(days=14))
+        .group_by(m.SalesHistory.store_id, m.SalesHistory.article_id)).all()}
+    stock = db.execute(_t("""SELECT DISTINCT ON (store_id, article_id) store_id, article_id, quantity, captured_at
+                             FROM stock_snapshots ORDER BY store_id, article_id, captured_at DESC""")).all()
+    arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
+    stores = {x.id: x.name for x in db.execute(select(m.Store).where(m.Store.is_active.is_(True))).scalars()}
+    rows = []
+    for sid, aid, q, at in stock:
+        q = float(q)
+        if q >= 0 or sid not in stores or aid not in arts or "АМБАЛАЖ" in (arts[aid].name or "").upper():
+            continue
+        sold = rec.get((sid, aid), 0.0)
+        if sold <= 0:
+            continue
+        a = arts[aid]
+        rows.append({"store": stores[sid], "sku": a.sku, "name": a.supplier_name or a.name, "stock": q,
+                     f"sold_{days}d": sold, "sold_14d": s14.get((sid, aid), 0.0),
+                     "per_day": round(s14.get((sid, aid), 0.0) / 14, 2),
+                     "eur": round(-q * float(a.delivery_price or 0), 2)})
+    rows.sort(key=lambda r: r["stock"])
+    return {"data_until": last.strftime("%d.%m.%Y"), "days": days, "count": len(rows), "rows": rows}
