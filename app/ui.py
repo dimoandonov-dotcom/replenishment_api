@@ -1235,3 +1235,60 @@ def ui_delivery_docs(store_id: int, day: str, db: Session = Depends(get_db)):
 def an_dup_docs(days: int = Query(14, ge=1, le=30), db: Session = Depends(get_db)):
     from . import anomalies
     return anomalies.detect_duplicate_docs(db, days)
+
+
+# ---------------------------------------------------------------------------
+# Експорт на всяка таблица от пулта в Excel
+# ---------------------------------------------------------------------------
+
+class ExportSheet(BaseModel):
+    name: str
+    columns: list[str]
+    rows: list[list]
+
+
+class ExportIn(BaseModel):
+    filename: str = "Справка"
+    sheets: list[ExportSheet]
+
+
+@router.post("/ui/export-xlsx")
+def ui_export_xlsx(payload: ExportIn):
+    """Таблицата, която е на екрана -> .xlsx (Arial, заглавен ред, автофилтър, замразен ред)."""
+    import re
+    from io import BytesIO
+    from urllib.parse import quote
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+    wb = Workbook(); wb.remove(wb.active)
+    F, B = Font(name="Arial", size=10), Font(name="Arial", size=10, bold=True, color="FFFFFF")
+    fill = PatternFill("solid", fgColor="2B2420")
+    for sh in payload.sheets[:10]:
+        title = re.sub(r"[\\/*?:\[\]]", " ", sh.name)[:31] or "Справка"
+        ws = wb.create_sheet(title)
+        ws.append(sh.columns)
+        for c in ws[1]:
+            c.font, c.fill = B, fill
+            c.alignment = Alignment(wrap_text=True, vertical="center")
+        for r in sh.rows[:100000]:
+            ws.append(r)
+        widths = [len(str(c)) for c in sh.columns]
+        for row in ws.iter_rows(min_row=2):
+            for i, c in enumerate(row):
+                c.font = F
+                if isinstance(c.value, float):
+                    c.number_format = "#,##0.00" if abs(c.value - round(c.value)) > 1e-9 else "#,##0"
+                if i < len(widths):
+                    widths[i] = max(widths[i], min(len(str(c.value or "")), 60))
+        for i, w in enumerate(widths, 1):
+            ws.column_dimensions[get_column_letter(i)].width = max(8, min(w + 2, 62))
+        ws.freeze_panes = "A2"
+        if ws.max_row > 1:
+            ws.auto_filter.ref = ws.dimensions
+    buf = BytesIO(); wb.save(buf)
+    fn = re.sub(r"[^\w\s.-]", "", payload.filename, flags=re.UNICODE).strip() or "Справка"
+    stamp = datetime.now(_SOFIA).strftime("%d.%m.%Y")
+    return Response(content=buf.getvalue(),
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fn + ' ' + stamp + '.xlsx')}"})

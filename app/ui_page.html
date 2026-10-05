@@ -1166,6 +1166,61 @@ function renderQual() {
 }
 
 
+
+/* ---------- експорт на всяка таблица в Excel ---------- */
+function cellValue(td) {
+  const t = (td.innerText || "").replace(/\u00a0/g, " ").trim();
+  // число във формат „1 234,56“ / „-12“ / „12%“ / „×1,5“ -> число
+  const m = t.replace(/[€%×]/g, "").replace(/\s/g, "").replace(/бр\.?$|дни$|маг\.?$|\/ден$/i, "");
+  if (/^[−-]?\d+(?:[.,]\d+)?$/.test(m)) return parseFloat(m.replace("−", "-").replace(",", "."));
+  return t.replace(/\s*\n\s*/g, " · ");
+}
+function tableTitle(el) {
+  let n = el;
+  while (n) {
+    let p = n.previousElementSibling;
+    while (p) {
+      const h = p.matches && (p.matches(".head") ? p.querySelector("h2") : p.matches("h2,h3,summary") ? p : null);
+      if (h) return h.innerText.trim();
+      p = p.previousElementSibling;
+    }
+    n = n.parentElement;
+    if (n && n.tagName === "DETAILS") { const s = n.querySelector("summary"); if (s) return s.innerText.trim(); }
+    if (n && n.classList && n.classList.contains("tab")) break;
+  }
+  const tab = document.querySelector("nav a.on, nav a.active"); return tab ? tab.innerText.trim() : "Справка";
+}
+async function exportTable(table, title) {
+  const ths = [...table.querySelectorAll("thead th")];
+  const keep = ths.map((th, i) => i).filter(i => (ths[i].innerText || "").trim() !== "" || i === 0);
+  const columns = keep.map(i => ths[i].innerText.trim() || "—");
+  const rows = [...table.querySelectorAll("tbody tr")].filter(tr => tr.style.display !== "none" && tr.children.length >= Math.min(2, columns.length))
+    .map(tr => keep.map(i => tr.children[i] ? cellValue(tr.children[i]) : ""))
+    .filter(r => r.some(v => v !== "" && v != null) && !(r.length > 1 && r.slice(1).every(v => v === "")));
+  if (!rows.length) { toast("Таблицата е празна", false); return; }
+  try {
+    const res = await fetch("/ui/export-xlsx", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: title, sheets: [{ name: title.slice(0, 31), columns, rows }] }) });
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob(); const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = `${title} ${new Date().toLocaleDateString("bg-BG")}.xlsx`.replace(/[\\/:*?"<>|]/g, " ");
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast(`Свалено: ${rows.length} реда`);
+  } catch (e) { toast("Експортът не мина: " + e.message, false); }
+}
+function addExportButtons(root = document) {
+  root.querySelectorAll(".scroll").forEach(sc => {
+    const t = sc.querySelector("table");
+    if (!t || sc.dataset.xl || !t.querySelector("thead")) return;
+    sc.dataset.xl = "1";
+    const b = document.createElement("button");
+    b.className = "mini"; b.textContent = "⬇️ Excel"; b.style.cssText = "margin:4px 0 6px;float:right";
+    b.onclick = () => exportTable(t, tableTitle(sc));
+    sc.parentNode.insertBefore(b, sc);
+  });
+}
+new MutationObserver(() => addExportButtons()).observe(document.body, { childList: true, subtree: true });
+
 /* ---------- аномалии ---------- */
 async function showDocs(storeId, day) {
   let box = $("anDocs");
