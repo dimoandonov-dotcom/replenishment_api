@@ -207,7 +207,7 @@ def calculate_for_store(
     settings = load_settings(db, store_id, supplier_id)
     # промо режим: временно вдигане на мин/макс за артикулите в кампания
     from . import promo as _promo
-    settings = _promo.apply(settings, _promo.active(db, order_date))
+    settings = _promo.apply_store(db, settings, order_date, store_id)
     # артикули, които НДК приема на брой (спиртни + каквото Ани поръчва на брой) -> без закръгляне до опаковка
     piece = piece_orderable(db)
     for s_ in settings:

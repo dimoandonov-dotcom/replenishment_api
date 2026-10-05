@@ -131,3 +131,47 @@ def listing(db: Session) -> list[dict]:
                     "active": s <= today <= e,
                     "items": [{"sku": k, "name": n, "uplift": float(u), "measured": bool(mm)} for k, n, u, mm in items]})
     return out
+
+
+def apply_store(db: Session, settings: list, day: date, store_id: int) -> list:
+    """
+    Промо режим, съобразен с ежедневните доставки: мин/макс се смятат по СЪЩАТА формула,
+    но от реалната скорост на продажби в ТОЗИ магазин по време на промото (не умножаване).
+    Ако промото още няма данни (първи ден) - вдигане най-много ×1.5.
+    """
+    factors = active(db, day)
+    if not factors:
+        return settings
+    from . import learning
+    try:
+        rows = db.execute(text("""SELECT p.start_day FROM promotions p
+                                  WHERE :d BETWEEN p.start_day AND p.end_day ORDER BY p.start_day LIMIT 1"""),
+                          {"d": day}).all()
+        start = rows[0][0] if rows else day
+    except Exception:
+        db.rollback(); start = day
+    until = day - timedelta(days=1)
+    days_ = max((until - start).days + 1, 0)
+    sold = {}
+    if days_ > 0:
+        for aid, q in db.execute(select(m.SalesHistory.article_id, func.sum(m.SalesHistory.quantity_sold))
+                                 .where(m.SalesHistory.store_id == store_id,
+                                        m.SalesHistory.article_id.in_(list(factors)),
+                                        m.SalesHistory.sale_date >= start, m.SalesHistory.sale_date <= until)
+                                 .group_by(m.SalesHistory.article_id)).all():
+            sold[aid] = max(float(q or 0), 0.0)
+    for s_ in settings:
+        f = factors.get(s_.article_id)
+        if not f or f <= 1.0 or s_.max_stock <= 0:
+            continue
+        if days_ > 0:
+            sdp = sold.get(s_.article_id, 0.0) / days_
+            _, mn, mx = learning.formula(sdp * learning.DAYS)
+            if mx > s_.max_stock:                      # само нагоре, никога над „база × коефициент"
+                s_.min_stock = min(mn, math.ceil(s_.min_stock * f))
+                s_.max_stock = max(min(mx, math.ceil(s_.max_stock * f)), s_.min_stock)
+        else:
+            g = min(f, 1.5)
+            s_.min_stock = math.ceil(s_.min_stock * g)
+            s_.max_stock = max(math.ceil(s_.max_stock * g), s_.min_stock)
+    return settings
