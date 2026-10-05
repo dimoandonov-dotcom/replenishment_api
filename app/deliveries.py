@@ -162,6 +162,7 @@ def detail(db: Session, store_id: int, day: str) -> dict:
     sett = {x.article_id: x for x in db.execute(select(m.StoreArticleSetting)
                                                 .where(m.StoreArticleSetting.store_id == store_id)).scalars().all()}
     series = compare._series(db, store_id, d - timedelta(days=1))
+    is_today_or_future = d >= datetime.now(SOFIA).date()
     out = []
     for aid in set(D) | {a for a, l in O.items() if l.ordered_quantity > 0} | set(A):
         a = arts.get(aid)
@@ -180,11 +181,33 @@ def detail(db: Session, store_id: int, day: str) -> dict:
                     "само магазин — наличността е над мин" if (st is not None and mn is not None and st >= mn) else "само магазин")
         else:
             note = "само MinMaxAI — под мин"
+        aq = A.get(aid)
+        ml = AF.get(aid) if AF else None
+        if ml is not None and (float(ml.store_qty or 0) > 0 or float(ml.api_qty or 0) > 0):
+            # има заявка на Ани -> етикет и обяснение от сравнението В НЕЙНИЯ МОМЕНТ (Ани ↔ MinMaxAI)
+            fake = SimpleNamespace(store_qty=float(ml.store_qty or 0), api_qty=float(ml.api_qty or 0), stock=st,
+                                   min_stock=mn, max_stock=mx, note=ml.note or "")
+            ex = compare.explain(fake, series.get(a.sku))
+            note = (ml.note or "").replace("само магазин", "само Ани")
+            txt, verdict = ex["text"], ex["verdict"]
+            if dq > 0:
+                txt += f" Доставено: {compare._fmt(dq)} бр."
+            elif is_today_or_future:
+                txt += " Доставката още не е заведена в Мистрал."
+                if float(ml.store_qty or 0) > 0:
+                    note += " · чака доставка"
+            elif float(ml.store_qty or 0) > 0:
+                note += " · НЕ Е ДОСТАВЕНО"
+                txt += " ⚠️ Ани го е поръчала, но в Мистрал няма доставка — не е доставено или не е заведено."
+            out.append({"sku": a.sku, "name": a.supplier_name or a.name, "delivered": dq, "ours": oq,
+                        "ani": aq, "stock": st, "min": mn, "max": mx, "note": note,
+                        "series": series.get(a.sku, [0.0] * 14), "explain": txt, "verdict": verdict,
+                        "sales_per_day": ex["sdp"], "diff": float(ml.api_qty or 0) - float(ml.store_qty or 0)})
+            continue
         fake = SimpleNamespace(store_qty=dq, api_qty=oq, stock=st, min_stock=mn, max_stock=mx, note=note)
         ex = compare.explain(fake, series.get(a.sku))
         txt = ex["text"].replace("Ани поръчва", "Доставено е").replace("по Ани", "по доставката")
         verdict = ex["verdict"]
-        aq = A.get(aid)
         if dq == 0 and oq > 0:
             if aq:  # Ани го е поръчала - просто още не е заведено като доставка
                 note = "поръчано от Ани — още не е заведено"
