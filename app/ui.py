@@ -1155,16 +1155,20 @@ def ui_mistral_operation(store_id: int, nums: str, db: Session = Depends(get_db)
                         FROM OPERATIONS o WITH (NOLOCK) WHERE o.LOCATIONID = %s AND o.NUM IN ({','.join(map(str, ids))})""", (loc,))
         ops = cur.fetchall()
         out = []
+        # кои артикули/количества има всеки документ (за сравнение на двата)
         for o in ops:
             cur.execute("SELECT TOP 1 PARTNERNAME FROM PARTNERNAME WHERE ID = %s", (o["PARTNERNAMEID"],))
             p = cur.fetchone()
-            cur.execute("SELECT TOP 1 NAME, FIRSTNAME, LASTNAME, CODE FROM USERS WHERE ID = %s AND LOCATIONID = %s",
+            cur.execute("SELECT TOP 1 NAME, FIRSTNAME, LASTNAME, CODE FROM USERS WHERE ID = %s ORDER BY CASE WHEN LOCATIONID = %s THEN 0 ELSE 1 END",
                         (o["USERID"], loc))
             u = cur.fetchone() or {}
             cur.execute("""SELECT DOCUMENTNUM, DOCUMENTDATE, DOCUMENTTYPEID, DOCNOTE, DOCSUM, DOCUMENTOUTNUM
                            FROM OPERATIONDOCUMENT WITH (NOLOCK) WHERE LOCATIONID = %s AND NUM = %s""", (loc, o["NUM"]))
             docs = [{k: str(v) for k, v in d.items() if v not in (None, "")} for d in cur.fetchall()]
-            out.append({"operation": int(o["NUM"]), "document_num": str(o["DOCUMENTNUM"]),
+            cur.execute("""SELECT MATERIALCODE, SUM(QTY) AS q FROM MATERIALQTYLOG WITH (NOLOCK)
+                           WHERE LOCATIONID = %s AND OPERAIONNUM = %s GROUP BY MATERIALCODE""", (loc, o["NUM"]))
+            lines = {int(r["MATERIALCODE"]): float(r["q"]) for r in cur.fetchall()}
+            out.append({"operation": int(o["NUM"]), "lines": lines, "document_num": str(o["DOCUMENTNUM"]),
                         "document_date": str(o["DOCUMENTDATE"])[:19], "document_type": o["DOCUMENTTYPEID"],
                         "sum": float(o["DOCUMENTSUM"] or 0), "saved": str(o["DATESAVED"])[:19],
                         "edited": str(o["LASTEDITDATE"])[:19] if o["LASTEDITDATE"] else None,
