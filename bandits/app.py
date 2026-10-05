@@ -241,12 +241,17 @@ def _data():
         stock = {(s, k): float(q) for s, k, q in c.execute(text("SELECT store_id, code, qty FROM stock")).all()}
         arts = {k: (n, d, s) for k, n, d, s in c.execute(text("SELECT code, name, shelf_days, sub FROM articles WHERE active")).all()}
         stores = {i: n for i, n in c.execute(text("SELECT id, name FROM stores WHERE active")).all()}
-        mv = c.execute(text("SELECT store_id, code, SUM(delivered), SUM(returned) FROM moves WHERE day >= :d GROUP BY store_id, code"),
+        mv = c.execute(text("""SELECT m.store_id, m.code, COALESCE(SUM(s.qty),0), SUM(m.returned) FROM moves m
+                                LEFT JOIN (SELECT store_id, code, SUM(qty) qty FROM sales WHERE day >= :d GROUP BY store_id, code) s
+                                  ON s.store_id = m.store_id AND s.code = m.code
+                                WHERE m.day >= :d GROUP BY m.store_id, m.code"""),
                        {"d": (last or date.today()) - timedelta(days=28)}).all()
     s = defaultdict(dict)
     for st, k, d, q in sales:
         s[(st, k)][d] = max(float(q or 0), 0.0)
-    waste = {(st, k): (float(o or 0) / float(i)) if i and float(i) > 0 else 0.0 for st, k, i, o in mv}
+    # sold = продадено за 28 дни (mv[2]), o = върнато
+    waste = {(st, k): (float(o or 0) / (float(i or 0) + float(o or 0))) if (float(i or 0) + float(o or 0)) > 0 else 0.0
+             for st, k, i, o in mv}
     return last, s, stock, arts, stores, waste
 
 
@@ -431,18 +436,23 @@ def api_daily(day: str | None = None):
 
 @app.get("/api/waste")
 def api_waste(days: int = 28):
-    """Брак (върнато на Бандитс) спрямо доставеното, по магазин и артикул."""
+    """Брак = върнато на Бандитс ÷ (продадено + върнато), по магазин и артикул."""
     with DB.connect() as c:
-        last = c.execute(text("SELECT MAX(day) FROM moves")).scalar() or date.today()
-        rows = c.execute(text("""SELECT s.name, a.name, SUM(m.delivered), SUM(m.returned), a.price FROM moves m
-                                 JOIN stores s ON s.id = m.store_id JOIN articles a ON a.code = m.code
-                                 WHERE m.day > :d AND a.active GROUP BY s.name, a.name, a.price"""), {"d": last - timedelta(days=days)}).all()
-    out = [{"store": s, "name": n, "delivered": round(float(i or 0)), "returned": round(float(o or 0)),
-            "pct": round(100 * float(o or 0) / float(i), 1) if i and float(i) > 0 else None,
-            "eur": round(float(o or 0) * float(p or 0), 2)} for s, n, i, o, p in rows]
+        last = c.execute(text("SELECT MAX(day) FROM sales")).scalar() or date.today()
+        f = last - timedelta(days=days)
+        rows = c.execute(text("""
+            WITH so AS (SELECT store_id, code, SUM(qty) q FROM sales WHERE day > :f GROUP BY store_id, code),
+                 re AS (SELECT store_id, code, SUM(returned) r FROM moves WHERE day > :f GROUP BY store_id, code)
+            SELECT st.name, a.name, COALESCE(so.q,0), COALESCE(re.r,0), a.price
+            FROM so FULL JOIN re ON re.store_id = so.store_id AND re.code = so.code
+            JOIN stores st ON st.id = COALESCE(so.store_id, re.store_id)
+            JOIN articles a ON a.code = COALESCE(so.code, re.code) AND a.active"""), {"f": f}).all()
+    out = [{"store": s_, "name": n, "sold": round(float(q)), "returned": round(float(r)),
+            "pct": round(100 * float(r) / (float(q) + float(r)), 1) if (float(q) + float(r)) > 0 else None,
+            "eur": round(float(r) * float(p or 0), 2)} for s_, n, q, r, p in rows]
     out.sort(key=lambda x: -(x["eur"] or 0))
-    di = sum(x["delivered"] for x in out); rt = sum(x["returned"] for x in out)
-    return {"days": days, "delivered": di, "returned": rt, "pct": round(100 * rt / di, 1) if di else None,
+    so = sum(x["sold"] for x in out); rt = sum(x["returned"] for x in out)
+    return {"days": days, "sold": so, "returned": rt, "pct": round(100 * rt / (so + rt), 1) if (so + rt) else None,
             "eur": round(sum(x["eur"] for x in out), 2), "rows": out}
 
 
