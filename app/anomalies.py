@@ -36,6 +36,8 @@ KIND = {
     "writeoff": "Брак / отписване", "correction": "Ръчни корекции надолу",
     "undelivered": "Незаведена доставка", "short_delivery": "Непълна доставка",
     "suspicious_delivery": "Подозрително голяма доставка (OCR?)",
+    "double_delivery": "Двойно заведена доставка",
+    "ocr_repeat": "Повтаряща се OCR грешка",
 }
 PHANTOM_DAYS = 4
 
@@ -224,6 +226,55 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
                 out.append({"kind": "suspicious_delivery", "store_id": sid, "store": stores[sid], "sku": sku(aid),
                             "name": name(aid), "qty": qin, "eur": round(qin * price(aid), 2), "day": d.strftime("%d.%m"),
                             "info": ("доставка: " if op == 2 else "корекция нагоре: ") + why})
+    except Exception:
+        db.rollback()
+
+    # двойно заведена доставка: много редове от заявката на Ани са заведени точно ×2
+    try:
+        from . import deliveries as _dl2
+        dsince2 = today - timedelta(days=days)
+        dlm = _dl2._delivered(db, dsince2 - timedelta(days=2))
+        anif = _dl2._ani_full(db, dsince2, dlm)
+        for (sid, d), lines in anif.items():
+            if d >= today or d < dsince2 or (store_id and sid != store_id) or sid not in stores:
+                continue
+            got = dlm.get((sid, d), {})
+            matched = [(aid, float(l.store_qty)) for aid, l in lines.items()
+                       if float(l.store_qty or 0) > 0 and got.get(aid, 0) > 0 and aid in arts
+                       and "АМБАЛАЖ" not in name(aid).upper()]
+            dbl = [(aid, q) for aid, q in matched if abs(got[aid] - 2 * q) < 0.01]
+            if len(dbl) >= 5 or (len(matched) >= 4 and len(dbl) >= 0.5 * len(matched)):
+                for aid, q in dbl:
+                    out.append({"kind": "double_delivery", "store_id": sid, "store": stores[sid], "sku": sku(aid),
+                                "name": name(aid), "qty": q, "eur": round(q * price(aid), 2), "day": d.strftime("%d.%m"),
+                                "info": f"поръчано {q:g}, заведено {got[aid]:g} — {len(dbl)} от {len(matched)} реда в доставката са ×2"})
+    except Exception:
+        db.rollback()
+
+    # повтаряща се OCR грешка: един артикул е заведен с ЕДНО И СЪЩО странно количество в няколко магазина
+    try:
+        dsince3 = today - timedelta(days=max(days, 14))
+        mx3 = {(x.store_id, x.article_id): float(x.max_stock)
+               for x in db.execute(select(m.StoreArticleSetting)).scalars().all()}
+        groups = defaultdict(list)
+        for sid, aid, d, qin in db.execute(text("""SELECT store_id, article_id, day, qty_in FROM stock_movements
+                                                   WHERE optype = 2 AND qty_in >= 20 AND day >= :d"""), {"d": dsince3}).all():
+            if sid not in stores or aid not in arts or "АМБАЛАЖ" in name(aid).upper():
+                continue
+            qin = float(qin); m_ = mx3.get((sid, aid), 0.0)
+            if m_ == 0 or qin > 3 * m_:
+                groups[(aid, qin)].append((sid, d, m_))
+        for (aid, qin), occ in groups.items():
+            if len({s_ for s_, _, _ in occ}) < 3:
+                continue
+            for sid, d, m_ in occ:
+                if store_id and sid != store_id:
+                    continue
+                excess = qin - (m_ or 0)
+                out.append({"kind": "ocr_repeat", "store_id": sid, "store": stores[sid], "sku": sku(aid), "name": name(aid),
+                            "qty": qin, "eur": round(excess * price(aid), 2), "day": d.strftime("%d.%m"),
+                            "info": f"заведено {qin:g} бр. в {len({s_ for s_, _, _ in occ})} магазина (при макс {m_:g}) — "
+                                    f"едно и също количество навсякъде"})
     except Exception:
         db.rollback()
 

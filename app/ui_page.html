@@ -1167,7 +1167,7 @@ function renderQual() {
 
 
 /* ---------- аномалии ---------- */
-const ANK = { shortage: "bad", surplus: "warn", negative: "bad", phantom: "warn", writeoff: "off", correction: "off", undelivered: "bad", short_delivery: "warn", suspicious_delivery: "bad" };
+const ANK = { shortage: "bad", surplus: "warn", negative: "bad", phantom: "warn", writeoff: "off", correction: "off", undelivered: "bad", short_delivery: "warn", suspicious_delivery: "bad", double_delivery: "bad", ocr_repeat: "bad" };
 // какво значи и какво да се направи - за картите, списъците и всеки ред
 const ANH = {
   shortage: ["Ревизията е намерила по-малко, отколкото пише в Мистрал.", "Провери за кражба, брак без документ или стока, продавана под друг код."],
@@ -1178,6 +1178,8 @@ const ANH = {
   correction: ["Ръчна корекция надолу без ревизия.", "Провери кой и защо е коригирал."],
   undelivered: ["Ани е поръчала, но в Мистрал няма доставка за деня.", "Провери с НДК дали е доставено. Ако е доставено — магазинът да заведе доставката."],
   short_delivery: ["Доставено е по-малко от поръчаното.", "Провери с НДК за липсващите бройки или дали доставката е заведена само частично."],
+  double_delivery: ["Голяма част от доставката е заведена точно два пъти (×2) — най-вероятно документът е въведен/сканиран два пъти.", "Провери в Мистрал за двоен документ за доставка и изтрий дубликата — иначе наличността е завишена и стоката няма да се поръчва."],
+  ocr_repeat: ["Един и същ артикул е заведен с едно и също необичайно количество в няколко магазина — системна грешка при четенето (OCR), напр. „6“ → „66“.", "Коригирай наличността в засегнатите магазини и провери как OCR приложението чете този артикул."],
   suspicious_delivery: ["Заведено е многократно повече от поръчаното или от максимума — типично при грешно въвеждане (OCR).", "Провери документа за доставка. Ако количеството е грешно — коригирай в Мистрал веднага, иначе наличността е завишена и стоката няма да се поръчва."],
 };
 async function loadAnom() {
@@ -1186,7 +1188,7 @@ async function loadAnom() {
   $("anUntil").textContent = d.data_until ? `данни до ${d.data_until}` : "";
   const net = (t.shortage?.eur || 0) + (t.surplus?.eur || 0);
   const tiles = [["НЕТО ОТ РЕВИЗИИ", fmtE(net) + " €", net < 0 ? "a" : "t", "липси + излишъци от ревизиите<br><span style=\"opacity:.85\">Близо до 0 = объркани артикули; голям минус = реална загуба.</span>", ""],
-    ...Object.entries(d.kinds).filter(([k]) => (t[k]?.n || 0) > 0 || ["shortage", "surplus", "negative", "phantom", "undelivered", "suspicious_delivery"].includes(k))
+    ...Object.entries(d.kinds).filter(([k]) => (t[k]?.n || 0) > 0 || ["shortage", "surplus", "negative", "phantom", "undelivered", "suspicious_delivery", "double_delivery", "ocr_repeat"].includes(k))
       .map(([k, l]) => [l.toUpperCase(), fmtN(t[k]?.n || 0), k === "shortage" || k === "negative" || k === "undelivered" ? "a" : "",
         `${fmtN(t[k]?.qty || 0)} бр. · ${fmtE(t[k]?.eur || 0)} €<br><span style="opacity:.85">${(ANH[k] || [""])[0]}</span>`, k])];
   $("anKpis").innerHTML = tiles.map(([l, v, c, sub, k]) => `<div class="tile" ${k ? `data-k="${k}" style="cursor:pointer"` : ""}><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${sub}${k ? " · <u>виж →</u>" : ""}</div></div>`).join("");
