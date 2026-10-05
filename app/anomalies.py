@@ -408,7 +408,9 @@ def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
                 elif own:
                     continue      # собствено производство: еднакви количества по няколко пъти на ден са нормални
                 elif one_digit and share >= 0.8 and len(same) >= 3:
-                    conf = "сигурен — номерата се различават с една цифра (грешно разчетен номер)"
+                    consecutive = na.isdigit() and nb.isdigit() and abs(int(na) - int(nb)) == 1
+                    conf = ("вероятен — последователни номера с почти еднакво съдържание (две фактури или двойно въведена)"
+                            if consecutive else "сигурен — номерата се различават с една цифра (грешно разчетен номер)")
                 elif same_sum and share >= 0.8 and len(same) >= 5:
                     conf = "сигурен — еднаква сума и еднакви редове"
                 elif share >= 0.9 and len(same) >= 10:
