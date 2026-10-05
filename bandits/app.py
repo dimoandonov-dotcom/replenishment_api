@@ -138,7 +138,7 @@ def me(request: Request):
     u = _user(request)
     with DB.connect() as c:
         n = c.execute(text("SELECT name FROM users WHERE username = :u"), {"u": u}).scalar()
-    return {"user": u, "name": n or u}
+    return {"user": u, "name": n or u, "title": "Заявки и производство", "brand": "БАНДИТС AI · МАГАЗИНИ 300", "app": "Бандитс AI"}
 
 
 @app.get("/health")

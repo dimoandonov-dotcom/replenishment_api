@@ -33,7 +33,7 @@ details{background:var(--card);border:1px solid var(--line);border-radius:14px;m
 .xl{float:right;margin:0 0 6px;font-size:12px;padding:5px 10px}
 .empty{padding:24px;text-align:center;color:var(--muted)}
 </style></head><body>
-<header id="hdr" class="hide"><span class="u" id="who"></span><div class="k">БАНДИТС AI · МАГАЗИНИ 300</div><h1>Заявки и производство</h1></header>
+<header id="hdr" class="hide"></header>
 <div id="login" class="hide"><h3 style="margin-top:0">Вход</h3><input id="lu" placeholder="Потребител" autocapitalize="off"><input id="lp" type="password" placeholder="Парола"><button class="go" id="lb" style="width:100%">Вход</button><div id="le" class="muted"></div></div>
 <div id="appx" class="hide">
 <nav><a href="#day" data-t="day">Продажби по магазини</a><a href="#orders" data-t="orders">Заявки по магазини</a><a href="#plan" data-t="plan">План за производство</a><a href="#waste" data-t="waste">Брак</a><a href="#arts" data-t="arts">Артикули</a></nav>
@@ -109,5 +109,5 @@ $("dDay").onchange=loadDay;$("oDay").onchange=loadOrders;$("pDay").onchange=load
 const L={day:loadDay,orders:loadOrders,plan:loadPlan,waste:loadWaste,arts:loadArts};
 function show(t){if(!L[t])t="day";document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("on",a.dataset.t===t));document.querySelectorAll("main section").forEach(s=>s.classList.toggle("hide",s.id!=="t-"+t));L[t]().catch(()=>{})}
 window.onhashchange=()=>show(location.hash.slice(1));
-(async()=>{try{const m=await api("/api/me");$("who").innerHTML=`👤 ${esc(m.name)} · <a href="#" id="lo">изход</a>`;$("lo").onclick=async e=>{e.preventDefault();await fetch("/api/logout",{method:"POST"});location.reload()};$("appx").classList.remove("hide");$("hdr").classList.remove("hide");document.title="Бандитс AI";days($("oDay"));days($("pDay"));show(location.hash.slice(1))}catch(e){}})();
+(async()=>{try{const m=await api("/api/me");$("hdr").innerHTML='<span class="u" id="who"></span><div class="k">'+esc(m.brand)+'</div><h1>'+esc(m.title)+'</h1>';$("who").innerHTML=`👤 ${esc(m.name)} · <a href="#" id="lo">изход</a>`;$("lo").onclick=async e=>{e.preventDefault();await fetch("/api/logout",{method:"POST"});location.reload()};$("appx").classList.remove("hide");$("hdr").classList.remove("hide");document.title=m.app||"";days($("oDay"));days($("pDay"));show(location.hash.slice(1))}catch(e){}})();
 </script></body></html>
