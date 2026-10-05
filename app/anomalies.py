@@ -235,7 +235,11 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
         for (sid, d), lines in ani.items():
             if d >= today or d < dsince or (store_id and sid != store_id) or sid not in stores:
                 continue
-            got = dl.get((sid, d), {})
+            # НДК доставя в същия или следващия ден (понякога на части) -> гледаме съседните дни
+            got = {}
+            for dd in (d - timedelta(days=1), d, d + timedelta(days=1)):
+                for k_, v_ in dl.get((sid, dd), {}).items():
+                    got[k_] = got.get(k_, 0.0) + v_
             for aid, q in lines.items():
                 if aid not in arts or "АМБАЛАЖ" in name(aid).upper():
                     continue

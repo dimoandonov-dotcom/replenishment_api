@@ -63,17 +63,33 @@ def _ours(db: Session, since: date) -> dict:
     return out
 
 
-def _ani_full(db: Session, since: date) -> dict:
+def _ani_full(db: Session, since: date, dl: dict | None = None) -> dict:
     """(store, delivery_day) -> {article_id: ManualOrderLine} - заявката на Ани и
-    това, което MinMaxAI би поръчал в СЪЩАТА секунда (api_qty, stock, min, max)."""
+    това, което MinMaxAI би поръчал в СЪЩАТА секунда (api_qty, stock, min, max).
+    Денят на доставката се определя от реално заведената доставка: НДК доставя
+    в СЪЩИЯ или в СЛЕДВАЩИЯ ден (според маршрута) - взема се денят с повече съвпадения."""
     out = {}
     skus = {a.sku: a.id for a in db.execute(select(m.Article)).scalars().all()}
+    if dl is None:
+        dl = _delivered(db, since - timedelta(days=2))
+    today = datetime.now(SOFIA).date()
     for o in db.execute(select(m.ManualOrder).where(
             m.ManualOrder.store_id.isnot(None),
             m.ManualOrder.received_at >= datetime.combine(since - timedelta(days=1), datetime.min.time(), SOFIA))
             .order_by(m.ManualOrder.received_at)).scalars().all():
         ls = db.execute(select(m.ManualOrderLine).where(m.ManualOrderLine.order_id == o.id)).scalars().all()
-        out[(o.store_id, _for_day(o.received_at))] = {skus[l.sku]: l for l in ls if l.sku in skus}
+        lines = {skus[l.sku]: l for l in ls if l.sku in skus}
+        made = o.received_at.astimezone(SOFIA).date()
+        ordered = {a for a, l in lines.items() if float(l.store_qty or 0) > 0}
+        same = len(ordered & set(dl.get((o.store_id, made), {})))
+        nxt = len(ordered & set(dl.get((o.store_id, made + timedelta(days=1)), {})))
+        if same > nxt:
+            day = made
+        elif nxt > 0:
+            day = made + timedelta(days=1)
+        else:   # още няма доставка: ако е от днес -> може още днес; иначе следващия ден
+            day = made if made >= today else made + timedelta(days=1)
+        out[(o.store_id, day)] = lines
     return out
 
 
@@ -93,7 +109,18 @@ def _times(db: Session, since: date) -> tuple[dict, dict]:
             m.ManualOrder.store_id.isnot(None),
             m.ManualOrder.received_at >= datetime.combine(since - timedelta(days=1), datetime.min.time(), SOFIA))
             .order_by(m.ManualOrder.received_at)).scalars().all():
-        ani[(o.store_id, _for_day(o.received_at))] = o.received_at
+        pass
+    for key in _ani_full(db, since).keys():
+        pass
+    # по-точно: часът на заявката за всеки (магазин, ден на доставка)
+    af = _ani_full(db, since)
+    for o in db.execute(select(m.ManualOrder).where(m.ManualOrder.store_id.isnot(None),
+            m.ManualOrder.received_at >= datetime.combine(since - timedelta(days=1), datetime.min.time(), SOFIA))).scalars().all():
+        made = o.received_at.astimezone(SOFIA).date()
+        for d in (made, made + timedelta(days=1)):
+            if (o.store_id, d) in af:
+                ani[(o.store_id, d)] = o.received_at
+                break
     return ours, ani
 
 
@@ -103,7 +130,8 @@ def _fmt_t(t) -> str | None:
 
 def summary(db: Session, days: int = 14) -> dict:
     since = datetime.now(SOFIA).date() - timedelta(days=days)
-    dl, ours, anif = _delivered(db, since), _ours(db, since), _ani_full(db, since)
+    dl, ours = _delivered(db, since - timedelta(days=2)), _ours(db, since)
+    anif = _ani_full(db, since, dl)
     t_ours, t_ani = _times(db, since)
     ani = {k: {a: float(l.store_qty) for a, l in v.items() if float(l.store_qty) > 0} for k, v in anif.items()}
     arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
@@ -149,8 +177,9 @@ def detail(db: Session, store_id: int, day: str) -> dict:
     from . import compare
     d = date.fromisoformat(day)
     since = d
-    D = _delivered(db, since).get((store_id, d), {})
-    AF = _ani_full(db, since).get((store_id, d), {})
+    _dl = _delivered(db, since - timedelta(days=2))
+    D = _dl.get((store_id, d), {})
+    AF = _ani_full(db, since - timedelta(days=1), _dl).get((store_id, d), {})
     A = {a: float(l.store_qty) for a, l in AF.items() if float(l.store_qty) > 0}
     if AF:   # нашето = в същата секунда като Ани
         O = {a: SimpleNamespace(ordered_quantity=float(l.api_qty), current_stock=l.stock,
