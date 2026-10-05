@@ -1098,3 +1098,20 @@ def ui_negative_selling(days: int = Query(3, ge=1, le=14), db: Session = Depends
                      "eur": round(-q * float(a.delivery_price or 0), 2)})
     rows.sort(key=lambda r: r["stock"])
     return {"data_until": last.strftime("%d.%m.%Y"), "days": days, "count": len(rows), "rows": rows}
+
+
+@router.get("/ui/article-deliveries")
+def ui_article_deliveries(sku: str, days: int = Query(30, ge=1, le=60), db: Session = Depends(get_db)):
+    """Всички заведени доставки (Мистрал, вид 2) на един артикул по магазини и дати."""
+    from sqlalchemy import text as _t
+    a = db.execute(select(m.Article).where(m.Article.sku == sku)).scalar_one_or_none()
+    if a is None:
+        raise HTTPException(404, "Няма такъв артикул")
+    stores = {x.id: x.name for x in db.execute(select(m.Store)).scalars()}
+    since = datetime.now(_SOFIA).date() - timedelta(days=days)
+    rows = db.execute(_t("""SELECT store_id, day, qty_in, qty_out FROM stock_movements
+                            WHERE article_id = :a AND optype = 2 AND day >= :d ORDER BY day DESC, store_id"""),
+                      {"a": a.id, "d": since}).all()
+    return {"sku": sku, "name": a.supplier_name or a.name, "pack": a.pack_size,
+            "rows": [{"store": stores.get(s_, s_), "day": d.strftime("%d.%m.%Y"), "qty_in": float(qi or 0),
+                      "qty_out": float(qo or 0)} for s_, d, qi, qo in rows]}
