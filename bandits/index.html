@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="bg"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Бандитс AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F7F2EC;--card:#FFFDF9;--ink:#221A16;--muted:#7A6A5E;--line:#E7DCCF;--brand:#9B1C1C;--brand2:#C2410C;--ok:#15803D;--bad:#B91C1C;--warn:#B45309;--soft:#FCEDE6}
+@media (prefers-color-scheme:dark){:root{--bg:#171210;--card:#211A17;--ink:#F3ECE6;--muted:#B5A497;--line:#3A2E28;--soft:#2D1D18}}
+*{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--ink);font:15px/1.5 Manrope,system-ui,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+header{background:#1E1411;color:#FCEFE6;padding:18px 18px 16px;border-radius:0 0 22px 22px}
+header .k{font:600 12px 'IBM Plex Mono',monospace;letter-spacing:3px;color:#F2B38C}
+header h1{margin:4px 0 0;font:800 26px Manrope}
+header .u{float:right;font:12px 'IBM Plex Mono';color:#D9C3B4}header .u a{color:#F2B38C}
+nav{display:flex;flex-wrap:wrap;gap:8px;padding:14px 14px 0}
+nav a{padding:9px 14px;border-radius:30px;background:var(--card);border:1px solid var(--line);color:var(--ink);text-decoration:none;font-weight:600;font-size:14px}
+nav a.on{background:var(--brand);border-color:var(--brand);color:#fff}
+main{padding:14px;max-width:1200px;margin:0 auto}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:0 0 14px}
+.t{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;border-top:5px solid var(--brand2)}
+.t .l{font:600 11px 'IBM Plex Mono';letter-spacing:1.5px;color:var(--muted)}.t .v{font:800 26px Manrope;margin-top:4px}.t .s{font-size:12px;color:var(--muted)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px}
+input,select,button{font:inherit;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+button{cursor:pointer;font-weight:600}button.go{background:var(--brand);color:#fff;border-color:var(--brand)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px;margin:0 0 12px}
+.scroll{overflow-x:auto;border-radius:12px;border:1px solid var(--line);background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{font:600 11px 'IBM Plex Mono';letter-spacing:1px;color:var(--muted);background:var(--soft);position:sticky;top:0}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}td.nm{white-space:normal;min-width:180px}
+.up{color:var(--ok);font-weight:700}.dn{color:var(--bad);font-weight:700}.muted{color:var(--muted)}
+.tag{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11.5px;background:var(--soft);color:var(--brand)}
+details{background:var(--card);border:1px solid var(--line);border-radius:14px;margin:0 0 8px}summary{padding:12px 14px;cursor:pointer;font-weight:700}
+#login{max-width:340px;margin:60px auto;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px}
+#login input{width:100%;margin:6px 0 10px}.hide{display:none}
+.xl{float:right;margin:0 0 6px;font-size:12px;padding:5px 10px}
+.empty{padding:24px;text-align:center;color:var(--muted)}
+</style></head><body>
+<header><span class="u" id="who"></span><div class="k">БАНДИТС AI · МАГАЗИНИ 300</div><h1>Заявки и производство</h1></header>
+<div id="login" class="hide"><h3 style="margin-top:0">Вход</h3><input id="lu" placeholder="Потребител" autocapitalize="off"><input id="lp" type="password" placeholder="Парола"><button class="go" id="lb" style="width:100%">Вход</button><div id="le" class="muted"></div></div>
+<div id="appx" class="hide">
+<nav><a href="#day" data-t="day">Продажби по магазини</a><a href="#orders" data-t="orders">Заявки по магазини</a><a href="#plan" data-t="plan">План за производство</a><a href="#waste" data-t="waste">Брак</a><a href="#arts" data-t="arts">Артикули</a></nav>
+<main>
+<section id="t-day">
+  <div class="bar"><input type="date" id="dDay"><span class="muted" id="dInfo"></span><button id="syncB" style="margin-left:auto">Обнови от Мистрал</button></div>
+  <div class="tiles" id="dTiles"></div>
+  <div class="card" id="dSeries"></div>
+  <h3>По магазини</h3><div class="scroll"><table id="dStores"></table></div>
+  <h3>По артикули</h3><div class="scroll"><table id="dArts"></table></div>
+</section>
+<section id="t-orders" class="hide">
+  <div class="bar"><select id="oDay"></select><span class="muted" id="oInfo"></span><button id="oRe" style="margin-left:auto">Преизчисли</button></div>
+  <div class="tiles" id="oTiles"></div>
+  <div class="bar"><input id="oQ" placeholder="Търси магазин или артикул" style="flex:1"><label><input type="checkbox" id="oOnly" checked> само с поръчка</label></div>
+  <div id="oList"></div>
+</section>
+<section id="t-plan" class="hide">
+  <div class="bar"><select id="pDay"></select><span class="muted" id="pInfo"></span></div>
+  <div class="tiles" id="pTiles"></div><div class="scroll"><table id="pTab"></table></div>
+</section>
+<section id="t-waste" class="hide">
+  <div class="bar"><select id="wDays"><option value="7">7 дни</option><option value="14">14 дни</option><option value="28" selected>28 дни</option></select></div>
+  <div class="tiles" id="wTiles"></div><div class="scroll"><table id="wTab"></table></div>
+</section>
+<section id="t-arts" class="hide">
+  <p class="muted">Срок на годност в дни от доставката в магазина. Заявката никога не надвишава очакваните продажби за срока.</p>
+  <div class="scroll"><table id="aTab"></table></div><div class="bar" style="margin-top:10px"><button class="go" id="aSave">Запази сроковете</button><span id="aMsg" class="muted"></span></div>
+</section>
+</main></div>
+<script>
+const $=id=>document.getElementById(id);
+const fmt=(v,d=0)=>v==null||isNaN(v)?"—":Number(v).toLocaleString("bg-BG",{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct=v=>v==null?"—":`<span class="${v>=3?"up":v<=-3?"dn":"muted"}">${v>0?"▲ ":v<0?"▼ ":""}${fmt(Math.abs(v),1)}%</span>`;
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+async function api(p,o={}){const r=await fetch(p,{credentials:"same-origin",...o});if(r.status===401){showLogin();throw new Error("login")}if(!r.ok)throw new Error(await r.text());return r.json()}
+function showLogin(){$("login").classList.remove("hide");$("appx").classList.add("hide")}
+$("lb").onclick=async()=>{try{const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:$("lu").value,password:$("lp").value})});if(!r.ok){$("le").textContent="Грешен потребител или парола";return}location.reload()}catch(e){$("le").textContent=e.message}};
+$("lp").onkeydown=e=>{if(e.key==="Enter")$("lb").click()};
+function tiles(el,arr){el.innerHTML=arr.map(([l,v,s])=>`<div class="t"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s||""}</div></div>`).join("")}
+async function xl(name,head,rows){const r=await fetch("/api/export-xlsx",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:name,columns:head,rows})});const b=await r.blob();const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name+".xlsx";a.click()}
+function table(el,head,rows,name){el.innerHTML=`<thead><tr>${head.map(h=>`<th class="${h[1]||""}">${h[0]}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map((c,i)=>`<td class="${head[i][1]||""}">${c}</td>`).join("")}</tr>`).join("")||`<tr><td colspan="${head.length}" class="empty">Няма данни</td></tr>`}</tbody>`;
+  const sc=el.parentElement;let b=sc.previousElementSibling;if(!b||!b.classList||!b.classList.contains("xl")){b=document.createElement("button");b.className="xl";b.textContent="⬇️ Excel";sc.parentNode.insertBefore(b,sc)}
+  b.onclick=()=>xl(name,head.map(h=>h[0]),[...el.querySelectorAll("tbody tr")].map(tr=>[...tr.children].map(td=>{const t=td.innerText.replace(/[▲▼%€]/g,"").replace(/\s/g,"").replace(",",".");return /^-?\d+(\.\d+)?$/.test(t)?parseFloat(t):td.innerText})))}
+function days(sel){const t=new Date();const o=[];for(let i=0;i<3;i++){const d=new Date(t);d.setDate(t.getDate()+i);o.push(`<option value="${d.toISOString().slice(0,10)}">${i===0?"Днес":i===1?"Утре":"Вдругиден"} · ${d.toLocaleDateString("bg-BG",{weekday:"short",day:"2-digit",month:"2-digit"})}</option>`)}sel.innerHTML=o.join("")}
+async function loadDay(){const d=await api("/api/daily"+($("dDay").value?`?day=${$("dDay").value}`:""));if(!d.ready){$("dTiles").innerHTML='<div class="empty">Още няма данни — натисни „Обнови от Мистрал“.</div>';return}
+  if(!$("dDay").value){$("dDay").value=d.iso;$("dDay").max=d.last}
+  const t=d.totals;$("dInfo").textContent=`${d.day}, ${d.weekday}`;
+  tiles($("dTiles"),[["ОБОРОТ",fmt(t.rev,2)+" €",`спрямо миналата седмица ${t.vs_week==null?"—":(t.vs_week>0?"+":"")+fmt(t.vs_week,1)+"%"}`],["ПРОДАДЕНИ",fmt(t.units)+" бр.",`в ${t.stores} магазина`],["МАРЖ",fmt(t.margin_pct,1)+"%","от оборота"],["ДОСТАВЕНО / ВЪРНАТО",`${fmt(t.delivered)} / ${fmt(t.returned)}`,"бр. за деня (брак)"]]);
+  const mx=Math.max(1,...d.series.map(x=>x.rev));$("dSeries").innerHTML=`<div class="muted" style="font-size:12px;margin-bottom:6px">Оборот по дни (28 дни)</div><div style="display:flex;align-items:flex-end;gap:3px;height:90px">${d.series.map(x=>`<div title="${x.day}: ${fmt(x.rev,2)} €" style="flex:1;height:${Math.max(2,x.rev/mx*88)}px;background:${x.day===d.day.slice(0,5)?"var(--brand)":"var(--brand2)"};opacity:${x.day===d.day.slice(0,5)?1:.55};border-radius:3px 3px 0 0"></div>`).join("")}</div>`;
+  table($("dStores"),[["Магазин"],["Бройки","n"],["Оборот €","n"],["Марж","n"],["vs миналата седмица","n"],["vs средно 7 дни","n"],["Доставено","n"],["Върнато","n"]],d.stores.map(s=>[esc(s.store),fmt(s.units),fmt(s.rev,2),s.margin_pct==null?"—":fmt(s.margin_pct,1)+"%",pct(s.vs_week),pct(s.vs_avg7),fmt(s.delivered),s.returned?`<span class="dn">${fmt(s.returned)}</span>`:"0"]),`Бандитс продажби по магазини ${d.day}`);
+  table($("dArts"),[["Артикул"],["Бройки","n"],["Оборот €","n"],["Марж","n"]],d.articles.map(a=>[`<span class="nm">${esc(a.name)}</span>`,fmt(a.units),fmt(a.rev,2),a.margin_pct==null?"—":fmt(a.margin_pct,1)+"%"]),`Бандитс продажби по артикули ${d.day}`)}
+let ORD=null;
+async function loadOrders(){ORD=await api(`/api/orders?day=${$("oDay").value}`);if(!ORD.ready){$("oList").innerHTML='<div class="empty">Още няма данни.</div>';return}
+  const L=ORD.lines,q=L.reduce((a,l)=>a+l.qty,0),st=new Set(L.filter(l=>l.qty>0).map(l=>l.store)).size;
+  $("oInfo").textContent=`изчислено ${ORD.computed}`;tiles($("oTiles"),[["ЗА ДОСТАВКА",fmt(q)+" бр.",ORD.day],["МАГАЗИНИ",fmt(st),"с поръчка"],["РЕДОВЕ",fmt(L.filter(l=>l.qty>0).length),"магазин × артикул"],["ПРОГНОЗА",fmt(L.reduce((a,l)=>a+l.forecast,0))+" бр.","очаквани продажби"]]);renderOrders()}
+function renderOrders(){const f=$("oQ").value.trim().toLowerCase(),only=$("oOnly").checked;const by={};
+  ORD.lines.filter(l=>(!only||l.qty>0)&&(!f||(l.store+" "+l.name).toLowerCase().includes(f))).forEach(l=>(by[l.store]=by[l.store]||[]).push(l));
+  const names=Object.keys(by).sort((a,b)=>a.localeCompare(b,"bg"));
+  $("oList").innerHTML=`<button class="xl" id="oXl">⬇️ Excel (всички магазини)</button><div style="clear:both"></div>`+names.map(n=>{const ls=by[n].sort((a,b)=>b.qty-a.qty);return `<details><summary>${esc(n)} · <b>${fmt(ls.reduce((a,l)=>a+l.qty,0))} бр.</b> <span class="muted">${ls.filter(l=>l.qty>0).length} артикула</span></summary><div class="scroll" style="border:0;border-top:1px solid var(--line);border-radius:0"><table><thead><tr><th>Артикул</th><th class="n">Заявка</th><th class="n">Прогноза</th><th class="n">Наличност</th><th class="n">Таван по срока</th><th class="n">Брак 28 дни</th><th>Бележка</th></tr></thead><tbody>${ls.map(l=>`<tr><td class="nm">${esc(l.name)} <span class="muted">${l.shelf} дни</span></td><td class="n"><b>${fmt(l.qty)}</b></td><td class="n">${fmt(l.forecast,1)}</td><td class="n">${fmt(l.stock)}</td><td class="n">${fmt(l.cap,1)}</td><td class="n">${l.waste_pct?`<span class="${l.waste_pct>15?"dn":""}">${fmt(l.waste_pct,1)}%</span>`:"—"}</td><td class="muted" style="white-space:normal">${esc(l.note||"")}</td></tr>`).join("")}</tbody></table></div></details>`}).join("")||'<div class="empty">Няма редове</div>';
+  $("oXl").onclick=()=>xl(`Бандитс заявки ${ORD.day}`,["Магазин","Код","Артикул","Заявка","Прогноза","Наличност","Таван по срока","Брак %","Бележка"],ORD.lines.filter(l=>!only||l.qty>0).map(l=>[l.store,l.code,l.name,l.qty,l.forecast,l.stock,l.cap,l.waste_pct,l.note||""]))}
+async function loadPlan(){const p=await api(`/api/plan?day=${$("pDay").value}`);if(!p.ready){$("pTab").innerHTML="";return}$("pInfo").textContent=`изчислено ${p.computed}`;
+  tiles($("pTiles"),[["ЗА ПРОИЗВОДСТВО",fmt(p.total)+" бр.",`доставка ${p.day}`],["АРТИКУЛИ",fmt(p.rows.filter(r=>r.qty>0).length),"с количество"]]);
+  table($("pTab"),[["Артикул"],["Срок, дни","n"],["Количество","n"],["Магазини","n"],["Прогноза продажби","n"]],p.rows.map(r=>[`<span class="nm">${esc(r.name)}</span>`,r.shelf||"—",`<b>${fmt(r.qty)}</b>`,fmt(r.stores),fmt(r.forecast,1)]),`План за производство ${p.day}`)}
+async function loadWaste(){const w=await api(`/api/waste?days=${$("wDays").value}`);
+  tiles($("wTiles"),[["ДОСТАВЕНО",fmt(w.delivered)+" бр.",`${w.days} дни`],["ВЪРНАТ БРАК",fmt(w.returned)+" бр.",`${fmt(w.pct,1)}% от доставеното`],["БРАК €",fmt(w.eur,2)+" €","по доставни цени"]]);
+  table($("wTab"),[["Магазин"],["Артикул"],["Доставено","n"],["Върнато","n"],["Брак %","n"],["€","n"]],w.rows.filter(r=>r.returned>0).map(r=>[esc(r.store),`<span class="nm">${esc(r.name)}</span>`,fmt(r.delivered),fmt(r.returned),r.pct==null?"—":`<span class="${r.pct>15?"dn":""}">${fmt(r.pct,1)}%</span>`,fmt(r.eur,2)]),`Бандитс брак ${w.days} дни`)}
+async function loadArts(){const a=await api("/api/articles");table($("aTab"),[["Код"],["Артикул"],["Група"],["Срок, дни","n"]],a.map(x=>[x.code,`<span class="nm">${esc(x.name)}</span>`,esc(x.sub||""),`<input type="number" min="1" max="30" value="${x.shelf_days??""}" data-c="${x.code}" style="width:70px;text-align:right">`]),"Бандитс срокове на годност")}
+$("aSave").onclick=async()=>{const items=[...document.querySelectorAll("#aTab input[data-c]")].filter(i=>i.value).map(i=>({code:+i.dataset.c,shelf_days:+i.value}));await api("/api/articles",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(items)});$("aMsg").textContent="Запазено ✓"};
+$("syncB").onclick=async()=>{await api("/api/sync",{method:"POST"});$("syncB").textContent="Обновява се…";const iv=setInterval(async()=>{const s=await api("/api/sync");if(!s.running){clearInterval(iv);$("syncB").textContent="Обнови от Мистрал";$("dDay").value="";loadDay()}else $("syncB").textContent="Обновява се: "+(s.progress||"…")},4000)};
+$("oRe").onclick=async()=>{await api(`/api/orders/rebuild?day=${$("oDay").value}`,{method:"POST"});loadOrders()};
+$("dDay").onchange=loadDay;$("oDay").onchange=loadOrders;$("pDay").onchange=loadPlan;$("wDays").onchange=loadWaste;$("oQ").oninput=renderOrders;$("oOnly").onchange=renderOrders;
+const L={day:loadDay,orders:loadOrders,plan:loadPlan,waste:loadWaste,arts:loadArts};
+function show(t){if(!L[t])t="day";document.querySelectorAll("nav a").forEach(a=>a.classList.toggle("on",a.dataset.t===t));document.querySelectorAll("main section").forEach(s=>s.classList.toggle("hide",s.id!=="t-"+t));L[t]().catch(()=>{})}
+window.onhashchange=()=>show(location.hash.slice(1));
+(async()=>{try{const m=await api("/api/me");$("who").innerHTML=`👤 ${esc(m.name)} · <a href="#" id="lo">изход</a>`;$("lo").onclick=async e=>{e.preventDefault();await fetch("/api/logout",{method:"POST"});location.reload()};$("appx").classList.remove("hide");days($("oDay"));days($("pDay"));show(location.hash.slice(1))}catch(e){}})();
+</script></body></html>
