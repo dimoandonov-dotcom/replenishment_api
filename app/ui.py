@@ -1135,3 +1135,41 @@ def ui_mistral_movements(store_id: int, sku: str, day_from: str, day_to: str, db
                        ORDER BY OPERATIONDATE""", (loc, int(sku), day_from, day_to))
         return {"location_id": loc, "rows": [{"at": str(r["OPERATIONDATE"])[:19], "type": int(r["OPERATIONTYPE"]),
                                               "doc": str(r["OPERAIONNUM"]), "qty": float(r["QTY"])} for r in cur.fetchall()]}
+
+
+@router.get("/ui/mistral/operation")
+def ui_mistral_operation(store_id: int, nums: str, db: Session = Depends(get_db)):
+    """Само четене: проследява операции от дневника до реалния документ - номер, дата, доставчик,
+    въвел го потребител, кога е записан/редактиран, бележка. (Без пароли.)"""
+    from . import mistral
+    from .anomalies import _loc_map
+    ids = [int(x) for x in nums.split(",") if x.strip().isdigit()][:20]
+    with mistral.connect() as conn:
+        cur = conn.cursor()
+        loc = {v: k for k, v in _loc_map(db, cur).items()}.get(store_id)
+        if loc is None or not ids:
+            raise HTTPException(404, "Няма обект или номера")
+        cur.execute(f"""SELECT o.NUM, o.DOCUMENTNUM, o.DOCUMENTDATE, o.DOCUMENTTYPEID, o.OPERATIONDOCTYPE, o.DOCUMENTSUM,
+                               o.DATESAVED, o.LASTEDITDATE, o.EXECUTEDATE, o.NOTE, o.USERID, o.PARTNERNAMEID, o.PARENTOF,
+                               o.EDITNUM, o.CHECKUSERCODE
+                        FROM OPERATIONS o WITH (NOLOCK) WHERE o.LOCATIONID = %s AND o.NUM IN ({','.join(map(str, ids))})""", (loc,))
+        ops = cur.fetchall()
+        out = []
+        for o in ops:
+            cur.execute("SELECT TOP 1 PARTNERNAME FROM PARTNERNAME WHERE ID = %s", (o["PARTNERNAMEID"],))
+            p = cur.fetchone()
+            cur.execute("SELECT TOP 1 NAME, FIRSTNAME, LASTNAME, CODE FROM USERS WHERE ID = %s AND LOCATIONID = %s",
+                        (o["USERID"], loc))
+            u = cur.fetchone() or {}
+            cur.execute("""SELECT DOCUMENTNUM, DOCUMENTDATE, DOCUMENTTYPEID, DOCNOTE, DOCSUM, DOCUMENTOUTNUM
+                           FROM OPERATIONDOCUMENT WITH (NOLOCK) WHERE LOCATIONID = %s AND NUM = %s""", (loc, o["NUM"]))
+            docs = [{k: str(v) for k, v in d.items() if v not in (None, "")} for d in cur.fetchall()]
+            out.append({"operation": int(o["NUM"]), "document_num": str(o["DOCUMENTNUM"]),
+                        "document_date": str(o["DOCUMENTDATE"])[:19], "document_type": o["DOCUMENTTYPEID"],
+                        "sum": float(o["DOCUMENTSUM"] or 0), "saved": str(o["DATESAVED"])[:19],
+                        "edited": str(o["LASTEDITDATE"])[:19] if o["LASTEDITDATE"] else None,
+                        "note": o["NOTE"], "partner": (p or {}).get("PARTNERNAME"),
+                        "user": " ".join(x for x in [u.get("NAME"), u.get("FIRSTNAME"), u.get("LASTNAME")] if x) or o["USERID"],
+                        "user_code": u.get("CODE"), "check_user": o["CHECKUSERCODE"], "parent": str(o["PARENTOF"]),
+                        "documents": docs})
+    return {"location_id": loc, "operations": out}
