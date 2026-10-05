@@ -331,6 +331,9 @@ def summary(db: Session, days: int = 7) -> dict:
 # Двойно заведени документи за доставка (всички доставчици) - нощна проверка в Мистрал
 # ---------------------------------------------------------------------------
 
+OWN_SUPPLIERS = ("ТРИСТА БГ", "БАНДИТС")
+
+
 def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
     """Два документа от един и същ доставчик в един и същ ден и магазин, които съвпадат
     в поне 80% от редовете си (същият артикул и количество) -> вероятно двойно заведени."""
@@ -392,10 +395,29 @@ def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
                 a, b = ops[ks[i]], ops[ks[j]]
                 same = [c for c, q in a.items() if b.get(c) == q]
                 small = min(len(a), len(b))
-                if len(same) >= 5 and len(same) >= 0.8 * small:
-                    ma, mb = meta[ks[i]], meta[ks[j]]
-                    excess = sum(q * float(getattr(arts.get(c), "delivery_price", 0) or 0) for c, q in a.items() if c in same)
-                    ex = [f"{(arts[c].supplier_name or arts[c].name) if c in arts else c}: {a[c]:g}" for c in same[:5]]
+                ma, mb = meta[ks[i]], meta[ks[j]]
+                na = str(ma["DOCUMENTNUM"] or "").split(".")[0]; nb = str(mb["DOCUMENTNUM"] or "").split(".")[0]
+                pname = (pn.get(int(pid or 0)) or "").upper()
+                own = any(k in pname for k in OWN_SUPPLIERS)
+                same_num = bool(na) and na == nb
+                one_digit = bool(na) and len(na) == len(nb) and na != nb and sum(x != y for x, y in zip(na, nb)) == 1
+                same_sum = abs(float(ma["DOCSUM"] or 0) - float(mb["DOCSUM"] or 0)) < 0.05 and float(ma["DOCSUM"] or 0) > 0
+                share = len(same) / small if small else 0
+                if same_num and len(same) >= 3:
+                    conf = "сигурен — еднакъв номер на документа"
+                elif own:
+                    continue      # собствено производство: еднакви количества по няколко пъти на ден са нормални
+                elif one_digit and share >= 0.8 and len(same) >= 3:
+                    conf = "сигурен — номерата се различават с една цифра (грешно разчетен номер)"
+                elif same_sum and share >= 0.8 and len(same) >= 5:
+                    conf = "сигурен — еднаква сума и еднакви редове"
+                elif share >= 0.9 and len(same) >= 10:
+                    conf = "вероятен — 90%+ еднакви редове"
+                else:
+                    continue
+                if True:
+                    excess = min(abs(float(ma["DOCSUM"] or 0)), abs(float(mb["DOCSUM"] or 0))) * (len(same) / max(len(a), len(b)))
+                    ex = [conf] + [f"{(arts[c].supplier_name or arts[c].name) if c in arts else c}: {a[c]:g}" for c in same[:4]]
                     db.execute(text("""INSERT INTO dup_docs VALUES (:s,:d,:da,:dbb,:p,:n,:la,:lb,:sa,:sb,:ta,:tb,:ua,:ub,:e,:x)
                                        ON CONFLICT DO NOTHING"""),
                                {"s": locs[loc], "d": d, "da": str(ma["DOCUMENTNUM"] or "").split(".")[0],
