@@ -93,11 +93,23 @@ def _user(request: Request) -> str | None:
 
 @app.middleware("http")
 async def auth(request: Request, call_next):
-    if request.url.path in ("/", "/health", "/api/login") or request.url.path.startswith("/static"):
-        return await call_next(request)
-    if not _user(request):
-        return JSONResponse({"detail": "Нужен е вход"}, status_code=401)
-    return await call_next(request)
+    if request.url.path in ("/", "/health", "/api/login", "/robots.txt"):
+        res = await call_next(request)
+    elif not _user(request):
+        res = JSONResponse({"detail": "Нужен е вход"}, status_code=401)
+    else:
+        res = await call_next(request)
+    # никакво индексиране и кеширане от търсачки и чужди сайтове
+    res.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet"
+    res.headers["Referrer-Policy"] = "no-referrer"
+    res.headers["X-Frame-Options"] = "DENY"
+    res.headers["Cache-Control"] = "no-store"
+    return res
+
+
+@app.get("/robots.txt")
+def robots():
+    return Response("User-agent: *\nDisallow: /\n", media_type="text/plain")
 
 
 class LoginIn(BaseModel):
