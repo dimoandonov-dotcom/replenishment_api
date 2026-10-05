@@ -199,9 +199,11 @@ def calculate_for_store(
     order_date: date,
     supplier_id: int | None = None,
     respect_schedule: bool = True,
+    stock_override: dict | None = None,
 ):
     """
     Изчислява (без да записва) какво трябва да се поръча за един магазин.
+    stock_override - наличност от минал момент (за преизчисляване на сутрешно пускане).
     respect_schedule=True -> само доставчици, за които днес е ден за заявка.
     """
     settings = load_settings(db, store_id, supplier_id)
@@ -230,7 +232,7 @@ def calculate_for_store(
         }
         settings = [s for s in settings if s.supplier_id in allowed]
 
-    stock = latest_stock_map(db, store_id)
+    stock = stock_override if stock_override is not None else latest_stock_map(db, store_id)
     closures = load_closures(db)
     avg_sales = load_avg_daily_sales(db, store_id)
 
@@ -386,3 +388,41 @@ def piece_orderable(db) -> set[int]:
     except Exception:
         db.rollback()
     return out
+
+
+def recalc_run(db: Session, run_id: int) -> dict:
+    """
+    Преизчислява вече направено пускане по СЪЩАТА наличност (от часа на пускането),
+    но с текущите правила. Нови редове не се добавят (правилата само намаляват),
+    заявките запазват часа си -> остават за същия ден доставка.
+    Старите количества се връщат в отговора (за резервно копие).
+    """
+    pos = db.execute(select(m.PurchaseOrder).where(m.PurchaseOrder.dispatch_run_id == run_id)).scalars().all()
+    before = after = lines_before = lines_after = 0
+    backup = []
+    for po in pos:
+        old = {l.article_id: l for l in po.lines}
+        if not old:
+            continue
+        stock = {aid: float(l.current_stock) for aid, l in old.items()}
+        # артикулите, които сутринта не са поръчани, остават неподредени (наличност "достатъчна")
+        res = calculate_for_store(db, po.store_id, po.created_at.date(), po.supplier_id,
+                                  respect_schedule=False, stock_override=stock)
+        # другите артикули (без сутрешна наличност) калкулаторът ги пропуска като „без данни"
+        new = {ln.article_id: ln for ln in res.lines if ln.article_id in old}
+        for aid, l in old.items():
+            backup.append({"po": po.id, "store_id": po.store_id, "article_id": aid, "qty": float(l.ordered_quantity)})
+            before += float(l.ordered_quantity); lines_before += 1
+            ln = new.get(aid)
+            if ln is None or ln.ordered_quantity <= 0:
+                db.delete(l)
+                continue
+            l.ordered_quantity = ln.ordered_quantity
+            l.suggested_quantity = ln.suggested_quantity
+            l.min_stock, l.max_stock, l.effective_max = ln.min_stock, ln.max_stock, ln.effective_max
+            l.pack_size = ln.pack_size
+            l.notes = ((ln.notes or "") + " · преизчислено").strip(" ·")
+            after += float(ln.ordered_quantity); lines_after += 1
+    db.commit()
+    return {"run_id": run_id, "orders": len(pos), "lines_before": lines_before, "lines_after": lines_after,
+            "units_before": before, "units_after": after, "backup": backup}

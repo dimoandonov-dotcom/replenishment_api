@@ -1056,3 +1056,9 @@ def admin_vacuum(table: str = Query("stock_snapshots", pattern="^(stock_snapshot
         from sqlalchemy import text as _t
         c.execute(_t(f"VACUUM FULL ANALYZE {table}"))
     return {"ok": True, "table": table}
+
+
+@router.post("/orders/recalc-run/{run_id}")
+def orders_recalc_run(run_id: int, db: Session = Depends(get_db)):
+    """Преизчислява пускане по наличността от часа му, с текущите правила."""
+    return service.recalc_run(db, run_id)
