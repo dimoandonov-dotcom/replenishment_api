@@ -262,7 +262,10 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
             if sid not in stores or aid not in arts or "АМБАЛАЖ" in name(aid).upper():
                 continue
             qin = float(qin); m_ = mx3.get((sid, aid), 0.0)
-            if m_ == 0 or qin > 3 * m_:
+            pk = int(getattr(arts[aid], "pack_size", 1) or 1)
+            qs = str(int(qin)) if qin == int(qin) else ""
+            odd = (pk > 1 and int(qin) % pk != 0) or (len(qs) >= 2 and len(set(qs)) == 1)   # не е кратно / 66, 88, 222
+            if odd and qin > 2 * pk and (m_ == 0 or qin > 3 * m_):
                 groups[(aid, qin)].append((sid, d, m_))
         for (aid, qin), occ in groups.items():
             if len({s_ for s_, _, _ in occ}) < 3:
