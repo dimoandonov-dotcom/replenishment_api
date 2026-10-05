@@ -1229,3 +1229,9 @@ def ui_delivery_docs(store_id: int, day: str, db: Session = Depends(get_db)):
     for a in docs:
         a.pop("_lines", None)
     return {"store_id": store_id, "day": d.strftime("%d.%m.%Y"), "documents": docs}
+
+
+@router.post("/anomalies/duplicate-docs")
+def an_dup_docs(days: int = Query(14, ge=1, le=30), db: Session = Depends(get_db)):
+    from . import anomalies
+    return anomalies.detect_duplicate_docs(db, days)

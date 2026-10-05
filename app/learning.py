@@ -106,6 +106,7 @@ def run(db: Session, apply: bool = True) -> dict:
         try:
             from . import anomalies
             notes.append(f"движения/ревизии: {anomalies.sync(db, 3)}")
+            notes.append(f"двойни документи: {anomalies.detect_duplicate_docs(db, 3)}")
         except Exception as e:
             db.rollback()
             notes.append(f"аномалии: {type(e).__name__}")

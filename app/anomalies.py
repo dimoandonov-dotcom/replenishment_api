@@ -229,25 +229,17 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
     except Exception:
         db.rollback()
 
-    # двойно заведена доставка: много редове от заявката на Ани са заведени точно ×2
+    # двойно заведена доставка: два документа от един доставчик в един ден, еднакви в 80%+ от редовете
     try:
-        from . import deliveries as _dl2
         dsince2 = today - timedelta(days=days)
-        dlm = _dl2._delivered(db, dsince2 - timedelta(days=2))
-        anif = _dl2._ani_full(db, dsince2, dlm)
-        for (sid, d), lines in anif.items():
-            if d >= today or d < dsince2 or (store_id and sid != store_id) or sid not in stores:
+        for sid, d, da, dbb, p, n, la, lb, sa, sb, ta, tb, ua, ub, e, x in db.execute(text(
+                "SELECT * FROM dup_docs WHERE day >= :d"), {"d": dsince2}).all():
+            if (store_id and sid != store_id) or sid not in stores:
                 continue
-            got = dlm.get((sid, d), {})
-            matched = [(aid, float(l.store_qty)) for aid, l in lines.items()
-                       if float(l.store_qty or 0) > 0 and got.get(aid, 0) > 0 and aid in arts
-                       and "АМБАЛАЖ" not in name(aid).upper()]
-            dbl = [(aid, q) for aid, q in matched if abs(got[aid] - 2 * q) < 0.01]
-            if len(dbl) >= 5 or (len(matched) >= 4 and len(dbl) >= 0.5 * len(matched)):
-                for aid, q in dbl:
-                    out.append({"kind": "double_delivery", "store_id": sid, "store": stores[sid], "sku": sku(aid),
-                                "name": name(aid), "qty": q, "eur": round(q * price(aid), 2), "day": d.strftime("%d.%m"),
-                                "info": f"поръчано {q:g}, заведено {got[aid]:g} — {len(dbl)} от {len(matched)} реда в доставката са ×2"})
+            out.append({"kind": "double_delivery", "store_id": sid, "store": stores[sid], "sku": "",
+                        "name": f"{p}: № {da} и № {dbb}", "qty": n, "eur": float(e or 0), "day": d.strftime("%d.%m"),
+                        "info": (f"№ {da} ({ta} ч., {float(sa or 0):.2f} €, {la} реда) и № {dbb} ({tb} ч., {float(sb or 0):.2f} €, "
+                                 f"{lb} реда) — {n} еднакви реда. Напр.: {x}")})
     except Exception:
         db.rollback()
 
@@ -333,3 +325,84 @@ def summary(db: Session, days: int = 7) -> dict:
     last = db.execute(text("SELECT MAX(day) FROM stock_movements")).scalar()
     return {"days": days, "kinds": KIND, "totals": tot, "stores": stores,
             "data_until": last.strftime("%d.%m.%Y") if last else None}
+
+
+# ---------------------------------------------------------------------------
+# Двойно заведени документи за доставка (всички доставчици) - нощна проверка в Мистрал
+# ---------------------------------------------------------------------------
+
+def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
+    """Два документа от един и същ доставчик в един и същ ден и магазин, които съвпадат
+    в поне 80% от редовете си (същият артикул и количество) -> вероятно двойно заведени."""
+    from . import mistral
+    db.execute(text("""CREATE TABLE IF NOT EXISTS dup_docs (
+        store_id INT NOT NULL, day DATE NOT NULL, doc_a TEXT, doc_b TEXT, partner TEXT,
+        same_lines INT, lines_a INT, lines_b INT, sum_a NUMERIC(14,2), sum_b NUMERIC(14,2),
+        saved_a TEXT, saved_b TEXT, user_a TEXT, user_b TEXT, excess_eur NUMERIC(14,2),
+        examples TEXT, PRIMARY KEY (store_id, day, doc_a, doc_b))"""))
+    db.commit()
+    since = datetime.now(SOFIA).date() - timedelta(days=days)
+    found = 0
+    with mistral.connect() as conn:
+        cur = conn.cursor()
+        locs = _loc_map(db, cur)
+        L = ",".join(map(str, locs))
+        cur.execute(f"""SELECT LOCATIONID AS loc, OPERAIONNUM AS op, MATERIALCODE AS code, SUM(QTY) AS q,
+                               CAST(MIN(OPERATIONDATE) AS date) AS d
+                        FROM MATERIALQTYLOG WITH (NOLOCK)
+                        WHERE OPERATIONTYPE = 2 AND OPERATIONDATE >= %s AND LOCATIONID IN ({L})
+                        GROUP BY LOCATIONID, OPERAIONNUM, MATERIALCODE""", (since.isoformat(),))
+        ops = defaultdict(dict); opday = {}
+        for r in cur.fetchall():
+            if float(r["q"] or 0) <= 0:
+                continue
+            k = (int(r["loc"]), int(r["op"]))
+            ops[k][int(r["code"])] = float(r["q"]); opday[k] = r["d"]
+        # заглавията на документите
+        meta = {}
+        byloc = defaultdict(list)
+        for loc, op in ops:
+            byloc[loc].append(op)
+        for loc, nums in byloc.items():
+            for i in range(0, len(nums), 500):
+                cur.execute(f"""SELECT o.NUM, o.PARTNERNAMEID, o.DATESAVED, o.USERID, od.DOCUMENTNUM, od.DOCSUM
+                                FROM OPERATIONS o WITH (NOLOCK)
+                                LEFT JOIN OPERATIONDOCUMENT od WITH (NOLOCK) ON od.LOCATIONID = o.LOCATIONID AND od.NUM = o.NUM
+                                WHERE o.LOCATIONID = %s AND o.NUM IN ({','.join(map(str, nums[i:i+500]))})""", (loc,))
+                for r in cur.fetchall():
+                    meta[(loc, int(r["NUM"]))] = r
+        pids = sorted({int(m_["PARTNERNAMEID"]) for m_ in meta.values() if m_["PARTNERNAMEID"]})
+        pn = {}
+        for i in range(0, len(pids), 500):
+            cur.execute(f"SELECT ID, PARTNERNAME FROM PARTNERNAME WHERE ID IN ({','.join(map(str, pids[i:i+500]))})")
+            pn.update({int(r["ID"]): r["PARTNERNAME"] for r in cur.fetchall()})
+    arts = {int(a.sku): a for a in db.execute(select(m.Article)).scalars().all() if a.sku.isdigit()}
+    db.execute(text("DELETE FROM dup_docs WHERE day >= :d"), {"d": since})
+    groups = defaultdict(list)
+    for k in ops:
+        mm = meta.get(k)
+        if not mm:
+            continue
+        groups[(k[0], opday[k], mm["PARTNERNAMEID"])].append(k)
+    for (loc, d, pid), ks in groups.items():
+        if len(ks) < 2 or loc not in locs:
+            continue
+        for i in range(len(ks)):
+            for j in range(i + 1, len(ks)):
+                a, b = ops[ks[i]], ops[ks[j]]
+                same = [c for c, q in a.items() if b.get(c) == q]
+                small = min(len(a), len(b))
+                if len(same) >= 5 and len(same) >= 0.8 * small:
+                    ma, mb = meta[ks[i]], meta[ks[j]]
+                    excess = sum(q * float(getattr(arts.get(c), "delivery_price", 0) or 0) for c, q in a.items() if c in same)
+                    ex = [f"{(arts[c].supplier_name or arts[c].name) if c in arts else c}: {a[c]:g}" for c in same[:5]]
+                    db.execute(text("""INSERT INTO dup_docs VALUES (:s,:d,:da,:dbb,:p,:n,:la,:lb,:sa,:sb,:ta,:tb,:ua,:ub,:e,:x)
+                                       ON CONFLICT DO NOTHING"""),
+                               {"s": locs[loc], "d": d, "da": str(ma["DOCUMENTNUM"] or "").split(".")[0],
+                                "dbb": str(mb["DOCUMENTNUM"] or "").split(".")[0], "p": pn.get(int(pid or 0), "?"),
+                                "n": len(same), "la": len(a), "lb": len(b), "sa": float(ma["DOCSUM"] or 0),
+                                "sb": float(mb["DOCSUM"] or 0), "ta": str(ma["DATESAVED"])[11:16], "tb": str(mb["DATESAVED"])[11:16],
+                                "ua": str(ma["USERID"]), "ub": str(mb["USERID"]), "e": round(excess, 2), "x": " · ".join(ex)})
+                    found += 1
+    db.commit()
+    return {"days": days, "duplicates": found}
