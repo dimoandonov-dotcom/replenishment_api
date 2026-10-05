@@ -1115,3 +1115,23 @@ def ui_article_deliveries(sku: str, days: int = Query(30, ge=1, le=60), db: Sess
     return {"sku": sku, "name": a.supplier_name or a.name, "pack": a.pack_size,
             "rows": [{"store": stores.get(s_, s_), "day": d.strftime("%d.%m.%Y"), "qty_in": float(qi or 0),
                       "qty_out": float(qo or 0)} for s_, d, qi, qo in rows]}
+
+
+@router.get("/ui/mistral/movements")
+def ui_mistral_movements(store_id: int, sku: str, day_from: str, day_to: str, db: Session = Depends(get_db)):
+    """Само четене: всеки ред от дневника на движенията в Мистрал за артикул в магазин (за проверка)."""
+    from . import mistral
+    from .anomalies import _loc_map
+    with mistral.connect() as conn:
+        cur = conn.cursor()
+        locs = {v: k for k, v in _loc_map(db, cur).items()}
+        loc = locs.get(store_id)
+        if loc is None:
+            raise HTTPException(404, "Магазинът няма обект в Мистрал")
+        cur.execute("""SELECT OPERATIONDATE, OPERATIONTYPE, OPERAIONNUM, QTY
+                       FROM MATERIALQTYLOG WITH (NOLOCK)
+                       WHERE LOCATIONID = %s AND MATERIALCODE = %s
+                         AND OPERATIONDATE >= %s AND OPERATIONDATE < DATEADD(day, 1, CAST(%s AS date))
+                       ORDER BY OPERATIONDATE""", (loc, int(sku), day_from, day_to))
+        return {"location_id": loc, "rows": [{"at": str(r["OPERATIONDATE"])[:19], "type": int(r["OPERATIONTYPE"]),
+                                              "doc": str(r["OPERAIONNUM"]), "qty": float(r["QTY"])} for r in cur.fetchall()]}
