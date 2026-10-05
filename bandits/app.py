@@ -52,10 +52,11 @@ def init():
         for q in SCHEMA.strip().split(";"):
             if q.strip():
                 c.execute(text(q))
-        for u, n, env in [("dimo", "Димо", "PW_DIMO"), ("asen", "Асен", "PW_ASEN")]:
-            if os.getenv(env):
-                c.execute(text("""INSERT INTO users(username, name, pw, role) VALUES (:u,:n,:p,'admin')
-                                  ON CONFLICT (username) DO NOTHING"""), {"u": u, "n": n, "p": _hash(os.getenv(env))})
+        # единствен потребител: Димо (никой друг няма достъп)
+        c.execute(text("DELETE FROM users WHERE username <> 'dimo'"))
+        if os.getenv("PW_DIMO"):
+            c.execute(text("""INSERT INTO users(username, name, pw, role) VALUES ('dimo','Димо',:p,'admin')
+                              ON CONFLICT (username) DO UPDATE SET pw = EXCLUDED.pw"""), {"p": _hash(os.getenv("PW_DIMO"))})
 
 
 # ---------------------------------------------------------------- вход
