@@ -1167,6 +1167,24 @@ function renderQual() {
 
 
 /* ---------- аномалии ---------- */
+async function showDocs(storeId, day) {
+  let box = $("anDocs");
+  if (!box) { $("anDetail").insertAdjacentHTML("afterbegin", `<div id="anDocs"></div>`); box = $("anDocs"); }
+  box.innerHTML = `<div class="empty loading">Чета документите от Мистрал…</div>`; box.scrollIntoView({ behavior: "smooth" });
+  try {
+    const d = await api(`/ui/mistral/delivery-docs?store_id=${storeId}&day=${encodeURIComponent(day)}`);
+    box.innerHTML = `<div class="card" style="padding:14px 16px;margin-bottom:12px;border-left:6px solid var(--danger)">
+      <div style="display:flex;justify-content:space-between;align-items:center"><b>📄 Документи за доставка · ${esc(d.day)}</b><button class="mini" id="docsClose">✕</button></div>
+      <div class="scroll" style="margin-top:8px"><table><thead><tr><th>№ документ</th><th>Записан в</th><th>Доставчик</th><th class="num">Сума</th><th class="num">Редове</th><th>Потребител</th><th>Повтаря се с</th></tr></thead><tbody>
+      ${d.documents.map(x => `<tr><td><b>${esc(x.document_num)}</b><div class="muted" style="font-size:11px">операция ${x.operation}</div></td><td>${esc(x.saved)}</td><td>${esc(x.partner || "")}</td>
+        <td class="num">${fmtE(x.sum)}</td><td class="num">${x.lines}</td><td>№ ${esc(String(x.user ?? ""))}</td>
+        <td style="font-size:12px">${x.repeats.length ? x.repeats.map(r => `<span class="tag bad">№ ${esc(r.with)}: ${r.same_lines} еднакви реда</span><div class="muted">${r.examples.map(esc).join(" · ")}</div>`).join("") : "—"}</td></tr>`).join("")}
+      </tbody></table></div>
+      <p class="note" style="margin:8px 0 0">Ако два документа съдържат едни и същи редове, провери в счетоводството дали доставчикът има две фактури — едната се анулира, или дубликатът се изтрива в Мистрал.</p></div>`;
+    $("docsClose").onclick = () => box.innerHTML = "";
+  } catch (e) { box.innerHTML = `<div class="empty">Мистрал не отговори: ${esc(e.message)}</div>`; }
+}
+
 const ANK = { shortage: "bad", surplus: "warn", negative: "bad", phantom: "warn", writeoff: "off", correction: "off", undelivered: "bad", short_delivery: "warn", suspicious_delivery: "bad", double_delivery: "bad", ocr_repeat: "bad" };
 // какво значи и какво да се направи - за картите, списъците и всеки ред
 const ANH = {
@@ -1223,13 +1241,15 @@ function renderAnom() {
     <td><span class="tag ${ANK[r.kind] || "off"}">${esc(AL.kinds[r.kind] || r.kind)}</span></td>
     <td class="num ${r.qty < 0 ? "low" : ""}">${fmtN(r.qty)}</td><td class="num ${r.eur < 0 ? "low" : ""}">${fmtE(r.eur)}</td>
     <td style="font-size:12.5px;min-width:220px">${esc(r.info || (ANH[r.kind] || [""])[0])}</td>
-    <td style="font-size:12.5px;min-width:220px"><b>${esc((ANH[r.kind] || ["", ""])[1])}</b></td></tr>`).join("")
+    <td style="font-size:12.5px;min-width:220px"><b>${esc((ANH[r.kind] || ["", ""])[1])}</b>
+      ${r.kind === "double_delivery" ? `<br><button class="mini" data-docs="${r.store_id}|${esc(r.day)}" style="margin-top:6px">📄 Документи</button>` : ""}</td></tr>`).join("")
     || `<tr><td colspan="9" class="empty">Няма редове.</td></tr>`}
   ${rows.length > AL.lim ? `<tr><td colspan="9" style="text-align:center;padding:14px"><button id="alMore">Покажи още (${fmtN(rows.length - AL.lim)})</button></td></tr>` : ""}
   </tbody></table></div>`;
   const inp = $("alSearch"); inp.oninput = () => { AL.lim = 200; renderAnom(); };
   if (had) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
   $("alClose").onclick = () => { $("anDetail").innerHTML = ""; };
+  document.querySelectorAll("[data-docs]").forEach(b => b.onclick = () => { const [sid, day] = b.dataset.docs.split("|"); showDocs(+sid, day); });
   if ($("alMore")) $("alMore").onclick = () => { AL.lim += 200; renderAnom(); };
 }
 

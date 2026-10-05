@@ -1177,3 +1177,55 @@ def ui_mistral_operation(store_id: int, nums: str, db: Session = Depends(get_db)
                         "user_code": u.get("CODE"), "check_user": o["CHECKUSERCODE"], "parent": str(o["PARENTOF"]),
                         "documents": docs})
     return {"location_id": loc, "operations": out}
+
+
+@router.get("/ui/mistral/delivery-docs")
+def ui_delivery_docs(store_id: int, day: str, db: Session = Depends(get_db)):
+    """Само четене: всички документи за доставка (вид 2) в магазин за ден - номер, сума, час,
+    доставчик, потребител, редове и кои редове се повтарят между документите."""
+    from . import mistral
+    from .anomalies import _loc_map
+    d = date.fromisoformat(day) if "-" in day else datetime.strptime(day + f".{datetime.now(_SOFIA).year}", "%d.%m.%Y").date()
+    arts = {int(a.sku): (a.supplier_name or a.name) for a in db.execute(select(m.Article)).scalars().all() if a.sku.isdigit()}
+    with mistral.connect() as conn:
+        cur = conn.cursor()
+        loc = {v: k for k, v in _loc_map(db, cur).items()}.get(store_id)
+        if loc is None:
+            raise HTTPException(404, "Магазинът няма обект в Мистрал")
+        cur.execute("""SELECT OPERAIONNUM AS op, MATERIALCODE AS code, SUM(QTY) AS q, MIN(OPERATIONDATE) AS at
+                       FROM MATERIALQTYLOG WITH (NOLOCK)
+                       WHERE LOCATIONID = %s AND OPERATIONTYPE = 2
+                         AND OPERATIONDATE >= %s AND OPERATIONDATE < DATEADD(day, 1, CAST(%s AS date))
+                       GROUP BY OPERAIONNUM, MATERIALCODE""", (loc, d.isoformat(), d.isoformat()))
+        ops = {}
+        for r in cur.fetchall():
+            ops.setdefault(int(r["op"]), {})[int(r["code"])] = float(r["q"])
+        docs = []
+        for op, lines in sorted(ops.items()):
+            cur.execute("""SELECT o.DATESAVED, o.USERID, o.PARTNERNAMEID, od.DOCUMENTNUM, od.DOCSUM
+                           FROM OPERATIONS o WITH (NOLOCK)
+                           LEFT JOIN OPERATIONDOCUMENT od WITH (NOLOCK) ON od.LOCATIONID = o.LOCATIONID AND od.NUM = o.NUM
+                           WHERE o.LOCATIONID = %s AND o.NUM = %s""", (loc, op))
+            o = cur.fetchone() or {}
+            pn = None
+            if o.get("PARTNERNAMEID"):
+                cur.execute("SELECT TOP 1 PARTNERNAME FROM PARTNERNAME WHERE ID = %s", (o["PARTNERNAMEID"],))
+                pn = (cur.fetchone() or {}).get("PARTNERNAME")
+            docs.append({"operation": op, "document_num": str(o.get("DOCUMENTNUM") or "—").split(".")[0],
+                         "sum": float(o.get("DOCSUM") or 0), "saved": str(o.get("DATESAVED"))[11:16] if o.get("DATESAVED") else "",
+                         "partner": pn, "user": o.get("USERID"), "lines": len(lines),
+                         "_lines": lines})
+    # повтарящи се редове между документите (еднакъв артикул и количество)
+    for i, a in enumerate(docs):
+        rep = []
+        for j, b in enumerate(docs):
+            if i == j:
+                continue
+            same = [c for c, q in a["_lines"].items() if b["_lines"].get(c) == q]
+            if same:
+                rep.append({"with": b["document_num"], "same_lines": len(same),
+                            "examples": [f"{arts.get(c, c)}: {a['_lines'][c]:g}" for c in same[:6]]})
+        a["repeats"] = rep
+    for a in docs:
+        a.pop("_lines", None)
+    return {"store_id": store_id, "day": d.strftime("%d.%m.%Y"), "documents": docs}
