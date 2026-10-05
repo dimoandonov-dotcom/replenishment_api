@@ -175,8 +175,8 @@ def sync(days: int = HISTORY_DAYS) -> dict:
         cur.execute(f"""SELECT s.LOCATIONID AS loc, c.MATERIALCODE AS code, s.REPORTINGDATE AS d,
                                SUM(c.QTY) AS q, SUM(c.QTY * c.SALEPRICE) AS rev, SUM(c.QTY * c.AVGDELIVERYPRICE) AS cost
                         FROM SALE s WITH (NOLOCK) JOIN SALECONTENT c WITH (NOLOCK) ON c.NUM = s.NUM AND c.LOCATIONID = s.LOCATIONID
-                        WHERE c.MATERIALCODE IN ({C}) AND s.REPORTINGDATE >= %s
-                        GROUP BY s.LOCATIONID, c.MATERIALCODE, s.REPORTINGDATE""", (since.isoformat(),))
+                        WHERE c.MATERIALCODE IN ({C}) AND s.REPORTINGDATE >= %s AND s.REPORTINGDATE < %s
+                        GROUP BY s.LOCATIONID, c.MATERIALCODE, s.REPORTINGDATE""", (since.isoformat(), today.isoformat()))
         sales = cur.fetchall()
         locs = sorted({int(r["loc"]) for r in sales})
         L = ",".join(map(str, locs))
@@ -203,12 +203,13 @@ def sync(days: int = HISTORY_DAYS) -> dict:
         for code in codes:
             m = mat.get(code, {})
             cat = (m.get("cat") or "").strip()
-            c.execute(text("""INSERT INTO articles(code, name, sub, shelf_days, price) VALUES (:c,:n,:s,:d,:p)
+            c.execute(text("""INSERT INTO articles(code, name, sub, shelf_days, price, active) VALUES (:c,:n,:s,:d,:p,:a)
                               ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, sub = EXCLUDED.sub, price = EXCLUDED.price,
-                              shelf_days = COALESCE(articles.shelf_days, EXCLUDED.shelf_days), updated_at = now()"""),
+                              shelf_days = COALESCE(articles.shelf_days, EXCLUDED.shelf_days),
+                              active = (articles.shelf_days IS NOT NULL OR EXCLUDED.shelf_days IS NOT NULL), updated_at = now()"""),
                       {"c": code, "n": m.get("nm") or str(code), "s": cname.get(cat, ""), "d": SHELF.get(code),
-                       "p": float(m.get("p") or 0)})
-        c.execute(text("DELETE FROM sales WHERE day >= :d"), {"d": since})
+                       "p": float(m.get("p") or 0), "a": code in SHELF})
+        c.execute(text("DELETE FROM sales WHERE day >= :d OR day >= :t"), {"d": since, "t": today})
         for r in sales:
             c.execute(text("INSERT INTO sales VALUES (:s,:c,:d,:q,:r,:k) ON CONFLICT DO NOTHING"),
                       {"s": int(r["loc"]), "c": int(r["code"]), "d": r["d"], "q": float(r["q"] or 0),
@@ -392,14 +393,15 @@ def api_daily(day: str | None = None):
         if not d:
             return {"ready": False}
         rows = c.execute(text("""SELECT store_id, day, SUM(qty), SUM(rev), SUM(cost) FROM sales
-                                 WHERE day BETWEEN :f AND :t GROUP BY store_id, day"""),
+                                 WHERE day BETWEEN :f AND :t AND code IN (SELECT code FROM articles WHERE active)
+                                 GROUP BY store_id, day"""),
                          {"f": d - timedelta(days=14), "t": d}).all()
         stores = {i: n for i, n in c.execute(text("SELECT id, name FROM stores")).all()}
         mv = {s: (float(i or 0), float(o or 0)) for s, i, o in c.execute(text(
-            "SELECT store_id, SUM(delivered), SUM(returned) FROM moves WHERE day = :d GROUP BY store_id"), {"d": d}).all()}
+            "SELECT store_id, SUM(delivered), SUM(returned) FROM moves WHERE day = :d AND code IN (SELECT code FROM articles WHERE active) GROUP BY store_id"), {"d": d}).all()}
         arts = c.execute(text("""SELECT a.name, SUM(s.qty), SUM(s.rev), SUM(s.cost) FROM sales s JOIN articles a ON a.code = s.code
-                                 WHERE s.day = :d GROUP BY a.name ORDER BY SUM(s.rev) DESC"""), {"d": d}).all()
-        series = c.execute(text("SELECT day, SUM(rev) FROM sales WHERE day > :f AND day <= :t GROUP BY day ORDER BY day"),
+                                 WHERE s.day = :d AND a.active GROUP BY a.name ORDER BY SUM(s.rev) DESC"""), {"d": d}).all()
+        series = c.execute(text("SELECT day, SUM(rev) FROM sales WHERE day > :f AND day <= :t AND code IN (SELECT code FROM articles WHERE active) GROUP BY day ORDER BY day"),
                            {"f": d - timedelta(days=28), "t": d}).all()
     per = defaultdict(dict)
     for s, dd, q, r, k in rows:
@@ -434,7 +436,7 @@ def api_waste(days: int = 28):
         last = c.execute(text("SELECT MAX(day) FROM moves")).scalar() or date.today()
         rows = c.execute(text("""SELECT s.name, a.name, SUM(m.delivered), SUM(m.returned), a.price FROM moves m
                                  JOIN stores s ON s.id = m.store_id JOIN articles a ON a.code = m.code
-                                 WHERE m.day > :d GROUP BY s.name, a.name, a.price"""), {"d": last - timedelta(days=days)}).all()
+                                 WHERE m.day > :d AND a.active GROUP BY s.name, a.name, a.price"""), {"d": last - timedelta(days=days)}).all()
     out = [{"store": s, "name": n, "delivered": round(float(i or 0)), "returned": round(float(o or 0)),
             "pct": round(100 * float(o or 0) / float(i), 1) if i and float(i) > 0 else None,
             "eur": round(float(o or 0) * float(p or 0), 2)} for s, n, i, o, p in rows]
