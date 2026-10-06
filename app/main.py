@@ -130,7 +130,7 @@ async def _require_auth(request: Request, call_next):
     # профили „само Анализи" (напр. Теди): виждат само раздела „Анализи", без промени
     user0 = getattr(request.state, "user", None)
     if user0 is not None and user0.lower() in analytics_only_users():
-        ok = ((request.method == "GET" and (p.startswith("/ui/analytics") or p in ("/", "/ui/me", "/stores")))
+        ok = ((request.method == "GET" and (p.startswith("/ui/analytics") or p in ("/", "/ui/me", "/stores", "/ui/version")))
               or (request.method == "POST" and p == "/ui/export-xlsx"))
         if not ok:
             return JSONResponse(status_code=403, content={"detail": "Профилът е само за „Анализи“"})

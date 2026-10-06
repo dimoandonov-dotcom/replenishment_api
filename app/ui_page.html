@@ -1734,6 +1734,23 @@ async function updateFresh() {
 }
 setInterval(() => autoRefresh(), AUTO_MIN * 60 * 1000);
 setInterval(updateFresh, 60 * 1000);
+
+/* нова версия на пулта -> презарежда се сам (без ръчно „презареди"), на същия раздел */
+let APP_VER = null;
+async function checkVersion() {
+  try {
+    const v = (await api("/ui/version")).version;
+    if (APP_VER === null) { APP_VER = v; return; }
+    if (v !== APP_VER) {
+      const busy = document.querySelector(".modal-bg") || (typeof edits !== "undefined" && Object.keys(edits).length)
+        || (document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName));
+      if (busy) return;   // не прекъсваме започната работа - ще опита пак след минута
+      APP_VER = v; toast("Нова версия на пулта — обновявам…"); setTimeout(() => location.reload(), 1200);
+    }
+  } catch (e) {}
+}
+checkVersion(); setInterval(checkVersion, 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkVersion(); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - lastRefresh > 60 * 1000) autoRefresh(true); });
 
 /* ---------- вход ---------- */

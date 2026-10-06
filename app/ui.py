@@ -1292,3 +1292,10 @@ def ui_export_xlsx(payload: ExportIn):
     return Response(content=buf.getvalue(),
                     media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fn + ' ' + stamp + '.xlsx')}"})
+
+
+@router.get("/ui/version")
+def ui_version():
+    """Версията на пулта (сменя се при всяко качване) - страницата се презарежда сама."""
+    import os as _os
+    return {"version": _os.getenv("RAILWAY_DEPLOYMENT_ID") or _os.getenv("RAILWAY_GIT_COMMIT_SHA") or "dev"}
