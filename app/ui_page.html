@@ -1215,9 +1215,12 @@ function addExportButtons(root = document) {
     if (!t || sc.dataset.xl || !t.querySelector("thead")) return;
     sc.dataset.xl = "1";
     const b = document.createElement("button");
-    b.className = "mini"; b.textContent = "⬇️ Excel"; b.style.cssText = "margin:4px 0 6px;float:right";
+    b.className = "mini"; b.textContent = "⬇️ Excel";
     b.onclick = () => exportTable(t, tableTitle(sc));
-    sc.parentNode.insertBefore(b, sc);
+    const wrap = document.createElement("div");   // отделен ред над таблицата - не я свива
+    wrap.style.cssText = "display:flex;justify-content:flex-end;margin:4px 0 6px;width:100%";
+    wrap.appendChild(b);
+    sc.parentNode.insertBefore(wrap, sc);
   });
 }
 new MutationObserver(() => addExportButtons()).observe(document.body, { childList: true, subtree: true });
