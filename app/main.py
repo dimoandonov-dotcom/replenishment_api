@@ -340,7 +340,7 @@ def upsert_settings(
             skipped_locked += 1
             continue
         lock = False if source == "manual" else (
-            existing.auto_adjust if existing is not None else it.auto_adjust)
+            it.auto_adjust if (source == "rules" or existing is None) else existing.auto_adjust)
         old = (float(existing.min_stock), float(existing.max_stock)) if existing else (None, None)
         if existing:
             existing.min_stock = it.min_stock
