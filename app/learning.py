@@ -124,6 +124,7 @@ def run(db: Session, apply: bool = True) -> dict:
     from . import promo as _promo
     pdays = _promo.promo_days(db)
     sales = defaultdict(float)
+    promo_sales = defaultdict(float)   # продажбите в промо дните (за нови позиции без друга история)
     for sid, aid, d, q in db.execute(
         select(m.SalesHistory.store_id, m.SalesHistory.article_id, m.SalesHistory.sale_date,
                func.sum(m.SalesHistory.quantity_sold))
@@ -131,6 +132,7 @@ def run(db: Session, apply: bool = True) -> dict:
         .group_by(m.SalesHistory.store_id, m.SalesHistory.article_id, m.SalesHistory.sale_date)
     ).all():
         if aid in pdays and any(a <= d <= b for a, b in pdays[aid]):
+            promo_sales[(sid, aid)] += float(q or 0)
             continue
         sales[(sid, aid)] += float(q or 0)
     for aid, periods in pdays.items():
@@ -191,6 +193,9 @@ def run(db: Session, apply: bool = True) -> dict:
                 counts["заключени"] += 1
                 continue
             sold = sales.get((store.id, aid), 0.0)
+            if s is None and sold <= 0 and promo_sales.get((store.id, aid), 0.0) > 0:
+                # нова позиция, продава се само в промото: базов мин/макс по половината промо продажби
+                sold = promo_sales[(store.id, aid)] * 0.5
             if s is not None and float(s.max_stock) == 0:
                 if sold < 14:
                     continue  # спрян 0-0 остава, докато не продава поне 1 бр./ден
