@@ -138,6 +138,9 @@ def needs_reorder(
 # Колко дни продажби трябва да покрива наличността, за да НЕ поръчваме цяла
 # опаковка заради малка нужда (≈ до следващата доставка + резерв).
 MIN_PACK_COVER_DAYS = 2.0
+# Ежедневни доставки: ако наличността стига за толкова дни продажби - не се поръчва,
+# дори да е под минимума (утре пак има доставка).
+SKIP_COVER_DAYS = 2.0
 # Бавен артикул: цяла опаковка се поръчва автоматично само ако стига за до толкова дни продажби
 MAX_PACK_COVER_DAYS = 21.0
 
@@ -166,6 +169,9 @@ def calculate_line(
         current_stock, setting.min_stock, mode, max_target
     ):
         return None
+
+    if avg_daily_sales and avg_daily_sales > 0 and current_stock >= avg_daily_sales * SKIP_COVER_DAYS:
+        return None   # стига за 2+ дни, а доставка има всеки ден
 
     suggested = max(max_target - current_stock, 0.0)
 

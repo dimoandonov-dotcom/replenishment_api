@@ -235,6 +235,14 @@ def calculate_for_store(
     stock = stock_override if stock_override is not None else latest_stock_map(db, store_id)
     closures = load_closures(db)
     avg_sales = load_avg_daily_sales(db, store_id)
+    # промо артикули: скоростта на продажби по време на промото
+    try:
+        _pf = _promo.active(db, order_date)
+        for _k in list(avg_sales):
+            if _k[1] in _pf and _pf[_k[1]] > 1.0:
+                avg_sales[_k] = avg_sales[_k] * _pf[_k[1]]
+    except Exception:
+        db.rollback()
 
     supplier_rows = db.execute(select(m.Supplier)).scalars().all()
     modes = {
