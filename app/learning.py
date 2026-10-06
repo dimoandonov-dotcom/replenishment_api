@@ -197,9 +197,9 @@ def run(db: Session, apply: bool = True) -> dict:
                 # нова позиция, продава се само в промото: базов мин/макс по половината промо продажби
                 sold = promo_sales[(store.id, aid)] * 0.5
             if s is not None and float(s.max_stock) == 0:
-                if sold < 14:
-                    continue  # спрян 0-0 остава, докато не продава поне 1 бр./ден
-                # продава ≥1 бр./ден -> пуска се отново по формулата (решение, одобрено от Димо)
+                if sold <= 0:
+                    continue  # спрян 0-0 без продажби остава спрян
+                # има продажби за 14 дни -> пуска се отново по формулата (Димо, 06.10)
             if s is None and sold <= 0:
                 continue  # никога непродаван и без настройка - не го пускаме
 
@@ -207,7 +207,7 @@ def run(db: Session, apply: bool = True) -> dict:
             reason = f"продажби {sold:g} бр./14 дни, клас {cls}"
             urgent = False
             if s is not None and float(s.max_stock) == 0:
-                reason = f"пуснат отново: продава {sold:g} бр./14 дни (≥1/ден), клас {cls}"
+                reason = f"пуснат отново: продава {sold:g} бр./14 дни, клас {cls}"
                 urgent = True
             q = stock.get(aid)
             if q is not None and q <= 0 and sold > 0:
