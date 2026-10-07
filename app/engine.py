@@ -141,6 +141,9 @@ MIN_PACK_COVER_DAYS = 2.0
 # Ежедневни доставки: ако наличността стига за толкова дни продажби - не се поръчва,
 # дори да е под минимума (утре пак има доставка).
 SKIP_COVER_DAYS = 2.0
+# Ежедневни доставки: след доставката наличността да стига за най-много толкова дни
+# продажби (+ дните без доставка - неделя, празници). Не трупаме запас до макса.
+ORDER_COVER_DAYS = 2.0
 # Бавен артикул: цяла опаковка се поръчва автоматично само ако стига за до толкова дни продажби
 MAX_PACK_COVER_DAYS = 21.0
 
@@ -153,6 +156,7 @@ def calculate_line(
     notes: str = "",
     mode: str = "below_min",
     avg_daily_sales: float | None = None,
+    extra_days: int = 0,
 ) -> OrderLine | None:
     """
     Изчислява един ред от заявка. Връща None, ако не се налага поръчка.
@@ -173,6 +177,12 @@ def calculate_line(
     if avg_daily_sales and avg_daily_sales > 0 and current_stock >= avg_daily_sales * SKIP_COVER_DAYS:
         return None   # стига за 2+ дни, а доставка има всеки ден
 
+    if avg_daily_sales and avg_daily_sales > 0:
+        # таван: до ORDER_COVER_DAYS (+ дни без доставка) продажби, не до макса
+        cap = max(math.ceil(avg_daily_sales * (ORDER_COVER_DAYS + extra_days)), 1)
+        if cap < max_target:
+            max_target = float(cap)
+            notes = ((notes + " · ") if notes else "") + f"до {ORDER_COVER_DAYS + extra_days:g} дни продажби"
     suggested = max(max_target - current_stock, 0.0)
 
     # Под минимума, но нуждата е под половин опаковка: цяла опаковка се поръчва
@@ -395,6 +405,7 @@ def generate_order_lines(
             None,
         )
 
+        cover_extra = 1 if order_date.isoweekday() == 6 else 0   # събота: неделя без доставка
         # 1) явен период на затваряне (Коледа/Великден) - приоритетен
         # буфер
         if sched_today and closures:
@@ -402,6 +413,7 @@ def generate_order_lines(
                 order_date, sched_today, closures
             )
             if extra_days > 0:
+                cover_extra = extra_days
                 adr = avg_daily_sales.get((s.store_id, s.article_id), 0.0)
                 effective_max, adjustment = apply_closure_buffer(
                     s, adr, extra_days
@@ -446,6 +458,7 @@ def generate_order_lines(
             notes=notes,
             mode=mode,
             avg_daily_sales=avg_daily_sales.get((s.store_id, s.article_id), 0.0),
+            extra_days=cover_extra,
         )
         if line:
             result.lines.append(line)
