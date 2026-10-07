@@ -132,7 +132,8 @@ def ui_me(request: Request, db: Session = Depends(get_db)):
     u = db.get(m.AppUser, user)
     return {"user": user, "name": u.display_name if u else "Димо",
             "analytics": user.lower() in _main.analytics_users(),
-            "analytics_only": user.lower() in _main.analytics_only_users()}
+            "analytics_only": user.lower() in _main.analytics_only_users(),
+            "anomalies_only": user.lower() in _main.anomalies_only_users()}
 
 
 class UserIn(BaseModel):

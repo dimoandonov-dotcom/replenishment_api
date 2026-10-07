@@ -134,6 +134,13 @@ async def _require_auth(request: Request, call_next):
               or (request.method == "POST" and p == "/ui/export-xlsx"))
         if not ok:
             return JSONResponse(status_code=403, content={"detail": "Профилът е само за „Анализи“"})
+    # профили „само Аномалии" (напр. Надежда - ревизори и доставчици)
+    if user0 is not None and user0.lower() in anomalies_only_users():
+        ok = ((request.method == "GET" and (p.startswith("/ui/anomalies") or p.startswith("/ui/mistral/")
+                                            or p in ("/", "/ui/me", "/stores", "/ui/version")))
+              or (request.method == "POST" and p == "/ui/export-xlsx"))
+        if not ok:
+            return JSONResponse(status_code=403, content={"detail": "Профилът е само за „Аномалии“"})
     if p.startswith("/ui/analytics") or p.startswith("/analytics"):
         user = getattr(request.state, "user", None)
         if user is not None and user.lower() not in analytics_users():
@@ -144,6 +151,12 @@ async def _require_auth(request: Request, call_next):
 def analytics_users() -> set[str]:
     import os as __os
     raw = __os.getenv("ANALYTICS_USERS", "dimo,asen,tedi")
+    return {x.strip().lower() for x in raw.split(",") if x.strip()}
+
+
+def anomalies_only_users() -> set[str]:
+    import os as __os
+    raw = __os.getenv("ANOMALIES_ONLY_USERS", "nadejda")
     return {x.strip().lower() for x in raw.split(",") if x.strip()}
 
 
