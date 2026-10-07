@@ -1059,6 +1059,15 @@ def admin_vacuum(table: str = Query("stock_snapshots", pattern="^(stock_snapshot
     return {"ok": True, "table": table}
 
 
+@router.post("/compare/recalc-day")
+def compare_recalc_day(day: str | None = None, db: Session = Depends(get_db)):
+    """Преизчислява MinMaxAI в сравненията с Ани за деня (по подразбиране днес) с текущите правила."""
+    from . import compare
+    from datetime import date as _d
+    d = _d.fromisoformat(day) if day else datetime.now(_SOFIA).date()
+    return compare.recalc_day(db, d)
+
+
 @router.post("/orders/recalc-run/{run_id}")
 def orders_recalc_run(run_id: int, add_new: bool = False, db: Session = Depends(get_db)):
     """Преизчислява пускане по наличността от часа му, с текущите правила.

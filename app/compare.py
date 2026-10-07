@@ -138,6 +138,43 @@ def record(db: Session, store_raw: str, lines: list[dict], raw_text: str | None,
             "store_lines": len(store_qty), "api_lines": len(api)}
 
 
+def recalc_day(db: Session, day) -> dict:
+    """Преизчислява колонката MinMaxAI в сравненията с Ани за деня - с текущите правила,
+    по наличността към момента на заявката на Ани."""
+    start = datetime.combine(day, datetime.min.time(), SOFIA)
+    orders = db.execute(select(m.ManualOrder).where(
+        m.ManualOrder.received_at >= start, m.ManualOrder.received_at < start + timedelta(days=1),
+        m.ManualOrder.store_id.isnot(None))).scalars().all()
+    arts = {a.sku: a for a in db.execute(select(m.Article)).scalars().all()}
+    changed = 0
+    for o in orders:
+        lines = db.execute(select(m.ManualOrderLine).where(m.ManualOrderLine.order_id == o.id)).scalars().all()
+        stock = service.stock_as_of(db, o.store_id, o.received_at)
+        for l in lines:
+            a = arts.get(l.sku)
+            if a is not None and l.stock is not None:
+                stock[a.id] = float(l.stock)
+        res = service.calculate_for_store(db, o.store_id, o.received_at.astimezone(SOFIA).date(), None, False,
+                                          stock_override=stock)
+        api = {x.sku: x for x in res.lines}
+        for l in lines:
+            our = api.get(l.sku)
+            q = float(our.ordered_quantity) if our else 0.0
+            if q != float(l.api_qty or 0):
+                l.api_qty = q
+                changed += 1
+            if our is not None:
+                l.min_stock, l.max_stock = float(our.min_stock), float(our.max_stock)
+            if float(l.store_qty or 0) > 0 and q > 0:
+                l.note = "и двамата" if abs(q - float(l.store_qty)) < 0.01 else "различно количество"
+            elif q > 0:
+                l.note = "само MinMaxAI — под мин"
+            elif float(l.store_qty or 0) > 0 and (l.note or "").startswith(("и двамата", "различно")):
+                l.note = "само магазин — наличността стига (до 2 дни продажби)"
+    db.commit()
+    return {"orders": len(orders), "changed_lines": changed}
+
+
 def _reason(sq: float, our, c: dict) -> str:
     """Кратко обяснение защо се разминаваме - за човека, който гледа."""
     if c.get("note"):
@@ -274,7 +311,7 @@ def explain(l, series: list[float] | None) -> dict:
     if note.startswith("и двамата") and abs(sq - aq) < 0.01:
         parts.append(f"И двамата поръчват {_fmt(sq)} бр. — пълно съвпадение.")
     elif note == "различно количество":
-        parts.append(f"Ани поръчва {_fmt(sq)} бр., MinMaxAI {_fmt(aq)} бр. (допълва до макс {_fmt(mx)} в цели опаковки).")
+        parts.append(f"Ани поръчва {_fmt(sq)} бр., MinMaxAI {_fmt(aq)} бр. (допълва до 2 дни продажби в цели опаковки).")
     elif note.startswith("само магазин"):
         if "над мин" in note:
             parts.append(f"Ани поръчва {_fmt(sq)} бр., но наличността е над минимума {_fmt(mn)} — MinMaxAI още не поръчва.")
