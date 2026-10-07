@@ -1059,9 +1059,10 @@ def admin_vacuum(table: str = Query("stock_snapshots", pattern="^(stock_snapshot
 
 
 @router.post("/orders/recalc-run/{run_id}")
-def orders_recalc_run(run_id: int, db: Session = Depends(get_db)):
-    """Преизчислява пускане по наличността от часа му, с текущите правила."""
-    return service.recalc_run(db, run_id)
+def orders_recalc_run(run_id: int, add_new: bool = False, db: Session = Depends(get_db)):
+    """Преизчислява пускане по наличността от часа му, с текущите правила.
+    add_new=true добавя и редове, които новите правила изискват (наличност от snapshot-а към часа)."""
+    return service.recalc_run(db, run_id, add_new)
 
 
 @router.get("/ui/negative-selling")

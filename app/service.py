@@ -398,7 +398,20 @@ def piece_orderable(db) -> set[int]:
     return out
 
 
-def recalc_run(db: Session, run_id: int) -> dict:
+def stock_as_of(db: Session, store_id: int, ts) -> dict[int, float]:
+    """Наличността към даден момент: последният snapshot до ts за всеки артикул."""
+    subq = (
+        select(m.StockSnapshot.article_id, m.StockSnapshot.quantity,
+               func.row_number().over(partition_by=m.StockSnapshot.article_id,
+                                      order_by=m.StockSnapshot.captured_at.desc()).label("rn"))
+        .where(m.StockSnapshot.store_id == store_id, m.StockSnapshot.captured_at <= ts)
+        .subquery()
+    )
+    return {r.article_id: float(r.quantity)
+            for r in db.execute(select(subq.c.article_id, subq.c.quantity).where(subq.c.rn == 1)).all()}
+
+
+def recalc_run(db: Session, run_id: int, add_new: bool = False) -> dict:
     """
     Преизчислява вече направено пускане по СЪЩАТА наличност (от часа на пускането),
     но с текущите правила. Нови редове не се добавят (правилата само намаляват),
@@ -406,18 +419,32 @@ def recalc_run(db: Session, run_id: int) -> dict:
     Старите количества се връщат в отговора (за резервно копие).
     """
     pos = db.execute(select(m.PurchaseOrder).where(m.PurchaseOrder.dispatch_run_id == run_id)).scalars().all()
-    before = after = lines_before = lines_after = 0
+    before = after = lines_before = lines_after = added = 0
     backup = []
     for po in pos:
         old = {l.article_id: l for l in po.lines}
         if not old:
             continue
         stock = {aid: float(l.current_stock) for aid, l in old.items()}
+        if add_new:
+            # наличността към часа на пускането - за артикули, които сутринта не са поръчани
+            stock = {**stock_as_of(db, po.store_id, po.created_at), **stock}
         # артикулите, които сутринта не са поръчани, остават неподредени (наличност "достатъчна")
         res = calculate_for_store(db, po.store_id, po.created_at.date(), po.supplier_id,
                                   respect_schedule=False, stock_override=stock)
         # другите артикули (без сутрешна наличност) калкулаторът ги пропуска като „без данни"
         new = {ln.article_id: ln for ln in res.lines if ln.article_id in old}
+        if add_new:
+            for ln in res.lines:
+                if ln.article_id in old or ln.ordered_quantity <= 0:
+                    continue
+                db.add(m.PurchaseOrderLine(
+                    purchase_order_id=po.id, article_id=ln.article_id, current_stock=ln.current_stock,
+                    min_stock=ln.min_stock, max_stock=ln.max_stock, effective_max=ln.effective_max,
+                    suggested_quantity=ln.suggested_quantity, ordered_quantity=ln.ordered_quantity,
+                    pack_size=ln.pack_size, notes=((ln.notes or "") + " · добавено при преизчисляване").strip(" ·")))
+                backup.append({"po": po.id, "store_id": po.store_id, "article_id": ln.article_id, "qty": 0.0})
+                after += float(ln.ordered_quantity); lines_after += 1; added += 1
         for aid, l in old.items():
             backup.append({"po": po.id, "store_id": po.store_id, "article_id": aid, "qty": float(l.ordered_quantity)})
             before += float(l.ordered_quantity); lines_before += 1
@@ -433,4 +460,4 @@ def recalc_run(db: Session, run_id: int) -> dict:
             after += float(ln.ordered_quantity); lines_after += 1
     db.commit()
     return {"run_id": run_id, "orders": len(pos), "lines_before": lines_before, "lines_after": lines_after,
-            "units_before": before, "units_after": after, "backup": backup}
+            "units_before": before, "units_after": after, "added_lines": added, "backup": backup}
