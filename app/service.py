@@ -395,6 +395,11 @@ def piece_orderable(db) -> set[int]:
                 out.add(aid)
     except Exception:
         db.rollback()
+    # малките алкохоли 200 мл НДК ги дава само на стек по 6 (6, 12, 18...) - не на брой
+    import re as _re
+    for a in arts:
+        if a.id in out and _re.search(r"(?<!\d)200\s*МЛ|(?<![\d.,])0[.,]2\s*Л", (a.name or "").upper()):
+            out.discard(a.id)
     return out
 
 
