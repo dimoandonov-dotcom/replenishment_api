@@ -1349,7 +1349,7 @@ function renderAnom() {
   ${help ? `<div class="card" style="padding:12px 16px;margin-bottom:12px;font-size:14px;line-height:1.55">${help}</div>` : ""}
   <div class="bar"><input type="search" id="alSearch" placeholder="Търси магазин, код или артикул" value="${esc(f)}" style="flex:1;min-width:200px"><button id="alClose">Затвори</button></div>
   <div class="scroll"><table><thead><tr><th>Дата</th><th>Магазин</th><th>Код</th><th>Артикул</th><th>Вид</th><th class="num">Бройки</th><th class="num">€</th><th>Какво е</th><th>Какво да се направи</th></tr></thead><tbody>
-  ${shown.map(r => `<tr><td>${esc(r.day || "")}</td><td>${esc(r.store)}</td><td>${esc(r.sku)}</td><td class="name">${esc(r.name)}</td>
+  ${shown.map(r => `<tr class="anrow" data-ad="${r.store_id}|${esc(r.day || "")}|${esc(r.sku)}" style="cursor:pointer" title="Цъкни за документите"><td>${esc(r.day || "")}</td><td>${esc(r.store)}</td><td>${esc(r.sku)}</td><td class="name">▸ ${esc(r.name)}</td>
     <td><span class="tag ${ANK[r.kind] || "off"}">${esc(AL.kinds[r.kind] || r.kind)}</span></td>
     <td class="num ${r.qty < 0 ? "low" : ""}">${fmtN(r.qty)}</td><td class="num ${r.eur < 0 ? "low" : ""}">${fmtE(r.eur)}</td>
     <td style="font-size:12.5px;min-width:220px">${esc(r.info || (ANH[r.kind] || [""])[0])}</td>
@@ -1361,8 +1361,43 @@ function renderAnom() {
   const inp = $("alSearch"); inp.oninput = () => { AL.lim = 200; renderAnom(); };
   if (had) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
   $("alClose").onclick = () => { $("anDetail").innerHTML = ""; };
-  document.querySelectorAll("[data-docs]").forEach(b => b.onclick = () => { const [sid, day] = b.dataset.docs.split("|"); showDocs(+sid, day); });
+  document.querySelectorAll("[data-docs]").forEach(b => b.onclick = e => { e.stopPropagation(); const [sid, day] = b.dataset.docs.split("|"); showDocs(+sid, day); });
+  document.querySelectorAll("#anDetail tr.anrow").forEach(tr => tr.onclick = () => toggleArtDocs(tr));
   if ($("alMore")) $("alMore").onclick = () => { AL.lim += 200; renderAnom(); };
+}
+
+async function toggleArtDocs(tr) {
+  const nx = tr.nextElementSibling;
+  if (nx && nx.classList.contains("adrow")) { nx.remove(); tr.querySelector("td.name").innerHTML = tr.querySelector("td.name").innerHTML.replace("▾", "▸"); return; }
+  const [sid, day, code] = tr.dataset.ad.split("|");
+  if (!sid || !day || !code) return;
+  tr.querySelector("td.name").innerHTML = tr.querySelector("td.name").innerHTML.replace("▸", "▾");
+  const row = document.createElement("tr"); row.className = "adrow";
+  row.innerHTML = `<td colspan="9" style="background:var(--paper)"><div class="empty loading">Търся документите в Мистрал…</div></td>`;
+  tr.after(row);
+  try {
+    const d = await api(`/ui/mistral/article-docs?store_id=${sid}&day=${encodeURIComponent(day)}&code=${encodeURIComponent(code)}`);
+    const docs = d.documents || [];
+    row.firstElementChild.innerHTML = `<div style="padding:8px 4px;position:sticky;left:0;max-width:min(1100px, calc(100vw - 48px))">
+      <div class="note" style="margin-bottom:8px">Документи с <b>${esc(d.name)}</b> около ${esc(d.day)} (±1 ден, без продажбите):</div>
+      ${docs.map(x => `<div class="card" style="padding:12px 14px;margin:0 0 10px">
+        <div style="display:flex;flex-wrap:wrap;gap:6px 18px;font-size:14px;line-height:1.5">
+          <span><span class="tag ${x.type === "Доставка" ? "warn" : "off"}">${esc(x.type)}</span></span>
+          <span>№ <b>${esc(x.document_num)}</b>${x.document_date ? ` от ${esc(x.document_date)}` : ""}</span>
+          <span>${esc(x.partner || "")}</span>
+          <span>Сума <b>${fmtE(x.sum)} €</b></span>
+          <span>👤 <b>${esc(String(x.user || "—"))}</b></span>
+          <span>🕒 въведен <b>${esc(x.saved || "—")}</b>${x.edited && x.edited !== x.saved ? ` · редактиран <b>${esc(x.edited)}</b>` : ""}</span>
+          <span>Този артикул: <b class="${x.qty_this < 0 ? "low" : ""}">${fmtN(x.qty_this)} бр.</b></span>
+          ${x.note ? `<span class="muted">Бележка: ${esc(x.note)}</span>` : ""}
+          <span class="muted">операция ${x.operation}</span>
+        </div>
+        <details style="margin-top:8px"><summary style="cursor:pointer">Целият документ — ${x.lines.length} реда</summary>
+          <div class="scroll" style="margin-top:6px"><table><thead><tr><th>Код</th><th>Артикул</th><th class="num">Бройки</th><th class="num">Цена</th></tr></thead><tbody>
+          ${x.lines.map(l => `<tr style="${l.this ? "background:#FDECEC;font-weight:600" : ""}"><td>${l.code}</td><td class="name">${esc(l.name)}</td>
+            <td class="num">${fmtN(l.qty)}</td><td class="num">${fmtE(l.price)}</td></tr>`).join("")}
+          </tbody></table></div></details></div>`).join("") || `<div class="empty">Няма документи с този артикул около тази дата (само продажби).</div>`}</div>`;
+  } catch (e) { row.firstElementChild.innerHTML = `<div class="note" style="color:#DC2626">Мистрал: ${esc(e.message)}</div>`; }
 }
 
 /* ---------- не се поръчват ---------- */

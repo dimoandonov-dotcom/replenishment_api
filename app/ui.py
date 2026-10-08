@@ -1241,6 +1241,78 @@ def ui_mistral_operation(store_id: int, nums: str, db: Session = Depends(get_db)
     return {"location_id": loc, "operations": out}
 
 
+_OPTYPE = {2: "Доставка", 4: "Брак", 37: "Корекция (ревизия)", 38: "Корекция (ревизия)", 3: "Връщане към доставчик",
+           5: "Трансфер", 6: "Трансфер"}
+
+
+@router.get("/ui/mistral/article-docs")
+def ui_article_docs(store_id: int, day: str, code: int, db: Session = Depends(get_db)):
+    """Само четене: документите (без продажбите), с които артикулът е движен в магазина в деня -
+    номер на фактура, кой и в колко часа я е въвел/редактирал, доставчик и всички редове на документа."""
+    from sqlalchemy import text as _t
+    from . import mistral
+    from .anomalies import _loc_map
+    today = datetime.now(_SOFIA).date()
+    if "-" in day:
+        d = date.fromisoformat(day)
+    else:
+        dd, mm = [int(x) for x in day.split(".")[:2]]
+        d = date(today.year, mm, dd)
+        if d > today:
+            d = date(today.year - 1, mm, dd)
+    names = {int(c): n for c, n in db.execute(_t("SELECT code, name FROM sa_articles")).all()}
+    names.update({int(a.sku): (a.supplier_name or a.name) for a in db.execute(select(m.Article)).scalars().all() if a.sku.isdigit()})
+    with mistral.connect() as conn:
+        cur = conn.cursor()
+        loc = {v: k for k, v in _loc_map(db, cur).items()}.get(store_id)
+        if loc is None:
+            raise HTTPException(404, "Магазинът няма обект в Мистрал")
+        cur.execute("""SELECT OPERAIONNUM AS op, OPERATIONTYPE AS tp, SUM(QTY) AS q, MIN(OPERATIONDATE) AS at
+                       FROM MATERIALQTYLOG WITH (NOLOCK)
+                       WHERE LOCATIONID = %s AND MATERIALCODE = %s AND OPERATIONTYPE <> 1
+                         AND OPERATIONDATE >= DATEADD(day, -1, CAST(%s AS date)) AND OPERATIONDATE < DATEADD(day, 2, CAST(%s AS date))
+                       GROUP BY OPERAIONNUM, OPERATIONTYPE ORDER BY MIN(OPERATIONDATE)""",
+                    (loc, code, d.isoformat(), d.isoformat()))
+        hits = cur.fetchall()
+        out = []
+        for h in hits[:10]:
+            op = int(h["op"])
+            cur.execute("""SELECT o.DOCUMENTNUM, o.DOCUMENTDATE, o.DOCUMENTSUM, o.DATESAVED, o.LASTEDITDATE, o.NOTE,
+                                  o.USERID, o.PARTNERNAMEID, o.EDITNUM
+                           FROM OPERATIONS o WITH (NOLOCK) WHERE o.LOCATIONID = %s AND o.NUM = %s""", (loc, op))
+            o = cur.fetchone() or {}
+            cur.execute("SELECT TOP 1 DOCUMENTNUM, DOCSUM FROM OPERATIONDOCUMENT WITH (NOLOCK) WHERE LOCATIONID = %s AND NUM = %s",
+                        (loc, op))
+            od = cur.fetchone() or {}
+            pn = None
+            if o.get("PARTNERNAMEID"):
+                cur.execute("SELECT TOP 1 PARTNERNAME FROM PARTNERNAME WHERE ID = %s", (o["PARTNERNAMEID"],))
+                pn = (cur.fetchone() or {}).get("PARTNERNAME")
+            u = {}
+            if o.get("USERID") is not None:
+                cur.execute("SELECT TOP 1 NAME, FIRSTNAME, LASTNAME FROM USERS WHERE ID = %s "
+                            "ORDER BY CASE WHEN LOCATIONID = %s THEN 0 ELSE 1 END", (o["USERID"], loc))
+                u = cur.fetchone() or {}
+            cur.execute("""SELECT MATERIALCODE AS c, SUM(QTY) AS q, MAX(PRICE) AS p FROM MATERIALQTYLOG WITH (NOLOCK)
+                           WHERE LOCATIONID = %s AND OPERAIONNUM = %s AND OPERATIONTYPE = %s GROUP BY MATERIALCODE""",
+                        (loc, op, h["tp"]))
+            lines = [{"code": int(r["c"]), "name": names.get(int(r["c"]), str(r["c"])), "qty": float(r["q"] or 0),
+                      "price": float(r["p"] or 0), "this": int(r["c"]) == code} for r in cur.fetchall()]
+            lines.sort(key=lambda x: (not x["this"], x["name"]))
+            dn = od.get("DOCUMENTNUM") or o.get("DOCUMENTNUM")
+            fmt = lambda v: v.strftime("%d.%m.%Y %H:%M") if hasattr(v, "strftime") else (str(v)[:16] if v else None)  # noqa: E731
+            out.append({"operation": op, "type": _OPTYPE.get(int(h["tp"]), f"операция {h['tp']}"),
+                        "document_num": str(dn).split(".")[0] if dn else "—",
+                        "document_date": o["DOCUMENTDATE"].strftime("%d.%m.%Y") if hasattr(o.get("DOCUMENTDATE"), "strftime") else None,
+                        "sum": float(od.get("DOCSUM") or o.get("DOCUMENTSUM") or 0),
+                        "saved": fmt(o.get("DATESAVED")), "edited": fmt(o.get("LASTEDITDATE")),
+                        "edits": o.get("EDITNUM"), "note": o.get("NOTE"), "partner": pn,
+                        "user": " ".join(x for x in [u.get("FIRSTNAME"), u.get("LASTNAME")] if x) or u.get("NAME") or o.get("USERID"),
+                        "qty_this": float(h["q"] or 0), "lines": lines})
+    return {"store_id": store_id, "day": d.strftime("%d.%m.%Y"), "code": code,
+            "name": names.get(code, str(code)), "documents": out}
+
+
 @router.get("/ui/mistral/delivery-docs")
 def ui_delivery_docs(store_id: int, day: str, db: Session = Depends(get_db)):
     """Само четене: всички документи за доставка (вид 2) в магазин за ден - номер, сума, час,
