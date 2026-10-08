@@ -1292,8 +1292,22 @@ def ui_article_docs(store_id: int, day: str, code: int, db: Session = Depends(ge
             op = int(h["op"])
             cur.execute("""SELECT o.DOCUMENTNUM, o.DOCUMENTDATE, o.DOCUMENTSUM, o.DATESAVED, o.LASTEDITDATE, o.NOTE,
                                   o.USERID, o.USERNAMEID, o.PARTNERNAMEID, o.EDITNUM
-                           FROM OPERATIONS o WITH (NOLOCK) WHERE o.LOCATIONID = %s AND o.NUM = %s""", (loc, op))
-            o = cur.fetchone() or {}
+                           FROM OPERATIONS o WITH (NOLOCK) WHERE o.LOCATIONID = %s AND o.NUM = %s
+                           ORDER BY o.DATESAVED""", (loc, op))
+            orows = cur.fetchall()
+            o = dict(orows[0]) if orows else {}
+            # при редакция Мистрал пази и нов запис: първият е въвеждането, последният - редакцията
+            ed = orows[-1] if len(orows) > 1 else None
+            if ed is not None:
+                o["LASTEDITDATE"] = max(x["LASTEDITDATE"] or x["DATESAVED"] for x in orows)
+            editor = None
+            if ed is not None:
+                for uid in (ed.get("USERNAMEID"), ed.get("USERID")):
+                    if uid:
+                        cur.execute("SELECT TOP 1 NAME FROM USERNAME WHERE ID = %s", (uid,))
+                        editor = (cur.fetchone() or {}).get("NAME")
+                        if editor:
+                            break
             cur.execute("SELECT TOP 1 DOCUMENTNUM, DOCSUM FROM OPERATIONDOCUMENT WITH (NOLOCK) WHERE LOCATIONID = %s AND NUM = %s",
                         (loc, op))
             od = cur.fetchone() or {}
@@ -1326,7 +1340,7 @@ def ui_article_docs(store_id: int, day: str, code: int, db: Session = Depends(ge
                         "document_date": o["DOCUMENTDATE"].strftime("%d.%m.%Y") if hasattr(o.get("DOCUMENTDATE"), "strftime") else None,
                         "sum": float(od.get("DOCSUM") or o.get("DOCUMENTSUM") or 0),
                         "saved": fmt(o.get("DATESAVED")), "edited": fmt(o.get("LASTEDITDATE")),
-                        "edits": o.get("EDITNUM"), "note": o.get("NOTE"), "partner": pn,
+                        "edits": o.get("EDITNUM"), "editor": editor, "note": o.get("NOTE"), "partner": pn,
                         "user": u.get("NAME") or " ".join(x for x in [u.get("FIRSTNAME"), u.get("LASTNAME")] if x) or o.get("USERID"),
                         "qty_this": float(h["q"] or 0), "steps": steps.get(op, []),
                         "corrected": any(x["type"].startswith("Сторно") for x in steps.get(op, [])), "lines": lines})

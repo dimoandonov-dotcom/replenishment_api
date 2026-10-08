@@ -1387,7 +1387,7 @@ async function toggleArtDocs(tr) {
           <span>${esc(x.partner || "")}</span>
           <span>Сума <b>${fmtE(x.sum)} €</b></span>
           <span>👤 <b>${esc(String(x.user || "—"))}</b></span>
-          <span>🕒 въведен <b>${esc(x.saved || "—")}</b>${x.edited && x.edited !== x.saved ? ` · редактиран <b>${esc(x.edited)}</b>` : ""}</span>
+          <span>🕒 въведен <b>${esc(x.saved || "—")}</b>${x.edited && x.edited !== x.saved ? ` · редактиран <b>${esc(x.edited)}</b>${x.editor ? ` от <b>${esc(x.editor)}</b>` : ""}` : ""}</span>
           <span>Този артикул ${x.corrected ? "(нетно)" : ""}: <b class="${x.qty_this < 0 ? "low" : ""}">${fmtN(x.qty_this)} бр.</b></span>
           ${x.corrected ? `<span class="tag t" style="background:#DCFCE7;color:#166534">✅ поправен: ${x.steps.map(st => `${st.type.startsWith("Сторно") ? "сторно" : "заведено"} ${st.qty > 0 ? "+" : ""}${fmtN(st.qty)}`).join(" → ")}</span>` : ""}
           ${x.note ? `<span class="muted">Бележка: ${esc(x.note)}</span>` : ""}
