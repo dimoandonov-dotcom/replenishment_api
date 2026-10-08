@@ -896,7 +896,13 @@ def ui_anom_debug_neg(days: int = 14, db: Session = Depends(get_db)):
                           FROM stock_snapshots WHERE captured_at >= :d"""), {"d": since}).one()
     r2 = db.execute(_t("""SELECT COUNT(*) FROM (SELECT store_id, article_id FROM stock_snapshots
                           WHERE quantity < 0 AND captured_at >= :d GROUP BY store_id, article_id) x"""), {"d": since}).scalar()
-    return {"days_with_snapshots": r1[0], "first": str(r1[1]), "rows": r1[2], "pairs_ever_negative": r2}
+    r3 = db.execute(_t("""WITH neg AS (SELECT DISTINCT store_id, article_id FROM stock_snapshots WHERE quantity < 0 AND captured_at >= :d),
+                          cur AS (SELECT DISTINCT ON (store_id, article_id) store_id, article_id, quantity FROM stock_snapshots
+                                  ORDER BY store_id, article_id, captured_at DESC)
+                          SELECT COUNT(*) FILTER (WHERE c.quantity >= 0), COUNT(*) FILTER (WHERE c.quantity < 0)
+                          FROM neg n JOIN cur c USING (store_id, article_id)"""), {"d": since}).one()
+    return {"days_with_snapshots": r1[0], "first": str(r1[1]), "rows": r1[2], "pairs_ever_negative": r2,
+            "now_ok": r3[0], "still_neg": r3[1]}
 
 
 @router.get("/ui/anomalies/list")
