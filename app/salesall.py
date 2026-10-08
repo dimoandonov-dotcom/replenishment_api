@@ -272,12 +272,16 @@ def campaigns(db: Session, kind: str = "brochure", back_days: int = 45) -> dict:
     last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
     if not last:
         return {"ready": False, "campaigns": []}
-    tp = 1 if kind == "brochure" else 0
+    # периодите на брошурата: с поне 20 артикула с тип „брошура" (1); всичко със същите дати е брошура
+    bro = {(s, e) for s, e in db.execute(text("""SELECT start_day, end_day FROM sa_promo WHERE tp = 1
+                                                  GROUP BY start_day, end_day HAVING COUNT(*) >= 20""")).all()}
     camps = defaultdict(list)
-    for code, s, e, n, p, d in db.execute(text("""SELECT code, start_day, end_day, stores, price, discount FROM sa_promo
-                                                  WHERE COALESCE(tp,0) = :tp AND start_day <= :t AND end_day >= :t - :b
-                                                  ORDER BY start_day DESC"""), {"t": last, "tp": tp, "b": back_days}).all():
-        camps[(s, e)].append((code, n, float(p or 0), float(d or 0)))
+    for code, s, e, n, p, d, t in db.execute(text("""SELECT code, start_day, end_day, stores, price, discount, COALESCE(tp,0)
+                                                  FROM sa_promo WHERE start_day <= :t AND end_day >= :t - :b
+                                                  ORDER BY start_day DESC"""), {"t": last, "b": back_days}).all():
+        is_bro = t == 1 or (s, e) in bro
+        if is_bro == (kind == "brochure"):
+            camps[(s, e)].append((code, n, float(p or 0), float(d or 0)))
     names = {c: (n, g, sup) for c, n, g, sup in db.execute(text(
         "SELECT code, name, grp, supplier FROM sa_articles")).all()}
     outs_all = {c: n for c, n in db.execute(text("SELECT code, COUNT(*) FROM sa_stock WHERE qty <= 0 GROUP BY code")).all()}
