@@ -916,7 +916,7 @@ def ui_anom_debug_neg(days: int = 14, db: Session = Depends(get_db)):
         if v is not None and v >= 0:
             ok += 1
             if len(samp) < 3: samp.append([s_, a_, str(d_), float(q_), v])
-    return {"wn": len(wn), "wn_ok": ok, "wn_samp": samp, "items_neg_fixed": len(negf), "sample": negf[:2], "days_with_snapshots": r1[0], "first": str(r1[1]), "rows": r1[2], "pairs_ever_negative": r2,
+    return {"dbg": {k: str(v) for k, v in _an._DBG.items()}, "wn": len(wn), "wn_ok": ok, "wn_samp": samp, "items_neg_fixed": len(negf), "sample": negf[:2], "days_with_snapshots": r1[0], "first": str(r1[1]), "rows": r1[2], "pairs_ever_negative": r2,
             "now_ok": r3[0], "still_neg": r3[1]}
 
 

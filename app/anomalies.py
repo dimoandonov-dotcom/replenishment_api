@@ -118,6 +118,9 @@ def sync(db: Session, days: int = 14) -> dict:
     return {"movements": len(rows), "inventory_lines": len(irows), "stores": len(set(locs.values())), "since": since.isoformat()}
 
 
+_DBG: dict = {}
+
+
 def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]:
     """Всички аномалии (ред по ред) за последните `days` дни."""
     _ensure(db)
@@ -193,10 +196,47 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
         pq = pq.where(m.Planogram.store_id == store_id)
     for s, a in db.execute(pq).all():
         plano[s].add(a)
+    # бивши отрицателни (в периода) - ако сега са >= 0, са оправени (ревизия, корекция или доставка)
+    was_neg = {}
+    for s_, a_, d_, q_ in db.execute(text(f"""
+            SELECT store_id, article_id, MIN((captured_at AT TIME ZONE 'Europe/Sofia')::date), MIN(quantity)
+            FROM stock_snapshots WHERE quantity < 0 AND captured_at >= :d {sf}
+            GROUP BY store_id, article_id"""), p).all():
+        was_neg[(s_, a_)] = (d_, float(q_))
+    how_rows = defaultdict(list)
+    for s_, a_, d_, o_, qi in db.execute(text(f"""
+            SELECT store_id, article_id, day, optype, qty_in FROM stock_movements
+            WHERE day >= :d AND optype IN (2, 38) AND qty_in > 0 {sf}"""), p).all():
+        how_rows[(s_, a_)].append((d_, o_, float(qi)))
+    inv_up = defaultdict(list)
+    for s_, a_, at_, q_ in db.execute(text(f"""
+            SELECT store_id, article_id, inv_at, diff_qty FROM inventory_results
+            WHERE inv_at >= :d AND diff_qty > 0 {sf}"""), p).all():
+        inv_up[(s_, a_)].append(at_.astimezone(SOFIA).date() if at_ else since)
+
+    def how_fixed(sid, aid, d0):
+        if any(x >= d0 for x in inv_up.get((sid, aid), [])):
+            return "с ревизия"
+        ev = [(d_, o_) for d_, o_, _ in how_rows.get((sid, aid), []) if d_ >= d0]
+        if any(o_ == 38 for _, o_ in ev):
+            return "с корекция нагоре"
+        if any(o_ == 2 for _, o_ in ev):
+            return "с доставка"
+        return "наличността вече не е отрицателна"
+
+    _DBG.update(was_neg=len(was_neg), stores=len(stores), sample=list(was_neg.items())[:2])
     for sid in stores:
         if store_id and sid != store_id:
             continue
         stock = service.latest_stock_map(db, sid)
+        for (s_, aid), (d0, mn) in was_neg.items():
+            if s_ != sid or aid not in arts:
+                continue
+            st0 = stock.get(aid)
+            if st0 is not None and st0 >= 0:
+                out.append({"kind": "negative", "store_id": sid, "store": stores[sid], "sku": sku(aid), "name": name(aid),
+                            "qty": mn, "eur": 0.0, "day": d0.strftime("%d.%m"), "fixed": True,
+                            "info": f"беше {mn:g} бр. от {d0.strftime('%d.%m')} · ✅ оправено {how_fixed(sid, aid, d0)}, сега {st0:g} бр."})
         for aid in plano.get(sid, ()):
             st = stock.get(aid)
             if st is None or aid not in arts or not arts[aid].is_active:
@@ -346,14 +386,26 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
                 if aid not in arts or "АМБАЛАЖ" in name(aid).upper():
                     continue
                 g = got.get(aid, 0.0)
+                if g < q - 0.01:
+                    # заведено по-късно (след съседните дни) -> поправено
+                    later, ld = 0.0, None
+                    dd = d + timedelta(days=2)
+                    while dd <= today:
+                        v_ = dl.get((sid, dd), {}).get(aid, 0.0)
+                        if v_ > 0:
+                            later += v_; ld = ld or dd
+                        dd += timedelta(days=1)
+                    fx = g + later >= q - 0.01
+                    fxt = f" · ✅ заведено по-късно ({later:g} бр. на {ld.strftime('%d.%m')})" if fx and ld else ""
                 if g <= 0:
                     out.append({"kind": "undelivered", "store_id": sid, "store": stores[sid], "sku": sku(aid), "name": name(aid),
-                                "qty": -q, "eur": round(-q * price(aid), 2), "day": d.strftime("%d.%m"),
-                                "info": f"Ани поръча {q:g} бр. — в Мистрал няма доставка за деня (не е доставено или не е заведено)"})
+                                "qty": -q, "eur": 0.0 if fx else round(-q * price(aid), 2), "day": d.strftime("%d.%m"),
+                                "fixed": fx,
+                                "info": f"Ани поръча {q:g} бр. — в Мистрал няма доставка за деня (не е доставено или не е заведено)" + fxt})
                 elif g < q - 0.01:
                     out.append({"kind": "short_delivery", "store_id": sid, "store": stores[sid], "sku": sku(aid), "name": name(aid),
-                                "qty": g - q, "eur": round((g - q) * price(aid), 2), "day": d.strftime("%d.%m"),
-                                "info": f"поръчано {q:g} бр., доставено {g:g} бр."})
+                                "qty": g - q, "eur": 0.0 if fx else round((g - q) * price(aid), 2), "day": d.strftime("%d.%m"),
+                                "fixed": fx, "info": f"поръчано {q:g} бр., доставено {g:g} бр." + fxt})
     except Exception:
         db.rollback()
     return out
