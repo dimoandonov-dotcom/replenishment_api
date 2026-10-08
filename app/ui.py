@@ -1020,6 +1020,12 @@ def an_all_detail(by: str, key: str, days: int = Query(14, ge=4, le=60), db: Ses
     return salesall.detail(db, by, key, days)
 
 
+@router.get("/ui/analytics/campaigns")
+def an_campaigns(kind: str = Query("brochure", pattern="^(brochure|silent)$"), db: Session = Depends(get_db)):
+    from . import salesall
+    return salesall.campaigns(db, kind)
+
+
 @router.get("/ui/analytics/all/promos")
 def an_all_promos(db: Session = Depends(get_db)):
     from . import salesall

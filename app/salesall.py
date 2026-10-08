@@ -35,6 +35,7 @@ def _ensure(db: Session):
              cost NUMERIC(14,4), PRIMARY KEY (store_id, code))""",
         """CREATE TABLE IF NOT EXISTS sa_promo (code INT NOT NULL, start_day DATE NOT NULL, end_day DATE NOT NULL,
              stores INT, price NUMERIC(12,4), discount NUMERIC(8,2), PRIMARY KEY (code, start_day, end_day))""",
+        "ALTER TABLE sa_promo ADD COLUMN IF NOT EXISTS tp SMALLINT",
     ]:
         db.execute(text(q))
     db.commit()
@@ -146,17 +147,18 @@ def _sync(db: Session, days: int):
         # промоции от Мистрал
         _job["progress"] = "промоции"
         cur.execute(f"""SELECT SALEMATERIALCODE AS code, CAST(STARTDATE AS date) AS s, CAST(ENDDATE AS date) AS e,
-                               COUNT(DISTINCT LOCATIONID) AS n, MIN(SALEPRICE) AS p, MAX(PERCENTAGEDISCOUNT) AS d
+                               COUNT(DISTINCT LOCATIONID) AS n, MIN(SALEPRICE) AS p, MAX(PERCENTAGEDISCOUNT) AS d,
+                               MAX(ISNULL(TYPEPROMOTION, 0)) AS tp
                         FROM PROMOTIONSALEPRICE WITH (NOLOCK)
                         WHERE ENDDATE >= DATEADD(day, -{KEEP_DAYS}, GETDATE()) AND STARTDATE <= DATEADD(day, 30, GETDATE())
                           AND LOCATIONID IN ({L})
                         GROUP BY SALEMATERIALCODE, CAST(STARTDATE AS date), CAST(ENDDATE AS date)""")
         pr = [{"c": int(r["code"]), "s": r["s"], "e": r["e"], "n": int(r["n"] or 0), "p": float(r["p"] or 0),
-               "d": float(r["d"] or 0)} for r in cur.fetchall()]
+               "d": float(r["d"] or 0), "tp": int(r["tp"] or 0)} for r in cur.fetchall()]
         db.execute(text("TRUNCATE sa_promo"))
         for j in range(0, len(pr), 5000):
-            db.execute(text("""INSERT INTO sa_promo(code, start_day, end_day, stores, price, discount)
-                               VALUES (:c,:s,:e,:n,:p,:d) ON CONFLICT DO NOTHING"""), pr[j:j + 5000])
+            db.execute(text("""INSERT INTO sa_promo(code, start_day, end_day, stores, price, discount, tp)
+                               VALUES (:c,:s,:e,:n,:p,:d,:tp) ON CONFLICT DO NOTHING"""), pr[j:j + 5000])
         db.commit()
     db.execute(text("DELETE FROM sa_sales WHERE day < :d"), {"d": today - timedelta(days=KEEP_DAYS)})
     db.commit()
@@ -261,6 +263,56 @@ def detail(db: Session, by: str, key: str, days: int = 14) -> dict:
                      "trend": round(100 * (float(qr or 0) - float(qp or 0)) / float(qp), 1) if qp else None,
                      "stock": round(sq), "cover_days": round(sq / pd, 1) if pd else None})
     return {"by": by, "key": key, "from": since.strftime("%d.%m"), "to": last.strftime("%d.%m"), "articles": arts}
+
+
+def campaigns(db: Session, kind: str = "brochure", back_days: int = 45) -> dict:
+    """Акции от Мистрал по вид: brochure = брошура (TYPEPROMOTION=1), silent = тихи акции (0).
+    За всяка кампания (период): продажби преди (14 дни) и по време, ръст, оборот, марж, свършили."""
+    _ensure(db)
+    last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
+    if not last:
+        return {"ready": False, "campaigns": []}
+    tp = 1 if kind == "brochure" else 0
+    camps = defaultdict(list)
+    for code, s, e, n, p, d in db.execute(text("""SELECT code, start_day, end_day, stores, price, discount FROM sa_promo
+                                                  WHERE COALESCE(tp,0) = :tp AND start_day <= :t AND end_day >= :t - :b
+                                                  ORDER BY start_day DESC"""), {"t": last, "tp": tp, "b": back_days}).all():
+        camps[(s, e)].append((code, n, float(p or 0), float(d or 0)))
+    names = {c: (n, g, sup) for c, n, g, sup in db.execute(text(
+        "SELECT code, name, grp, supplier FROM sa_articles")).all()}
+    outs_all = {c: n for c, n in db.execute(text("SELECT code, COUNT(*) FROM sa_stock WHERE qty <= 0 GROUP BY code")).all()}
+    out = []
+    for (s, e), items in sorted(camps.items(), key=lambda x: (x[0][0], x[0][1]), reverse=True):
+        p_end = min(e, last); pdays = (p_end - s).days + 1
+        if pdays <= 0:
+            continue
+        codes = [c for c, *_ in items]
+        b0 = s - timedelta(days=14)
+        agg = {c: [0.0, 0.0, 0.0, 0.0] for c in codes}
+        for c, d, q, r, k in db.execute(text("""SELECT code, day, SUM(qty), SUM(rev), SUM(cost) FROM sa_sales
+                                                WHERE code = ANY(:c) AND day BETWEEN :b AND :e GROUP BY code, day"""),
+                                        {"c": codes, "b": b0, "e": p_end}).all():
+            a = agg[c]
+            if d < s: a[0] += float(q or 0)
+            else: a[1] += float(q or 0); a[2] += float(r or 0); a[3] += float(k or 0)
+        rows = []
+        for c, n, price, disc in items:
+            qb, qd, rd, kd = agg.get(c, [0, 0, 0, 0])
+            bpd, dpd = qb / 14, qd / pdays
+            nm, g, sup = names.get(c, (str(c), "", ""))
+            rows.append({"code": c, "name": nm or str(c), "group": g or "", "supplier": sup or "", "stores": n,
+                         "start": s.strftime("%d.%m"), "end": e.strftime("%d.%m"),
+                         "promo_price": price, "discount": disc, "before_per_day": round(bpd, 1),
+                         "during_per_day": round(dpd, 1), "uplift": round(dpd / bpd, 2) if bpd else None,
+                         "units": round(qd), "extra_units": round(qd - bpd * pdays), "rev": round(rd, 2),
+                         "margin_pct": round(100 * (rd - kd) / rd, 1) if rd else None,
+                         "stores_out": outs_all.get(c, 0) if s <= last <= e else None})
+        rows.sort(key=lambda r: -(r["rev"] or 0))
+        out.append({"start": s.strftime("%d.%m.%Y"), "end": e.strftime("%d.%m.%Y"), "days_with_data": pdays,
+                    "active": s <= last <= e, "items": len(rows), "units": sum(r["units"] for r in rows),
+                    "extra_units": sum(r["extra_units"] for r in rows), "rev": round(sum(r["rev"] for r in rows), 2),
+                    "rows": rows})
+    return {"ready": True, "kind": kind, "data_until": last.strftime("%d.%m.%Y"), "campaigns": out}
 
 
 def promos(db: Session) -> dict:

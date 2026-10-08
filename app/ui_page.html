@@ -236,7 +236,7 @@ nav a:hover { transform:translateY(-2px); }
 nav a.on { background:var(--c,var(--amber)); color:#fff; box-shadow:0 8px 20px color-mix(in srgb,var(--c,var(--amber)) 40%,transparent); }
 nav a.on::before { background:#fff; box-shadow:0 0 0 3px rgba(255,255,255,.35); }
 nav a[data-tab="board"]{--c:#D9621C} nav a[data-tab="orders"]{--c:#2F7DD1} nav a[data-tab="assort"]{--c:#E9A23B}
-nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A} nav a[data-tab="qual"]{--c:#0EA5A4} nav a[data-tab="anal"]{--c:#C026D3} nav a[data-tab="anom"]{--c:#9F1239}
+nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A} nav a[data-tab="qual"]{--c:#0EA5A4} nav a[data-tab="anal"]{--c:#C026D3} nav a[data-tab="anom"]{--c:#9F1239} nav a[data-tab="promo"]{--c:#DB2777}
 
 /* ---------- бутони ---------- */
 button { border-radius:10px; border:1px solid var(--line-strong); background:var(--raised); font-family:var(--head); font-weight:700;
@@ -323,6 +323,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <a href="#assort" data-tab="assort">Асортимент и цени</a>
   <a href="#plano" data-tab="plano">Планограма</a>
   <a href="#anal" data-tab="anal">Анализи</a>
+  <a href="#promo" data-tab="promo">Брошура и акции</a>
   <a href="#qual" data-tab="qual">Качество</a>
   <a href="#anom" data-tab="anom">Аномалии</a>
   <a href="#nord" data-tab="nord">Не се поръчват</a>
@@ -489,6 +490,24 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   </table></div>
 </section>
 
+<!-- ============ БРОШУРА И ТИХИ АКЦИИ ============ -->
+<section class="tab" id="tab-promo">
+  <div class="bar">
+    <button id="pmB" class="warm">📰 Брошура</button>
+    <button id="pmS">🤫 Тихи акции</button>
+    <select id="pmCamp"></select>
+    <input id="pmQ" placeholder="търси артикул / доставчик" style="min-width:200px">
+    <span class="note" id="pmInfo"></span>
+  </div>
+  <p class="note" style="margin:0 0 14px;line-height:1.6">Акциите се четат от Мистрал (промо цените). <b>Брошура</b> — промоциите от брошурата; <b>тихи акции</b> — промо цени извън брошурата.
+  Сравнява се средната продажба на ден <b>по време</b> на акцията с последните <b>14 дни преди</b> нея, за всички магазини и всички доставчици.</p>
+  <div class="board" id="pmKpis"></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Код</th><th>Артикул</th><th>Доставчик</th><th>Период</th><th class="num">Промо цена</th><th class="num">Преди/ден</th><th class="num">По време/ден</th><th class="num">Ръст ×</th><th class="num">Продадени</th><th class="num">Допълнително</th><th class="num">Оборот €</th><th class="num">Марж %</th><th class="num">Свършили в маг.</th></tr></thead>
+    <tbody id="pmBody"></tbody>
+  </table></div>
+</section>
+
 <!-- ============ НЕ СЕ ПОРЪЧВАТ ============ -->
 <section class="tab" id="tab-nord">
   <p class="note" style="margin:0 0 14px;line-height:1.6">Всичко, което при сегашните настройки <b>никога няма да влезе в заявка</b>, по магазини и по причина.
@@ -634,7 +653,7 @@ const loaded = {};
 function show(tab) {
   document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + tab));
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: loadAnom, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: loadAnom, promo: initPromo, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -1580,10 +1599,63 @@ async function showCmp(id) {
   $("cDetail").scrollIntoView({ behavior: "smooth" });
 }
 
+/* ---------- брошура и тихи акции ---------- */
+let PM = { kind: "brochure", data: null, filter: "", sort: "rev" };
+function initPromo() {
+  $("pmB").onclick = () => loadPromo("brochure"); $("pmS").onclick = () => loadPromo("silent");
+  $("pmCamp").onchange = renderPromo; $("pmQ").oninput = renderPromo;
+  loadPromo("brochure");
+}
+async function loadPromo(kind) {
+  PM.kind = kind; PM.filter = ""; PM.sort = "rev";
+  $("pmB").className = kind === "brochure" ? "warm" : ""; $("pmS").className = kind === "silent" ? "warm" : "";
+  $("pmBody").innerHTML = `<tr><td colspan="13" class="empty">Зареждам…</td></tr>`;
+  PM.data = await api(`/ui/analytics/campaigns?kind=${kind}`);
+  const cs = PM.data.campaigns || [];
+  const opts = cs.map((c, i) => `<option value="${i}">${c.start} – ${c.end}${c.active ? " · активна" : ""} · ${c.items} арт.</option>`);
+  if (kind === "silent" && cs.length > 1) opts.unshift(`<option value="all">Всички тихи акции (${cs.reduce((a, c) => a + c.items, 0)} арт.)</option>`);
+  $("pmCamp").innerHTML = opts.join("") || `<option value="">няма акции</option>`;
+  if (kind === "brochure") { const i = cs.findIndex(c => c.active); if (i >= 0) $("pmCamp").value = String(i); }
+  $("pmInfo").textContent = PM.data.data_until ? `продажби до ${PM.data.data_until}` : "";
+  renderPromo();
+}
+function pmRows() {
+  const cs = (PM.data && PM.data.campaigns) || [], v = $("pmCamp").value;
+  let rows = v === "all" ? cs.flatMap(c => c.rows) : (cs[+v] ? cs[+v].rows : []);
+  const q = $("pmQ").value.trim().toUpperCase();
+  if (q) rows = rows.filter(r => (r.name + " " + r.supplier + " " + r.code + " " + r.group).toUpperCase().includes(q));
+  return rows;
+}
+function renderPromo() {
+  let rows = pmRows();
+  const sum = k => rows.reduce((a, r) => a + (r[k] || 0), 0);
+  const weak = rows.filter(r => r.uplift != null && r.uplift < 1.1 && r.before_per_day > 0).length;
+  const strong = rows.filter(r => r.uplift != null && r.uplift >= 1.5).length;
+  const out = rows.filter(r => (r.stores_out || 0) > 0).length;
+  const tiles = [["АРТИКУЛИ", fmtN(rows.length), "t", "в акцията", ""], ["ОБОРОТ", fmtE(sum("rev")), "", `${fmtN(sum("units"))} бр. продадени`, "rev"],
+    ["ДОПЪЛНИТЕЛНО", fmtN(sum("extra_units")), "", "бр. над нормалните продажби", "extra"],
+    ["СИЛЕН ЕФЕКТ", fmtN(strong), "t", "продажбите × 1,5 и повече", "strong"], ["БЕЗ ЕФЕКТ", fmtN(weak), "a", "ръст под 10%", "weak"],
+    ["СВЪРШИЛИ", fmtN(out), "a", "артикули на 0 в някой магазин", "out"]];
+  $("pmKpis").innerHTML = tiles.map(([l, v, c, sub, k]) => `<div class="tile" ${k ? `data-pm="${k}" style="cursor:pointer${PM.filter === k ? ";outline:2px solid var(--c, #DB2777)" : ""}"` : ""}><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${sub}${k ? " · <u>виж →</u>" : ""}</div></div>`).join("");
+  document.querySelectorAll("#pmKpis .tile[data-pm]").forEach(el => el.onclick = () => { const k = el.dataset.pm; PM.filter = PM.filter === k ? "" : k; renderPromo(); });
+  const f = PM.filter;
+  if (f === "strong") rows = rows.filter(r => r.uplift != null && r.uplift >= 1.5).sort((a, b) => b.uplift - a.uplift);
+  else if (f === "weak") rows = rows.filter(r => r.uplift != null && r.uplift < 1.1 && r.before_per_day > 0).sort((a, b) => a.uplift - b.uplift);
+  else if (f === "out") rows = rows.filter(r => (r.stores_out || 0) > 0).sort((a, b) => b.stores_out - a.stores_out);
+  else if (f === "extra") rows = [...rows].sort((a, b) => b.extra_units - a.extra_units);
+  else rows = [...rows].sort((a, b) => b.rev - a.rev);
+  const up = u => u == null ? `<span class="muted">ново</span>` : `<b class="${u >= 1.5 ? "t" : u < 1.1 ? "low" : ""}">${String(u).replace(".", ",")}</b>`;
+  $("pmBody").innerHTML = rows.slice(0, 600).map(r => `<tr><td>${r.code}</td><td class="name">${esc(r.name)}<div class="muted" style="font-size:12px">${esc(r.group)}</div></td><td class="muted">${esc(r.supplier)}</td>
+    <td>${r.start}–${r.end}</td><td class="num">${fmtE(r.promo_price)}</td><td class="num">${fmtN(r.before_per_day)}</td><td class="num">${fmtN(r.during_per_day)}</td><td class="num">${up(r.uplift)}</td>
+    <td class="num">${fmtN(r.units)}</td><td class="num">${r.extra_units > 0 ? "+" : ""}${fmtN(r.extra_units)}</td><td class="num">${fmtE(r.rev)}</td><td class="num">${r.margin_pct == null ? "—" : fmtN(r.margin_pct)}</td>
+    <td class="num ${r.stores_out ? "low" : ""}">${r.stores_out == null ? "—" : fmtN(r.stores_out)}</td></tr>`).join("")
+    || `<tr><td colspan="13" class="empty">${PM.data && PM.data.ready === false ? "Данните още се дърпат…" : "Няма артикули."}</td></tr>`;
+}
+
 /* ---------- обучение ---------- */
 const SRC = { manual: ["ти", "warn"], learning: ["учене", ""], rules: ["правила", "off"], import: ["импорт", "off"], api: ["система", "off"] };
 function initLearn() {
-  $("lDays").onchange = loadLearn; $("lSrc").onchange = loadLearn;
+  $("lDays").onchange = loadLearn; $("lSrc").onchange = () => { L_KIND = ""; loadLearn(); };
   $("lPreview").onclick = async () => {
     msg("lMsg", "Смятам (без да записвам)…");
     try { const r = await api("/learning/run?apply=false", { method: "POST" });
@@ -1593,15 +1665,24 @@ function initLearn() {
   };
   loadLearn();
 }
+let L_KIND = "";
 async function loadLearn() {
-  const d = await api(`/ui/learning?days=${$("lDays").value}&source=${$("lSrc").value}`);
-  const by = s => d.log.filter(x => x.source === s).length;
-  const up = d.log.filter(x => x.source === "learning" && (x.new_max ?? 0) > (x.old_max ?? 0)).length;
-  const dn = d.log.filter(x => x.source === "learning" && (x.new_max ?? 0) < (x.old_max ?? 0)).length;
-  const ani = d.log.filter(x => (x.reason || "").startsWith("Ани")).length;
-  const tiles = [["НАУЧЕНИ ПРОМЕНИ", by("learning"), "t", `нагоре ${up} · надолу ${dn}`], ["ОТ АНИ, ПОТВЪРДЕНИ", ani, "a", "продажбите показват, че е права"],
-    ["ТВОИ КОРЕКЦИИ", by("manual"), "", "заключени, ученето не ги пипа"], ["ЗАКЛЮЧЕНИ ОБЩО", d.locked.length, "", "позиции магазин × артикул"]];
-  $("lKpis").innerHTML = tiles.map(([l, v, c, s]) => `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("");
+  const d = await api(`/ui/learning?days=${$("lDays").value}&source=${$("lSrc").value}${L_KIND ? "&kind=" + L_KIND : ""}`);
+  const n = d.counts || {};
+  const tiles = [["НАУЧЕНИ ПРОМЕНИ", fmtN(n.learning), "t", `<span data-lk="up" style="cursor:pointer"><u>нагоре ${fmtN(n.up)}</u></span> · <span data-lk="down" style="cursor:pointer"><u>надолу ${fmtN(n.down)}</u></span>`, "learning"],
+    ["ОТ АНИ, ПОТВЪРДЕНИ", fmtN(n.ani), "a", "продажбите показват, че е права · <u>виж →</u>", "ani"],
+    ["ТВОИ КОРЕКЦИИ", fmtN(n.manual), "", "заключени, ученето не ги пипа · <u>виж →</u>", "manual"],
+    ["ЗАКЛЮЧЕНИ ОБЩО", fmtN(d.locked.length), "", "позиции магазин × артикул · <u>виж →</u>", "locked"]];
+  const act = L_KIND || $("lSrc").value;
+  $("lKpis").innerHTML = tiles.map(([l, v, c, s, k]) => `<div class="tile" data-lt="${k}" style="cursor:pointer${act === k ? ";outline:2px solid #D2493A" : ""}"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("");
+  document.querySelectorAll("#lKpis [data-lk]").forEach(el => el.onclick = e => { e.stopPropagation(); L_KIND = el.dataset.lk; $("lSrc").value = "learning"; loadLearn(); });
+  document.querySelectorAll("#lKpis .tile[data-lt]").forEach(el => el.onclick = () => {
+    const k = el.dataset.lt;
+    if (k === "locked") { $("lLocked").closest(".scroll").scrollIntoView({ behavior: "smooth" }); return; }
+    if (k === "ani") { L_KIND = "ani"; $("lSrc").value = ""; }
+    else { L_KIND = ""; $("lSrc").value = k; }
+    loadLearn();
+  });
   const mm = (a, b) => a == null ? `<b>${fmtN(b)}</b>` : (a === b ? fmtN(b) : `${fmtN(a)} → <b>${fmtN(b)}</b>`);
   $("lBody").innerHTML = d.log.map(x => { const [l, c] = SRC[x.source] || [x.source, "off"];
     return `<tr><td>${x.at}</td><td>${esc(x.store)}</td><td>${esc(x.sku)}</td><td class="name">${esc(x.name)}</td>
@@ -1793,8 +1874,8 @@ fetch("/ui/summary").then(r => {
   if (r.status === 401) { showLogin(); return; }
   api("/ui/me").then(m => { const w = document.getElementById("whoami"); if (w && m.name) w.textContent = "👤 " + m.name;
     if (m.analytics_only) {   // профил само за „Анализи"
-      document.querySelectorAll('nav a').forEach(a => { if (a.dataset.tab !== "anal") a.remove(); });
-      document.querySelectorAll('section.tab').forEach(t => { if (t.id !== "tab-anal") t.remove(); });
+      document.querySelectorAll('nav a').forEach(a => { if (!["anal", "promo"].includes(a.dataset.tab)) a.remove(); });
+      document.querySelectorAll('section.tab').forEach(t => { if (!["tab-anal", "tab-promo"].includes(t.id)) t.remove(); });
       ["kpis", "freshInfo"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
       if (location.hash !== "#anal") location.hash = "#anal";
     }
@@ -1804,8 +1885,8 @@ fetch("/ui/summary").then(r => {
       ["kpis", "freshInfo"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
       if (location.hash !== "#anom") location.hash = "#anom";
     }
-    if (!m.analytics) { const a = document.querySelector('nav a[data-tab="anal"]'); if (a) a.remove();
-      const t = document.getElementById("tab-anal"); if (t) t.remove(); if (location.hash === "#anal") location.hash = "#board"; } }).catch(() => {});
+    if (!m.analytics) { ["anal", "promo"].forEach(k => { const a = document.querySelector(`nav a[data-tab="${k}"]`); if (a) a.remove();
+      const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (["#anal", "#promo"].includes(location.hash)) location.hash = "#board"; } }).catch(() => {});
   show((location.hash || "#board").slice(1));
   updateFresh();
 });
