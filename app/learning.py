@@ -286,15 +286,38 @@ def run(db: Session, apply: bool = True) -> dict:
     }
 
 
-def recent_log(db: Session, days: int = 14, limit: int = 500, source: str | None = None) -> list[dict]:
+def log_counts(db: Session, days: int = 14) -> dict:
+    """Броят на промените за целия период (не само показаните редове)."""
+    from sqlalchemy import text as _t
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    r = db.execute(_t("""SELECT
+        COUNT(*) FILTER (WHERE source='learning'),
+        COUNT(*) FILTER (WHERE source='learning' AND COALESCE(new_max,0) > COALESCE(old_max,0)),
+        COUNT(*) FILTER (WHERE source='learning' AND COALESCE(new_max,0) < COALESCE(old_max,0)),
+        COUNT(*) FILTER (WHERE reason LIKE :ani),
+        COUNT(*) FILTER (WHERE source='manual'),
+        COUNT(*) FILTER (WHERE source IN ('rules','import')),
+        COUNT(*)
+        FROM settings_log WHERE created_at >= :s"""), {"s": since, "ani": "Ани%"}).one()
+    return dict(zip(["learning", "up", "down", "ani", "manual", "rules", "all"], [int(x or 0) for x in r]))
+
+
+def recent_log(db: Session, days: int = 14, limit: int = 500, source: str | None = None,
+               kind: str | None = None) -> list[dict]:
     since = datetime.now(timezone.utc) - timedelta(days=days)
     stores = {s.id: s.name for s in db.execute(select(m.Store)).scalars().all()}
     arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
-    rows = db.execute(
-        select(m.SettingsLog).where(m.SettingsLog.created_at >= since,
-                                    *( [m.SettingsLog.source == source] if source else []))
-        .order_by(m.SettingsLog.created_at.desc()).limit(limit)
-    ).scalars().all()
+    L = m.SettingsLog
+    cond = [L.created_at >= since]
+    if source:
+        cond.append(L.source == source)
+    if kind == "up":
+        cond += [L.source == "learning", func.coalesce(L.new_max, 0) > func.coalesce(L.old_max, 0)]
+    elif kind == "down":
+        cond += [L.source == "learning", func.coalesce(L.new_max, 0) < func.coalesce(L.old_max, 0)]
+    elif kind == "ani":
+        cond.append(L.reason.like("Ани%"))
+    rows = db.execute(select(L).where(*cond).order_by(L.created_at.desc()).limit(limit)).scalars().all()
     f = lambda v: float(v) if v is not None else None  # noqa: E731
     return [{
         "at": r.created_at.astimezone(SOFIA).strftime("%d.%m %H:%M"),

@@ -368,3 +368,16 @@ def probe_sales_all(db, day_offset: int = 1) -> dict:
               AND s.LOCATIONID IN ({','.join(map(str, locs))})""")
         r = cur.fetchone()
     return {k: (float(v) if v is not None else None) for k, v in r.items()} | {"seconds": round(time.time() - t, 1)}
+
+
+def promo_groups(days: int = 45) -> list[dict]:
+    """Групите промоции в Мистрал (по ID на промоцията): период, бележка, тип, брой артикули."""
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute(f"""SELECT ID AS pid, MAX(NOTE) AS note, MAX(TYPEPROMOTION) AS tp,
+                               MIN(CAST(STARTDATE AS date)) AS s, MAX(CAST(ENDDATE AS date)) AS e,
+                               COUNT(DISTINCT SALEMATERIALCODE) AS items, COUNT(DISTINCT LOCATIONID) AS stores
+                        FROM PROMOTIONSALEPRICE WITH (NOLOCK)
+                        WHERE ENDDATE >= DATEADD(day, -{int(days)}, GETDATE())
+                        GROUP BY ID ORDER BY MIN(STARTDATE) DESC""")
+        return [{k: (str(v) if v is not None else None) for k, v in r.items()} for r in cur.fetchall()]

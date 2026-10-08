@@ -444,6 +444,12 @@ def mistral_tables():
         raise HTTPException(502, f"Мистрал: {type(e).__name__}: {e}")
 
 
+@router.get("/ui/mistral/promo-groups")
+def mistral_promo_groups(days: int = Query(45, ge=1, le=120)):
+    from . import mistral
+    return mistral.promo_groups(days)
+
+
 @router.get("/ui/mistral/sample")
 def mistral_sample(table: str, n: int = 5):
     from . import mistral
@@ -614,7 +620,8 @@ def learning_run(apply: bool = True, db: Session = Depends(get_db)):
 
 
 @router.get("/ui/learning")
-def ui_learning(days: int = Query(14, ge=1, le=90), source: str | None = None, db: Session = Depends(get_db)):
+def ui_learning(days: int = Query(14, ge=1, le=90), source: str | None = None,
+                kind: str | None = Query(None, pattern="^(up|down|ani)$"), db: Session = Depends(get_db)):
     from . import learning
     stores = {x.id: x.name for x in db.execute(select(m.Store)).scalars().all()}
     arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
@@ -626,7 +633,8 @@ def ui_learning(days: int = Query(14, ge=1, le=90), source: str | None = None, d
                             .where(m.StoreArticleSetting.auto_adjust.is_(False))).scalars().all()
         if x.article_id in arts
     ]
-    return {"log": learning.recent_log(db, days, 500, source), "locked": locked}
+    return {"log": learning.recent_log(db, days, 2000, source or None, kind), "locked": locked,
+            "counts": learning.log_counts(db, days)}
 
 
 class UnlockIn(BaseModel):
