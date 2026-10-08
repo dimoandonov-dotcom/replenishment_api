@@ -586,5 +586,15 @@ def nomenclature(db: Session, grp: str, days: int = 30) -> dict:
             "stock_eur": round(float(v), 2), "sold": float(sq), "rev": round(float(sr), 2),
             "last_sale": ld.strftime("%d.%m.%Y") if ld else None}
            for c, n, s, p, cs, q, k, v, sq, sr, ld in rows]
+    miss = [r["code"] for r in out if r["cost"] is None]
+    if miss:
+        try:
+            from . import mistral
+            pr = mistral.delivery_prices(miss)
+            for r in out:
+                if r["cost"] is None and r["code"] in pr:
+                    r["cost"] = round(pr[r["code"]], 4)
+        except Exception:
+            pass
     return {"group": grp, "days": days, "from": since.strftime("%d.%m.%Y") if since else None,
             "to": last.strftime("%d.%m.%Y") if last else None, "count": len(out), "rows": out}

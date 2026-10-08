@@ -381,3 +381,16 @@ def promo_groups(days: int = 45) -> list[dict]:
                         WHERE ENDDATE >= DATEADD(day, -{int(days)}, GETDATE())
                         GROUP BY ID ORDER BY MIN(STARTDATE) DESC""")
         return [{k: (str(v) if v is not None else None) for k, v in r.items()} for r in cur.fetchall()]
+
+
+def delivery_prices(codes: list[int]) -> dict[int, float]:
+    """Текуща доставна цена (средна, най-високата по обекти) за кодове - и за тези на 0 наличност."""
+    out = {}
+    with connect() as conn:
+        cur = conn.cursor()
+        for j in range(0, len(codes), 900):
+            part = ",".join(str(int(c)) for c in codes[j:j + 900])
+            cur.execute(f"""SELECT MATERIALCODE AS code, MAX(AVGDELIVERYPRICE) AS p FROM MATERIAL WITH (NOLOCK)
+                            WHERE MATERIALCODE IN ({part}) AND AVGDELIVERYPRICE > 0 GROUP BY MATERIALCODE""")
+            out.update({int(r["code"]): float(r["p"]) for r in cur.fetchall()})
+    return out
