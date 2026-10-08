@@ -904,7 +904,19 @@ def ui_anom_debug_neg(days: int = 14, db: Session = Depends(get_db)):
     from . import anomalies as _an
     its = _an.items(db, days)
     negf = [r for r in its if r["kind"] == "negative" and r.get("fixed")]
-    return {"items_neg_fixed": len(negf), "sample": negf[:2], "days_with_snapshots": r1[0], "first": str(r1[1]), "rows": r1[2], "pairs_ever_negative": r2,
+    from . import service as _sv
+    wn = db.execute(_t("""SELECT store_id, article_id, MIN((captured_at AT TIME ZONE 'Europe/Sofia')::date), MIN(quantity)
+            FROM stock_snapshots WHERE quantity < 0 AND captured_at >= :d GROUP BY store_id, article_id"""), {"d": since, "sid": None}).all()
+    ok = 0; samp = []
+    cache = {}
+    for s_, a_, d_, q_ in wn:
+        if s_ not in cache:
+            cache[s_] = _sv.latest_stock_map(db, s_)
+        v = cache[s_].get(a_)
+        if v is not None and v >= 0:
+            ok += 1
+            if len(samp) < 3: samp.append([s_, a_, str(d_), float(q_), v])
+    return {"wn": len(wn), "wn_ok": ok, "wn_samp": samp, "items_neg_fixed": len(negf), "sample": negf[:2], "days_with_snapshots": r1[0], "first": str(r1[1]), "rows": r1[2], "pairs_ever_negative": r2,
             "now_ok": r3[0], "still_neg": r3[1]}
 
 
