@@ -1700,7 +1700,7 @@ function renderPromo() {
   else rows = [...rows].sort((a, b) => b.rev - a.rev);
   const up = u => u == null ? `<span class="muted">ново</span>` : `<b class="${u >= 1.5 ? "t" : u < 1.1 ? "low" : ""}">${String(u).replace(".", ",")}</b>`;
   $("pmBody").innerHTML = rows.slice(0, 600).map(r => `<tr><td>${r.code}</td><td class="name">${esc(r.name)}<div class="muted" style="font-size:12px">${esc(r.group)}</div></td><td class="muted">${esc(r.supplier)}</td>
-    <td>${r.start}–${r.end}</td><td class="num">${fmtE(r.promo_price)}</td><td class="num">${fmtN(r.before_per_day)}</td><td class="num">${fmtN(r.during_per_day)}</td><td class="num">${up(r.uplift)}</td>
+    <td>${r.start}–${r.end}</td><td class="num">${fmtE(r.promo_price)}</td><td class="num">${fmtN(r.before_per_day)}</td><td class="num">${fmtN(r.during_per_day)}</td><td class="num">${r.new ? `<span class="tag warn">започва</span>` : up(r.uplift)}</td>
     <td class="num">${fmtN(r.units)}</td><td class="num">${r.extra_units > 0 ? "+" : ""}${fmtN(r.extra_units)}</td><td class="num">${fmtE(r.rev)}</td><td class="num">${r.margin_pct == null ? "—" : fmtN(r.margin_pct)}</td>
     <td class="num ${r.stores_out ? "low" : ""}">${r.stores_out == null ? "—" : fmtN(r.stores_out)}</td></tr>`).join("")
     || `<tr><td colspan="13" class="empty">${PM.data && PM.data.ready === false ? "Данните още се дърпат…" : "Няма артикули."}</td></tr>`;

@@ -277,8 +277,9 @@ def campaigns(db: Session, kind: str = "brochure", back_days: int = 45) -> dict:
                                                   GROUP BY start_day, end_day HAVING COUNT(*) >= 20""")).all()}
     camps = defaultdict(list)
     for code, s, e, n, p, d, t in db.execute(text("""SELECT code, start_day, end_day, stores, price, discount, COALESCE(tp,0)
-                                                  FROM sa_promo WHERE start_day <= :t AND end_day >= :t - :b
-                                                  ORDER BY start_day DESC"""), {"t": last, "b": back_days}).all():
+                                                  FROM sa_promo WHERE start_day <= :up AND end_day >= :t - :b
+                                                  ORDER BY start_day DESC"""),
+                                                  {"t": last, "b": back_days, "up": last + timedelta(days=31)}).all():
         is_bro = t == 1 or (s, e) in bro
         if is_bro == (kind == "brochure"):
             camps[(s, e)].append((code, n, float(p or 0), float(d or 0)))
@@ -287,11 +288,9 @@ def campaigns(db: Session, kind: str = "brochure", back_days: int = 45) -> dict:
     outs_all = {c: n for c, n in db.execute(text("SELECT code, COUNT(*) FROM sa_stock WHERE qty <= 0 GROUP BY code")).all()}
     out = []
     for (s, e), items in sorted(camps.items(), key=lambda x: (x[0][0], x[0][1]), reverse=True):
-        p_end = min(e, last); pdays = (p_end - s).days + 1
-        if pdays <= 0:
-            continue
+        p_end = min(e, last); pdays = max((p_end - s).days + 1, 0)   # 0 = започва днес/предстои, още без продажби
         codes = [c for c, *_ in items]
-        b0 = s - timedelta(days=14)
+        b0 = min(s, last + timedelta(days=1)) - timedelta(days=14)
         agg = {c: [0.0, 0.0, 0.0, 0.0] for c in codes}
         for c, d, q, r, k in db.execute(text("""SELECT code, day, SUM(qty), SUM(rev), SUM(cost) FROM sa_sales
                                                 WHERE code = ANY(:c) AND day BETWEEN :b AND :e GROUP BY code, day"""),
@@ -302,8 +301,15 @@ def campaigns(db: Session, kind: str = "brochure", back_days: int = 45) -> dict:
         rows = []
         for c, n, price, disc in items:
             qb, qd, rd, kd = agg.get(c, [0, 0, 0, 0])
-            bpd, dpd = qb / 14, qd / pdays
+            bpd, dpd = qb / 14, (qd / pdays if pdays else None)
             nm, g, sup = names.get(c, (str(c), "", ""))
+            if not pdays:
+                rows.append({"code": c, "name": nm or str(c), "group": g or "", "supplier": sup or "", "stores": n,
+                             "start": s.strftime("%d.%m"), "end": e.strftime("%d.%m"), "promo_price": price,
+                             "discount": disc, "before_per_day": round(bpd, 1), "during_per_day": None,
+                             "uplift": None, "units": 0, "extra_units": 0, "rev": 0.0, "margin_pct": None,
+                             "stores_out": None, "new": True})
+                continue
             rows.append({"code": c, "name": nm or str(c), "group": g or "", "supplier": sup or "", "stores": n,
                          "start": s.strftime("%d.%m"), "end": e.strftime("%d.%m"),
                          "promo_price": price, "discount": disc, "before_per_day": round(bpd, 1),
@@ -313,7 +319,7 @@ def campaigns(db: Session, kind: str = "brochure", back_days: int = 45) -> dict:
                          "stores_out": outs_all.get(c, 0) if s <= last <= e else None})
         rows.sort(key=lambda r: -(r["rev"] or 0))
         out.append({"start": s.strftime("%d.%m.%Y"), "end": e.strftime("%d.%m.%Y"), "days_with_data": pdays,
-                    "active": s <= last <= e, "items": len(rows), "units": sum(r["units"] for r in rows),
+                    "active": s <= last + timedelta(days=1) <= e, "items": len(rows), "units": sum(r["units"] for r in rows),
                     "extra_units": sum(r["extra_units"] for r in rows), "rev": round(sum(r["rev"] for r in rows), 2),
                     "rows": rows})
     return {"ready": True, "kind": kind, "data_until": last.strftime("%d.%m.%Y"), "campaigns": out}
@@ -360,7 +366,7 @@ def promos(db: Session) -> dict:
                          "margin_pct": round(100 * (rd - kd) / rd, 1) if rd else None, "stores_out": outs.get(c, 0)})
         rows.sort(key=lambda r: -(r["rev"] or 0))
         out.append({"start": s.strftime("%d.%m.%Y"), "end": e.strftime("%d.%m.%Y"), "days_with_data": pdays,
-                    "active": s <= last <= e, "items": len(rows), "units": sum(r["units"] for r in rows),
+                    "active": s <= last + timedelta(days=1) <= e, "items": len(rows), "units": sum(r["units"] for r in rows),
                     "extra_units": sum(r["extra_units"] for r in rows), "rev": round(sum(r["rev"] for r in rows), 2),
                     "rows": rows[:300]})
     return {"ready": True, "data_until": last.strftime("%d.%m.%Y"), "campaigns": out}
