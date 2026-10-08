@@ -563,3 +563,26 @@ def low_stock_alerts(db: Session, days: int = 14, n: int = TOP_N, cover: float =
                                   "stores_sold": sold_in[c], "stores_negative": neg[c], "stores_zero_or_neg": nonpos[c],
                                   "rev": round(sum(v[1] for (st, cc), v in psa.items() if cc == c), 2)}
                                  for c in untracked], key=lambda x: -x["rev"])[:400]}
+
+
+def nomenclature(db: Session, grp: str, days: int = 30) -> dict:
+    """Номенклатурата на група: всички артикули с продажби или наличност, с продажби за N дни."""
+    _ensure(db)
+    last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
+    since = (last - timedelta(days=days - 1)) if last else None
+    rows = db.execute(text("""
+        SELECT a.code, a.name, a.sub, a.supplier,
+               COALESCE(st.q, 0), COALESCE(st.n, 0), COALESCE(st.v, 0),
+               COALESCE(sl.q, 0), COALESCE(sl.r, 0), sl.last_day
+        FROM sa_articles a
+        LEFT JOIN (SELECT code, SUM(qty) q, COUNT(*) FILTER (WHERE qty > 0) n, SUM(GREATEST(qty,0) * COALESCE(cost,0)) v
+                   FROM sa_stock GROUP BY code) st ON st.code = a.code
+        LEFT JOIN (SELECT code, SUM(qty) q, SUM(rev) r, MAX(day) last_day FROM sa_sales
+                   WHERE day >= :f GROUP BY code) sl ON sl.code = a.code
+        WHERE a.grp = :g ORDER BY a.sub, a.name"""), {"g": grp, "f": since}).all()
+    out = [{"code": c, "name": n, "sub": s or "", "supplier": p or "", "stock": float(q), "stores_with_stock": int(k),
+            "stock_eur": round(float(v), 2), "sold": float(sq), "rev": round(float(sr), 2),
+            "last_sale": ld.strftime("%d.%m.%Y") if ld else None}
+           for c, n, s, p, q, k, v, sq, sr, ld in rows]
+    return {"group": grp, "days": days, "from": since.strftime("%d.%m.%Y") if since else None,
+            "to": last.strftime("%d.%m.%Y") if last else None, "count": len(out), "rows": out}

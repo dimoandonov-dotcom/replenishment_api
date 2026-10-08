@@ -1057,6 +1057,12 @@ def an_campaigns(kind: str = Query("brochure", pattern="^(brochure|silent)$"), d
     return salesall.campaigns(db, kind)
 
 
+@router.get("/ui/analytics/nomenclature")
+def an_nomenclature(group: str, days: int = Query(30, ge=1, le=60), db: Session = Depends(get_db)):
+    from . import salesall
+    return salesall.nomenclature(db, group, days)
+
+
 @router.get("/ui/analytics/all/promos")
 def an_all_promos(db: Session = Depends(get_db)):
     from . import salesall
