@@ -97,6 +97,9 @@ td input.changed { border-color:var(--amber); background:var(--amber-soft); }
 .tag.bad { background:var(--danger-soft); color:var(--danger); }
 .tag.off { background:var(--line); color:var(--slate); }
 .tag.bro { background:#DC2626; color:#fff; }
+th[title], th.tipped { cursor:help; } th[title]::after, th.tipped::after { content:" ⓘ"; font-size:10px; opacity:.55; }
+#thTip { position:fixed; z-index:9999; max-width:260px; background:#1f1a14; color:#fff; font-size:13px; line-height:1.4;
+  padding:8px 11px; border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,.25); display:none; }
 tr.bro > td { background:#FDECEC; } tr.bro > td:first-child { box-shadow: inset 4px 0 0 #DC2626; }
 .empty { padding:34px 12px; text-align:center; color:var(--slate); font-family:var(--mono); font-size:13px; }
 
@@ -1629,6 +1632,20 @@ async function showCmp(id) {
   $("cAll").onclick = () => d.lines.forEach((l, i) => { if (Math.abs(l.diff) >= 0.01) $("x" + i).style.display = ""; });
   $("cDetail").scrollIntoView({ behavior: "smooth" });
 }
+
+/* ---------- подсказки на заглавията: докосване (телефон) или клик ---------- */
+document.addEventListener("click", e => {
+  const tip = document.getElementById("thTip") || Object.assign(document.body.appendChild(document.createElement("div")), { id: "thTip" });
+  const th = e.target.closest("th[title], th[data-tip]");
+  if (!th) { tip.style.display = "none"; return; }
+  if (th.title) { th.dataset.tip = th.title; th.removeAttribute("title"); th.classList.add("tipped"); }
+  const r = th.getBoundingClientRect();
+  tip.textContent = th.dataset.tip; tip.style.display = "block";
+  tip.style.left = Math.max(8, Math.min(r.left, innerWidth - tip.offsetWidth - 8)) + "px";
+  tip.style.top = (r.bottom + 6) + "px";
+  clearTimeout(tip._t); tip._t = setTimeout(() => tip.style.display = "none", 4000);
+});
+document.addEventListener("scroll", () => { const t = document.getElementById("thTip"); if (t) t.style.display = "none"; }, true);
 
 /* ---------- брошура и тихи акции ---------- */
 let PM = { kind: "brochure", data: null, filter: "", sort: "rev" };
