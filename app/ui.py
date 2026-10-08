@@ -1278,7 +1278,7 @@ def ui_article_docs(store_id: int, day: str, code: int, db: Session = Depends(ge
         for h in hits[:10]:
             op = int(h["op"])
             cur.execute("""SELECT o.DOCUMENTNUM, o.DOCUMENTDATE, o.DOCUMENTSUM, o.DATESAVED, o.LASTEDITDATE, o.NOTE,
-                                  o.USERID, o.PARTNERNAMEID, o.EDITNUM
+                                  o.USERID, o.USERNAMEID, o.PARTNERNAMEID, o.EDITNUM
                            FROM OPERATIONS o WITH (NOLOCK) WHERE o.LOCATIONID = %s AND o.NUM = %s""", (loc, op))
             o = cur.fetchone() or {}
             cur.execute("SELECT TOP 1 DOCUMENTNUM, DOCSUM FROM OPERATIONDOCUMENT WITH (NOLOCK) WHERE LOCATIONID = %s AND NUM = %s",
@@ -1289,7 +1289,14 @@ def ui_article_docs(store_id: int, day: str, code: int, db: Session = Depends(ge
                 cur.execute("SELECT TOP 1 PARTNERNAME FROM PARTNERNAME WHERE ID = %s", (o["PARTNERNAMEID"],))
                 pn = (cur.fetchone() or {}).get("PARTNERNAME")
             u = {}
-            if o.get("USERID") is not None:
+            for uid in (o.get("USERNAMEID"), o.get("USERID")):   # името на потребителя е в USERNAME
+                if uid:
+                    cur.execute("SELECT TOP 1 NAME FROM USERNAME WHERE ID = %s", (uid,))
+                    nm_ = (cur.fetchone() or {}).get("NAME")
+                    if nm_:
+                        u = {"NAME": nm_}
+                        break
+            if not u and o.get("USERID") is not None:
                 cur.execute("SELECT TOP 1 NAME, FIRSTNAME, LASTNAME FROM USERS WHERE ID = %s "
                             "ORDER BY CASE WHEN LOCATIONID = %s THEN 0 ELSE 1 END", (o["USERID"], loc))
                 u = cur.fetchone() or {}
@@ -1307,7 +1314,7 @@ def ui_article_docs(store_id: int, day: str, code: int, db: Session = Depends(ge
                         "sum": float(od.get("DOCSUM") or o.get("DOCUMENTSUM") or 0),
                         "saved": fmt(o.get("DATESAVED")), "edited": fmt(o.get("LASTEDITDATE")),
                         "edits": o.get("EDITNUM"), "note": o.get("NOTE"), "partner": pn,
-                        "user": " ".join(x for x in [u.get("FIRSTNAME"), u.get("LASTNAME")] if x) or u.get("NAME") or o.get("USERID"),
+                        "user": u.get("NAME") or " ".join(x for x in [u.get("FIRSTNAME"), u.get("LASTNAME")] if x) or o.get("USERID"),
                         "qty_this": float(h["q"] or 0), "lines": lines})
     return {"store_id": store_id, "day": d.strftime("%d.%m.%Y"), "code": code,
             "name": names.get(code, str(code)), "documents": out}
