@@ -131,6 +131,21 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
     p = {"d": since, "sid": store_id}
     out = []
 
+    # корекции надолу след даден ден (ревизия или ръчна корекция) - за „поправено с ревизия/корекция"
+    _down: dict = {}
+
+    def down_after(sid, aid, d) -> float:
+        if not _down:
+            _down["_"] = True
+            since_ = datetime.now(SOFIA).date() - timedelta(days=max(days, 14) + 2)
+            for s_, a_, d_, q_ in db.execute(text("""SELECT store_id, article_id, day, qty_out FROM stock_movements
+                                                     WHERE optype = 37 AND qty_out > 0 AND day >= :d"""), {"d": since_}).all():
+                _down.setdefault((s_, a_), []).append((d_, float(q_)))
+            for s_, a_, at_, q_ in db.execute(text("""SELECT store_id, article_id, inv_at, diff_qty FROM inventory_results
+                                                      WHERE diff_qty < 0 AND inv_at >= :d"""), {"d": since_}).all():
+                _down.setdefault((s_, a_), []).append((at_.astimezone(SOFIA).date() if at_ else since_, -float(q_)))
+        return sum(q_ for d_, q_ in _down.get((sid, aid), []) if d_ >= d)
+
     # 1) ревизии
     inv_days = set()
     for sid, aid, num, at, b, f, q, mny in db.execute(text(f"""
@@ -230,12 +245,18 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
                 why = f"заведено {qin:g} бр. при макс {m_:g} в магазина ({qin / m_:.0f}×)"
             elif m_ == 0 and qin >= 100:
                 why = f"заведено {qin:g} бр., а артикулът няма мин/макс в магазина"
+            if why and not fixed_:
+                exc = qin - max(m_, float(ordered or 0), 1)
+                dn = down_after(sid, aid, d)
+                if exc > 0 and dn >= 0.5 * exc:
+                    fixed_, net = True, qin - dn
+                    why += f" · коригирано с ревизия/корекция −{dn:g} бр."
             if why:
                 out.append({"kind": "suspicious_delivery", "store_id": sid, "store": stores[sid], "sku": sku(aid),
                             "name": name(aid), "qty": qin, "eur": 0.0 if fixed_ else round(qin * price(aid), 2),
                             "day": d.strftime("%d.%m"), "fixed": fixed_,
                             "info": ("доставка: " if op == 2 else "корекция нагоре: ") + why
-                                    + (f" · поправено на {net:g} бр." if fixed_ else "")})
+                                    + (f" · поправено, остават {net:g} бр." if fixed_ else "")})
     except Exception:
         db.rollback()
 
@@ -293,11 +314,18 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
                     continue
                 excess = qin - (m_ or 0)
                 fx = fixed_map.get((sid, aid, d))
+                how = "поправено на"
+                if fx is None:
+                    pk_ = int(getattr(arts[aid], "pack_size", 1) or 1)
+                    exc = qin - max(m_, pk_, 1)
+                    dn = down_after(sid, aid, d)
+                    if exc > 0 and dn >= 0.5 * exc:
+                        fx, how = qin - dn, f"коригирано с ревизия/корекция −{dn:g} бр., остават"
                 out.append({"kind": "ocr_repeat", "store_id": sid, "store": stores[sid], "sku": sku(aid), "name": name(aid),
                             "qty": qin, "eur": 0.0 if fx is not None else round(excess * price(aid), 2),
                             "day": d.strftime("%d.%m"), "fixed": fx is not None,
                             "info": f"заведено {qin:g} бр. в {len({s_ for s_, _, _ in occ})} магазина (при макс {m_:g}) — "
-                                    f"едно и също количество навсякъде" + (f" · поправено на {fx:g} бр." if fx is not None else "")})
+                                    f"едно и също количество навсякъде" + (f" · {how} {fx:g} бр." if fx is not None else "")})
     except Exception:
         db.rollback()
 
