@@ -249,14 +249,14 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
                 exc = qin - max(m_, float(ordered or 0), 1)
                 dn = down_after(sid, aid, d)
                 if exc > 0 and dn >= 0.5 * exc:
-                    fixed_, net = True, qin - dn
-                    why += f" · коригирано с ревизия/корекция −{dn:g} бр."
+                    fixed_, net = True, None
+                    why += f" · след това коригирано с ревизия/корекция надолу −{dn:g} бр."
             if why:
                 out.append({"kind": "suspicious_delivery", "store_id": sid, "store": stores[sid], "sku": sku(aid),
                             "name": name(aid), "qty": qin, "eur": 0.0 if fixed_ else round(qin * price(aid), 2),
                             "day": d.strftime("%d.%m"), "fixed": fixed_,
                             "info": ("доставка: " if op == 2 else "корекция нагоре: ") + why
-                                    + (f" · поправено, остават {net:g} бр." if fixed_ else "")})
+                                    + (f" · поправено на {net:g} бр." if fixed_ and net is not None else "")})
     except Exception:
         db.rollback()
 
@@ -320,12 +320,12 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
                     exc = qin - max(m_, pk_, 1)
                     dn = down_after(sid, aid, d)
                     if exc > 0 and dn >= 0.5 * exc:
-                        fx, how = qin - dn, f"коригирано с ревизия/корекция −{dn:g} бр., остават"
+                        fx, how = dn, "след това коригирано с ревизия/корекция надолу −"
                 out.append({"kind": "ocr_repeat", "store_id": sid, "store": stores[sid], "sku": sku(aid), "name": name(aid),
                             "qty": qin, "eur": 0.0 if fx is not None else round(excess * price(aid), 2),
                             "day": d.strftime("%d.%m"), "fixed": fx is not None,
                             "info": f"заведено {qin:g} бр. в {len({s_ for s_, _, _ in occ})} магазина (при макс {m_:g}) — "
-                                    f"едно и също количество навсякъде" + (f" · {how} {fx:g} бр." if fx is not None else "")})
+                                    f"едно и също количество навсякъде" + ((f" · {how}{fx:g} бр." if how.endswith("−") else f" · {how} {fx:g} бр.") if fx is not None else "")})
     except Exception:
         db.rollback()
 
