@@ -888,6 +888,17 @@ def ui_anomalies(days: int = Query(7, ge=1, le=60), db: Session = Depends(get_db
     return anomalies.summary(db, days)
 
 
+@router.get("/ui/anomalies/debug-neg")
+def ui_anom_debug_neg(days: int = 14, db: Session = Depends(get_db)):
+    from sqlalchemy import text as _t
+    since = datetime.now(_SOFIA).date() - timedelta(days=days)
+    r1 = db.execute(_t("""SELECT COUNT(DISTINCT (captured_at AT TIME ZONE 'Europe/Sofia')::date), MIN(captured_at), COUNT(*)
+                          FROM stock_snapshots WHERE captured_at >= :d"""), {"d": since}).one()
+    r2 = db.execute(_t("""SELECT COUNT(*) FROM (SELECT store_id, article_id FROM stock_snapshots
+                          WHERE quantity < 0 AND captured_at >= :d GROUP BY store_id, article_id) x"""), {"d": since}).scalar()
+    return {"days_with_snapshots": r1[0], "first": str(r1[1]), "rows": r1[2], "pairs_ever_negative": r2}
+
+
 @router.get("/ui/anomalies/list")
 def ui_anomalies_list(kind: str | None = None, store_id: int | None = None,
                       days: int = Query(7, ge=1, le=60), db: Session = Depends(get_db)):
