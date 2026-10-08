@@ -901,7 +901,10 @@ def ui_anom_debug_neg(days: int = 14, db: Session = Depends(get_db)):
                                   ORDER BY store_id, article_id, captured_at DESC)
                           SELECT COUNT(*) FILTER (WHERE c.quantity >= 0), COUNT(*) FILTER (WHERE c.quantity < 0)
                           FROM neg n JOIN cur c USING (store_id, article_id)"""), {"d": since}).one()
-    return {"days_with_snapshots": r1[0], "first": str(r1[1]), "rows": r1[2], "pairs_ever_negative": r2,
+    from . import anomalies as _an
+    its = _an.items(db, days)
+    negf = [r for r in its if r["kind"] == "negative" and r.get("fixed")]
+    return {"items_neg_fixed": len(negf), "sample": negf[:2], "days_with_snapshots": r1[0], "first": str(r1[1]), "rows": r1[2], "pairs_ever_negative": r2,
             "now_ok": r3[0], "still_neg": r3[1]}
 
 
