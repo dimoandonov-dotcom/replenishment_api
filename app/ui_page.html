@@ -100,6 +100,7 @@ td input.changed { border-color:var(--amber); background:var(--amber-soft); }
 th[title], th.tipped { cursor:help; } th[title]::after, th.tipped::after { content:" ⓘ"; font-size:10px; opacity:.55; }
 #thTip { position:fixed; z-index:9999; max-width:260px; background:#1f1a14; color:#fff; font-size:13px; line-height:1.4;
   padding:8px 11px; border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,.25); display:none; }
+tr.anrow.fixed > td { background:#DCFCE7 !important; } tr.anrow.fixed > td:first-child { box-shadow: inset 4px 0 0 #16A34A; }
 tr.bro > td { background:#FDECEC; } tr.bro > td:first-child { box-shadow: inset 4px 0 0 #DC2626; }
 .empty { padding:34px 12px; text-align:center; color:var(--slate); font-family:var(--mono); font-size:13px; }
 
@@ -1350,7 +1351,7 @@ function renderAnom() {
   ${help ? `<div class="card" style="padding:12px 16px;margin-bottom:12px;font-size:14px;line-height:1.55">${help}</div>` : ""}
   <div class="bar"><input type="search" id="alSearch" placeholder="Търси магазин, код или артикул" value="${esc(f)}" style="flex:1;min-width:200px"><button id="alClose">Затвори</button></div>
   <div class="scroll"><table><thead><tr><th>Дата</th><th>Магазин</th><th>Код</th><th>Артикул</th><th>Вид</th><th class="num">Бройки</th><th class="num">€</th><th>Какво е</th><th>Какво да се направи</th></tr></thead><tbody>
-  ${shown.map(r => `<tr class="anrow" data-ad="${r.store_id}|${esc(r.day || "")}|${esc(r.sku)}" style="cursor:pointer${r.fixed ? ";opacity:.6" : ""}" title="Цъкни за документите"><td>${r.fixed ? `<span style="color:#16A34A" title="Поправено">●</span> ` : ""}${esc(r.day || "")}</td><td>${esc(r.store)}</td><td>${esc(r.sku)}</td><td class="name">▸ ${esc(r.name)}</td>
+  ${shown.map(r => `<tr class="anrow${r.fixed ? " fixed" : ""}" data-ad="${r.store_id}|${esc(r.day || "")}|${esc(r.sku)}" style="cursor:pointer" title="Цъкни за документите"><td>${r.fixed ? `<span style="color:#16A34A">●</span> ` : ""}${esc(r.day || "")}</td><td>${esc(r.store)}</td><td>${esc(r.sku)}</td><td class="name">▸ ${esc(r.name)}${r.fixed ? `<br><span class="tag" style="background:#16A34A;color:#fff;margin-top:4px">✅ ПОПРАВЕНО</span>` : ""}</td>
     <td>${r.fixed ? `<span class="tag" style="background:#DCFCE7;color:#166534">✅ поправено</span>` : `<span class="tag ${ANK[r.kind] || "off"}">${esc(AL.kinds[r.kind] || r.kind)}</span>`}</td>
     <td class="num ${r.qty < 0 ? "low" : ""}">${fmtN(r.qty)}</td><td class="num ${r.eur < 0 ? "low" : ""}">${fmtE(r.eur)}</td>
     <td style="font-size:12.5px;min-width:220px">${esc(r.info || (ANH[r.kind] || [""])[0])}</td>
