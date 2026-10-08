@@ -1241,7 +1241,7 @@ def ui_mistral_operation(store_id: int, nums: str, db: Session = Depends(get_db)
     return {"location_id": loc, "operations": out}
 
 
-_OPTYPE = {2: "Доставка", 4: "Брак", 37: "Корекция (ревизия)", 38: "Корекция (ревизия)", 3: "Връщане към доставчик",
+_OPTYPE = {2: "Доставка", 24: "Сторно (корекция на документа)", 4: "Брак", 37: "Корекция (ревизия)", 38: "Корекция (ревизия)", 3: "Връщане към доставчик",
            5: "Трансфер", 6: "Трансфер"}
 
 
@@ -1273,7 +1273,20 @@ def ui_article_docs(store_id: int, day: str, code: int, db: Session = Depends(ge
                          AND OPERATIONDATE >= DATEADD(day, -1, CAST(%s AS date)) AND OPERATIONDATE < DATEADD(day, 2, CAST(%s AS date))
                        GROUP BY OPERAIONNUM, OPERATIONTYPE ORDER BY MIN(OPERATIONDATE)""",
                     (loc, code, d.isoformat(), d.isoformat()))
-        hits = cur.fetchall()
+        raw = cur.fetchall()
+        # един документ може да има няколко записа: заведено -> сторно (24) -> поправено
+        byop = {}
+        for h in raw:
+            byop.setdefault(int(h["op"]), []).append(h)
+        cur.execute("""SELECT OPERAIONNUM AS op, OPERATIONTYPE AS tp, QTY AS q FROM MATERIALQTYLOG WITH (NOLOCK)
+                       WHERE LOCATIONID = %s AND MATERIALCODE = %s AND OPERAIONNUM IN (%s) ORDER BY ID""" %
+                    ("%s", "%s", ",".join(str(x) for x in byop) or "0"), (loc, code))
+        steps = {}
+        for r in cur.fetchall():
+            steps.setdefault(int(r["op"]), []).append({"type": _OPTYPE.get(int(r["tp"]), f"операция {r['tp']}"),
+                                                       "qty": float(r["q"] or 0)})
+        hits = [{"op": op, "tp": next((int(x["tp"]) for x in hs if int(x["tp"]) != 24), int(hs[0]["tp"])),
+                 "q": sum(float(x["q"] or 0) for x in hs)} for op, hs in byop.items()]
         out = []
         for h in hits[:10]:
             op = int(h["op"])
@@ -1301,7 +1314,7 @@ def ui_article_docs(store_id: int, day: str, code: int, db: Session = Depends(ge
                             "ORDER BY CASE WHEN LOCATIONID = %s THEN 0 ELSE 1 END", (o["USERID"], loc))
                 u = cur.fetchone() or {}
             cur.execute("""SELECT MATERIALCODE AS c, SUM(QTY) AS q, MAX(PRICE) AS p FROM MATERIALQTYLOG WITH (NOLOCK)
-                           WHERE LOCATIONID = %s AND OPERAIONNUM = %s AND OPERATIONTYPE = %s GROUP BY MATERIALCODE""",
+                           WHERE LOCATIONID = %s AND OPERAIONNUM = %s AND OPERATIONTYPE IN (%s, 24) GROUP BY MATERIALCODE""",
                         (loc, op, h["tp"]))
             lines = [{"code": int(r["c"]), "name": names.get(int(r["c"]), str(r["c"])), "qty": float(r["q"] or 0),
                       "price": float(r["p"] or 0), "this": int(r["c"]) == code} for r in cur.fetchall()]
@@ -1315,7 +1328,8 @@ def ui_article_docs(store_id: int, day: str, code: int, db: Session = Depends(ge
                         "saved": fmt(o.get("DATESAVED")), "edited": fmt(o.get("LASTEDITDATE")),
                         "edits": o.get("EDITNUM"), "note": o.get("NOTE"), "partner": pn,
                         "user": u.get("NAME") or " ".join(x for x in [u.get("FIRSTNAME"), u.get("LASTNAME")] if x) or o.get("USERID"),
-                        "qty_this": float(h["q"] or 0), "lines": lines})
+                        "qty_this": float(h["q"] or 0), "steps": steps.get(op, []),
+                        "corrected": any(x["type"].startswith("Сторно") for x in steps.get(op, [])), "lines": lines})
     return {"store_id": store_id, "day": d.strftime("%d.%m.%Y"), "code": code,
             "name": names.get(code, str(code)), "documents": out}
 

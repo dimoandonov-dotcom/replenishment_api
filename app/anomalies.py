@@ -205,8 +205,13 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
         ani_q = _dl._ani(db, dsince)
         mx = {(x.store_id, x.article_id): float(x.max_stock)
               for x in db.execute(select(m.StoreArticleSetting)).scalars().all()}
-        q = text("""SELECT store_id, article_id, day, optype, qty_in FROM stock_movements
-                    WHERE optype IN (2, 38) AND qty_in >= 50 AND day >= :d""")
+        q = text("""SELECT store_id, article_id, day, MIN(optype),
+                           SUM(CASE WHEN optype IN (2, 38) THEN qty_in ELSE 0 END)
+                           - SUM(CASE WHEN optype = 24 THEN qty_out - qty_in ELSE 0 END) AS net
+                    FROM stock_movements WHERE optype IN (2, 38, 24) AND day >= :d
+                    GROUP BY store_id, article_id, day
+                    HAVING SUM(CASE WHEN optype IN (2, 38) THEN qty_in ELSE 0 END)
+                           - SUM(CASE WHEN optype = 24 THEN qty_out - qty_in ELSE 0 END) >= 50""")
         for sid, aid, d, op, qin in db.execute(q, {"d": dsince}).all():
             if (store_id and sid != store_id) or sid not in stores or aid not in arts:
                 continue
@@ -249,8 +254,15 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
         mx3 = {(x.store_id, x.article_id): float(x.max_stock)
                for x in db.execute(select(m.StoreArticleSetting)).scalars().all()}
         groups = defaultdict(list)
-        for sid, aid, d, qin in db.execute(text("""SELECT store_id, article_id, day, qty_in FROM stock_movements
-                                                   WHERE optype = 2 AND qty_in >= 20 AND day >= :d"""), {"d": dsince3}).all():
+        # нетно доставено: доставка (2) минус сторно/корекция на документа (24) - поправените не са аномалия
+        for sid, aid, d, qin in db.execute(text("""SELECT store_id, article_id, day,
+                                                          SUM(CASE WHEN optype = 2 THEN qty_in - qty_out ELSE 0 END)
+                                                          - SUM(CASE WHEN optype = 24 THEN qty_out - qty_in ELSE 0 END)
+                                                   FROM stock_movements WHERE optype IN (2, 24) AND day >= :d
+                                                   GROUP BY store_id, article_id, day
+                                                   HAVING SUM(CASE WHEN optype = 2 THEN qty_in - qty_out ELSE 0 END)
+                                                          - SUM(CASE WHEN optype = 24 THEN qty_out - qty_in ELSE 0 END) >= 20"""),
+                                           {"d": dsince3}).all():
             if sid not in stores or aid not in arts or "АМБАЛАЖ" in name(aid).upper():
                 continue
             qin = float(qin); m_ = mx3.get((sid, aid), 0.0)
