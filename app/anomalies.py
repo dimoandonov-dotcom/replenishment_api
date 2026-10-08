@@ -118,9 +118,6 @@ def sync(db: Session, days: int = 14) -> dict:
     return {"movements": len(rows), "inventory_lines": len(irows), "stores": len(set(locs.values())), "since": since.isoformat()}
 
 
-_DBG: dict = {}
-
-
 def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]:
     """Всички аномалии (ред по ред) за последните `days` дни."""
     _ensure(db)
@@ -224,7 +221,6 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
             return "с доставка"
         return "наличността вече не е отрицателна"
 
-    _DBG.update(was_neg=len(was_neg), stores=len(stores), sample=list(was_neg.items())[:2])
     for sid in stores:
         if store_id and sid != store_id:
             continue

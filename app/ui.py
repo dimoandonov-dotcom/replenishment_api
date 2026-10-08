@@ -888,38 +888,6 @@ def ui_anomalies(days: int = Query(7, ge=1, le=60), db: Session = Depends(get_db
     return anomalies.summary(db, days)
 
 
-@router.get("/ui/anomalies/debug-neg")
-def ui_anom_debug_neg(days: int = 14, db: Session = Depends(get_db)):
-    from sqlalchemy import text as _t
-    since = datetime.now(_SOFIA).date() - timedelta(days=days)
-    r1 = db.execute(_t("""SELECT COUNT(DISTINCT (captured_at AT TIME ZONE 'Europe/Sofia')::date), MIN(captured_at), COUNT(*)
-                          FROM stock_snapshots WHERE captured_at >= :d"""), {"d": since}).one()
-    r2 = db.execute(_t("""SELECT COUNT(*) FROM (SELECT store_id, article_id FROM stock_snapshots
-                          WHERE quantity < 0 AND captured_at >= :d GROUP BY store_id, article_id) x"""), {"d": since}).scalar()
-    r3 = db.execute(_t("""WITH neg AS (SELECT DISTINCT store_id, article_id FROM stock_snapshots WHERE quantity < 0 AND captured_at >= :d),
-                          cur AS (SELECT DISTINCT ON (store_id, article_id) store_id, article_id, quantity FROM stock_snapshots
-                                  ORDER BY store_id, article_id, captured_at DESC)
-                          SELECT COUNT(*) FILTER (WHERE c.quantity >= 0), COUNT(*) FILTER (WHERE c.quantity < 0)
-                          FROM neg n JOIN cur c USING (store_id, article_id)"""), {"d": since}).one()
-    from . import anomalies as _an
-    its = _an.items(db, days)
-    negf = [r for r in its if r["kind"] == "negative" and r.get("fixed")]
-    from . import service as _sv
-    wn = db.execute(_t("""SELECT store_id, article_id, MIN((captured_at AT TIME ZONE 'Europe/Sofia')::date), MIN(quantity)
-            FROM stock_snapshots WHERE quantity < 0 AND captured_at >= :d GROUP BY store_id, article_id"""), {"d": since, "sid": None}).all()
-    ok = 0; samp = []
-    cache = {}
-    for s_, a_, d_, q_ in wn:
-        if s_ not in cache:
-            cache[s_] = _sv.latest_stock_map(db, s_)
-        v = cache[s_].get(a_)
-        if v is not None and v >= 0:
-            ok += 1
-            if len(samp) < 3: samp.append([s_, a_, str(d_), float(q_), v])
-    return {"dbg": {k: str(v) for k, v in _an._DBG.items()}, "wn": len(wn), "wn_ok": ok, "wn_samp": samp, "items_neg_fixed": len(negf), "sample": negf[:2], "days_with_snapshots": r1[0], "first": str(r1[1]), "rows": r1[2], "pairs_ever_negative": r2,
-            "now_ok": r3[0], "still_neg": r3[1]}
-
-
 @router.get("/ui/anomalies/list")
 def ui_anomalies_list(kind: str | None = None, store_id: int | None = None,
                       days: int = Query(7, ge=1, le=60), db: Session = Depends(get_db)):
