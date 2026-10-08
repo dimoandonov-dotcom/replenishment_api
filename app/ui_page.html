@@ -1320,7 +1320,7 @@ async function loadAnom() {
   const tiles = [["НЕТО ОТ РЕВИЗИИ", fmtE(net) + " €", net < 0 ? "a" : "t", "липси + излишъци от ревизиите<br><span style=\"opacity:.85\">Близо до 0 = объркани артикули; голям минус = реална загуба.</span>", ""],
     ...Object.entries(d.kinds).filter(([k]) => (t[k]?.n || 0) > 0 || ["shortage", "surplus", "negative", "phantom", "undelivered", "suspicious_delivery", "double_delivery", "ocr_repeat"].includes(k))
       .map(([k, l]) => [l.toUpperCase(), fmtN(t[k]?.n || 0), k === "shortage" || k === "negative" || k === "undelivered" ? "a" : "",
-        `${fmtN(t[k]?.qty || 0)} бр. · ${fmtE(t[k]?.eur || 0)} €<br><span style="opacity:.85">${(ANH[k] || [""])[0]}</span>`, k])];
+        `${fmtN(t[k]?.qty || 0)} бр. · ${fmtE(t[k]?.eur || 0)} €${t[k]?.fixed ? ` · <span style="color:#16A34A;font-weight:600">● ${fmtN(t[k].fixed)} поправени</span>` : ""}<br><span style="opacity:.85">${(ANH[k] || [""])[0]}</span>`, k])];
   $("anKpis").innerHTML = tiles.map(([l, v, c, sub, k]) => `<div class="tile" ${k ? `data-k="${k}" style="cursor:pointer"` : ""}><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${sub}${k ? " · <u>виж →</u>" : ""}</div></div>`).join("");
   document.querySelectorAll("#anKpis .tile[data-k]").forEach(el => el.onclick = () => showAnom({ kind: el.dataset.k, title: d.kinds[el.dataset.k] }));
   $("anBody").innerHTML = (d.stores || []).map(r => { const n = (r.shortage_eur || 0) + (r.surplus_eur || 0);
@@ -1336,7 +1336,7 @@ async function showAnom({ kind, store_id, title }) {
   $("anDetail").innerHTML = `<div class="empty loading">Зареждам…</div>`; $("anDetail").scrollIntoView({ behavior: "smooth" });
   const q = new URLSearchParams({ days: $("anDays").value }); if (kind) q.set("kind", kind); if (store_id) q.set("store_id", store_id);
   const d = await api(`/ui/anomalies/list?${q}`);
-  AL = { rows: d.rows.sort((a, b) => (a.eur || 0) - (b.eur || 0)), lim: 200, title, kinds: d.kinds };
+  AL = { rows: d.rows.sort((a, b) => (!!a.fixed - !!b.fixed) || (a.eur || 0) - (b.eur || 0)), lim: 200, title, kinds: d.kinds };
   renderAnom();
 }
 function renderAnom() {
@@ -1345,12 +1345,13 @@ function renderAnom() {
   const kinds = [...new Set(rows.map(r => r.kind))];
   const help = kinds.filter(k => ANH[k]).map(k => `<div style="margin:4px 0"><span class="tag ${ANK[k] || "off"}">${esc(AL.kinds[k] || k)}</span>
     ${esc(ANH[k][0])} <b>→ ${esc(ANH[k][1])}</b></div>`).join("");
-  $("anDetail").innerHTML = `<div class="head"><h2>${esc(AL.title)}</h2><span class="note">${fmtN(rows.length)} реда</span></div>
+  const nfx = rows.filter(r => r.fixed).length;
+  $("anDetail").innerHTML = `<div class="head"><h2>${esc(AL.title)}</h2><span class="note">${fmtN(rows.length - nfx)} за оправяне${nfx ? ` · <span style="color:#16A34A">● ${fmtN(nfx)} поправени</span>` : ""}</span></div>
   ${help ? `<div class="card" style="padding:12px 16px;margin-bottom:12px;font-size:14px;line-height:1.55">${help}</div>` : ""}
   <div class="bar"><input type="search" id="alSearch" placeholder="Търси магазин, код или артикул" value="${esc(f)}" style="flex:1;min-width:200px"><button id="alClose">Затвори</button></div>
   <div class="scroll"><table><thead><tr><th>Дата</th><th>Магазин</th><th>Код</th><th>Артикул</th><th>Вид</th><th class="num">Бройки</th><th class="num">€</th><th>Какво е</th><th>Какво да се направи</th></tr></thead><tbody>
-  ${shown.map(r => `<tr class="anrow" data-ad="${r.store_id}|${esc(r.day || "")}|${esc(r.sku)}" style="cursor:pointer" title="Цъкни за документите"><td>${esc(r.day || "")}</td><td>${esc(r.store)}</td><td>${esc(r.sku)}</td><td class="name">▸ ${esc(r.name)}</td>
-    <td><span class="tag ${ANK[r.kind] || "off"}">${esc(AL.kinds[r.kind] || r.kind)}</span></td>
+  ${shown.map(r => `<tr class="anrow" data-ad="${r.store_id}|${esc(r.day || "")}|${esc(r.sku)}" style="cursor:pointer${r.fixed ? ";opacity:.6" : ""}" title="Цъкни за документите"><td>${r.fixed ? `<span style="color:#16A34A" title="Поправено">●</span> ` : ""}${esc(r.day || "")}</td><td>${esc(r.store)}</td><td>${esc(r.sku)}</td><td class="name">▸ ${esc(r.name)}</td>
+    <td>${r.fixed ? `<span class="tag" style="background:#DCFCE7;color:#166534">✅ поправено</span>` : `<span class="tag ${ANK[r.kind] || "off"}">${esc(AL.kinds[r.kind] || r.kind)}</span>`}</td>
     <td class="num ${r.qty < 0 ? "low" : ""}">${fmtN(r.qty)}</td><td class="num ${r.eur < 0 ? "low" : ""}">${fmtE(r.eur)}</td>
     <td style="font-size:12.5px;min-width:220px">${esc(r.info || (ANH[r.kind] || [""])[0])}</td>
     <td style="font-size:12.5px;min-width:220px"><b>${esc((ANH[r.kind] || ["", ""])[1])}</b>

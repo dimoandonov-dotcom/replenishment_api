@@ -205,19 +205,22 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
         ani_q = _dl._ani(db, dsince)
         mx = {(x.store_id, x.article_id): float(x.max_stock)
               for x in db.execute(select(m.StoreArticleSetting)).scalars().all()}
+        # заведеното (без сторното) и нетното след поправка; поправените остават със зелен знак
         q = text("""SELECT store_id, article_id, day, MIN(optype),
+                           MAX(CASE WHEN optype IN (2, 38) THEN qty_in ELSE 0 END) AS gross,
                            SUM(CASE WHEN optype IN (2, 38) THEN qty_in ELSE 0 END)
                            - SUM(CASE WHEN optype = 24 THEN qty_out - qty_in ELSE 0 END) AS net
                     FROM stock_movements WHERE optype IN (2, 38, 24) AND day >= :d
                     GROUP BY store_id, article_id, day
-                    HAVING SUM(CASE WHEN optype IN (2, 38) THEN qty_in ELSE 0 END)
-                           - SUM(CASE WHEN optype = 24 THEN qty_out - qty_in ELSE 0 END) >= 50""")
-        for sid, aid, d, op, qin in db.execute(q, {"d": dsince}).all():
+                    HAVING SUM(CASE WHEN optype IN (2, 38) THEN qty_in ELSE 0 END) >= 50""")
+        for sid, aid, d, op, gross, net in db.execute(q, {"d": dsince}).all():
+            gross, net = float(gross or 0), float(net or 0)
+            fixed_ = net < gross - 0.01
+            qin = (gross - net) if fixed_ else net     # поправено: показваме грешно заведеното (сторнираното)
             if (store_id and sid != store_id) or sid not in stores or aid not in arts:
                 continue
             if "АМБАЛАЖ" in name(aid).upper():
                 continue   # бутилки/каси - винаги големи бройки, не са стока
-            qin = float(qin)
             ordered = ani_q.get((sid, d), {}).get(aid)
             m_ = mx.get((sid, aid), 0.0)
             why = None
@@ -229,20 +232,24 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
                 why = f"заведено {qin:g} бр., а артикулът няма мин/макс в магазина"
             if why:
                 out.append({"kind": "suspicious_delivery", "store_id": sid, "store": stores[sid], "sku": sku(aid),
-                            "name": name(aid), "qty": qin, "eur": round(qin * price(aid), 2), "day": d.strftime("%d.%m"),
-                            "info": ("доставка: " if op == 2 else "корекция нагоре: ") + why})
+                            "name": name(aid), "qty": qin, "eur": 0.0 if fixed_ else round(qin * price(aid), 2),
+                            "day": d.strftime("%d.%m"), "fixed": fixed_,
+                            "info": ("доставка: " if op == 2 else "корекция нагоре: ") + why
+                                    + (f" · поправено на {net:g} бр." if fixed_ else "")})
     except Exception:
         db.rollback()
 
     # двойно заведена доставка: два документа от един доставчик в един ден, еднакви в 80%+ от редовете
     try:
         dsince2 = today - timedelta(days=days)
-        for sid, d, da, dbb, p, n, la, lb, sa, sb, ta, tb, ua, ub, e, x in db.execute(text(
-                "SELECT * FROM dup_docs WHERE day >= :d"), {"d": dsince2}).all():
+        for sid, d, da, dbb, p, n, la, lb, sa, sb, ta, tb, ua, ub, e, x, fx in db.execute(text(
+                "SELECT store_id, day, doc_a, doc_b, partner, same_lines, lines_a, lines_b, sum_a, sum_b, saved_a, saved_b, "
+                "user_a, user_b, excess_eur, examples, COALESCE(fixed, FALSE) FROM dup_docs WHERE day >= :d"), {"d": dsince2}).all():
             if (store_id and sid != store_id) or sid not in stores:
                 continue
             out.append({"kind": "double_delivery", "store_id": sid, "store": stores[sid], "sku": "",
-                        "name": f"{p}: № {da} и № {dbb}", "qty": n, "eur": float(e or 0), "day": d.strftime("%d.%m"),
+                        "name": f"{p}: № {da} и № {dbb}", "qty": n, "eur": 0.0 if fx else float(e or 0),
+                        "day": d.strftime("%d.%m"), "fixed": bool(fx),
                         "info": (f"№ {da} ({ta} ч., {float(sa or 0):.2f} €, {la} реда) и № {dbb} ({tb} ч., {float(sb or 0):.2f} €, "
                                  f"{lb} реда) — {n} еднакви реда. Напр.: {x}")})
     except Exception:
@@ -255,14 +262,21 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
                for x in db.execute(select(m.StoreArticleSetting)).scalars().all()}
         groups = defaultdict(list)
         # нетно доставено: доставка (2) минус сторно/корекция на документа (24) - поправените не са аномалия
-        for sid, aid, d, qin in db.execute(text("""SELECT store_id, article_id, day,
+        fixed_map = {}
+        for sid, aid, d, qin, net in db.execute(text("""SELECT store_id, article_id, day,
+                                                          MAX(CASE WHEN optype = 2 THEN qty_in ELSE 0 END),
                                                           SUM(CASE WHEN optype = 2 THEN qty_in - qty_out ELSE 0 END)
                                                           - SUM(CASE WHEN optype = 24 THEN qty_out - qty_in ELSE 0 END)
                                                    FROM stock_movements WHERE optype IN (2, 24) AND day >= :d
                                                    GROUP BY store_id, article_id, day
-                                                   HAVING SUM(CASE WHEN optype = 2 THEN qty_in - qty_out ELSE 0 END)
-                                                          - SUM(CASE WHEN optype = 24 THEN qty_out - qty_in ELSE 0 END) >= 20"""),
+                                                   HAVING MAX(CASE WHEN optype = 2 THEN qty_in ELSE 0 END) >= 20"""),
                                            {"d": dsince3}).all():
+            # qty_in на деня е сбор (66 + поправените 6 = 72) - първоначалното е нетното + сторното
+            net = float(net or 0)
+            storno = float(qin or 0) - net
+            if storno > 0.01:
+                qin = storno            # грешно заведеното количество (сторнираното)
+                fixed_map[(sid, aid, d)] = net
             if sid not in stores or aid not in arts or "АМБАЛАЖ" in name(aid).upper():
                 continue
             qin = float(qin); m_ = mx3.get((sid, aid), 0.0)
@@ -278,10 +292,12 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
                 if store_id and sid != store_id:
                     continue
                 excess = qin - (m_ or 0)
+                fx = fixed_map.get((sid, aid, d))
                 out.append({"kind": "ocr_repeat", "store_id": sid, "store": stores[sid], "sku": sku(aid), "name": name(aid),
-                            "qty": qin, "eur": round(excess * price(aid), 2), "day": d.strftime("%d.%m"),
+                            "qty": qin, "eur": 0.0 if fx is not None else round(excess * price(aid), 2),
+                            "day": d.strftime("%d.%m"), "fixed": fx is not None,
                             "info": f"заведено {qin:g} бр. в {len({s_ for s_, _, _ in occ})} магазина (при макс {m_:g}) — "
-                                    f"едно и също количество навсякъде"})
+                                    f"едно и също количество навсякъде" + (f" · поправено на {fx:g} бр." if fx is not None else "")})
     except Exception:
         db.rollback()
 
@@ -317,10 +333,13 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
 
 def summary(db: Session, days: int = 7) -> dict:
     rows = items(db, days)
-    tot = {k: {"n": 0, "qty": 0.0, "eur": 0.0} for k in KIND}
+    tot = {k: {"n": 0, "qty": 0.0, "eur": 0.0, "fixed": 0} for k in KIND}
     by = defaultdict(lambda: {k: {"n": 0, "qty": 0.0, "eur": 0.0} for k in KIND})
     names = {}
     for r in rows:
+        if r.get("fixed"):            # поправените не се броят - само новите грешки
+            tot[r["kind"]]["fixed"] += 1
+            continue
         for t in (tot[r["kind"]], by[r["store_id"]][r["kind"]]):
             t["n"] += 1
             t["qty"] += r["qty"]
@@ -355,6 +374,7 @@ def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
         same_lines INT, lines_a INT, lines_b INT, sum_a NUMERIC(14,2), sum_b NUMERIC(14,2),
         saved_a TEXT, saved_b TEXT, user_a TEXT, user_b TEXT, excess_eur NUMERIC(14,2),
         examples TEXT, PRIMARY KEY (store_id, day, doc_a, doc_b))"""))
+    db.execute(text("ALTER TABLE dup_docs ADD COLUMN IF NOT EXISTS fixed BOOLEAN DEFAULT FALSE"))
     db.commit()
     since = datetime.now(SOFIA).date() - timedelta(days=days)
     found = 0
@@ -362,16 +382,19 @@ def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
         cur = conn.cursor()
         locs = _loc_map(db, cur)
         L = ",".join(map(str, locs))
-        cur.execute(f"""SELECT LOCATIONID AS loc, OPERAIONNUM AS op, MATERIALCODE AS code, SUM(QTY) AS q,
-                               CAST(MIN(OPERATIONDATE) AS date) AS d
+        # първоначално заведеното (2, само плюс) и нетното след сторно (24) - за да се види поправеното
+        cur.execute(f"""SELECT LOCATIONID AS loc, OPERAIONNUM AS op, MATERIALCODE AS code,
+                               SUM(CASE WHEN OPERATIONTYPE = 2 AND QTY > 0 THEN QTY ELSE 0 END) AS q,
+                               SUM(QTY) AS net, CAST(MIN(OPERATIONDATE) AS date) AS d
                         FROM MATERIALQTYLOG WITH (NOLOCK)
-                        WHERE OPERATIONTYPE = 2 AND OPERATIONDATE >= %s AND LOCATIONID IN ({L})
+                        WHERE OPERATIONTYPE IN (2, 24) AND OPERATIONDATE >= %s AND LOCATIONID IN ({L})
                         GROUP BY LOCATIONID, OPERAIONNUM, MATERIALCODE""", (since.isoformat(),))
-        ops = defaultdict(dict); opday = {}
+        ops = defaultdict(dict); opday = {}; opnet = defaultdict(float)
         for r in cur.fetchall():
+            k = (int(r["loc"]), int(r["op"]))
+            opnet[k] += float(r["net"] or 0)
             if float(r["q"] or 0) <= 0:
                 continue
-            k = (int(r["loc"]), int(r["op"]))
             ops[k][int(r["code"])] = float(r["q"]); opday[k] = r["d"]
         # заглавията на документите
         meta = {}
@@ -432,13 +455,16 @@ def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
                 if True:
                     excess = min(abs(float(ma["DOCSUM"] or 0)), abs(float(mb["DOCSUM"] or 0))) * (len(same) / max(len(a), len(b)))
                     ex = [conf] + [f"{(arts[c].supplier_name or arts[c].name) if c in arts else c}: {a[c]:g}" for c in same[:4]]
-                    db.execute(text("""INSERT INTO dup_docs VALUES (:s,:d,:da,:dbb,:p,:n,:la,:lb,:sa,:sb,:ta,:tb,:ua,:ub,:e,:x)
+                    ga, gb = sum(a.values()), sum(b.values())
+                    fixed = (ga > 0 and opnet[ks[i]] <= 0.1 * ga) or (gb > 0 and opnet[ks[j]] <= 0.1 * gb)
+                    db.execute(text("""INSERT INTO dup_docs VALUES (:s,:d,:da,:dbb,:p,:n,:la,:lb,:sa,:sb,:ta,:tb,:ua,:ub,:e,:x,:fx)
                                        ON CONFLICT DO NOTHING"""),
                                {"s": locs[loc], "d": d, "da": str(ma["DOCUMENTNUM"] or "").split(".")[0],
                                 "dbb": str(mb["DOCUMENTNUM"] or "").split(".")[0], "p": pn.get(int(pid or 0), "?"),
                                 "n": len(same), "la": len(a), "lb": len(b), "sa": float(ma["DOCSUM"] or 0),
                                 "sb": float(mb["DOCSUM"] or 0), "ta": str(ma["DATESAVED"])[11:16], "tb": str(mb["DATESAVED"])[11:16],
-                                "ua": str(ma["USERID"]), "ub": str(mb["USERID"]), "e": round(excess, 2), "x": " · ".join(ex)})
+                                "ua": str(ma["USERID"]), "ub": str(mb["USERID"]), "e": round(excess, 2), "x": " · ".join(ex),
+                                "fx": bool(fixed)})
                     found += 1
     db.commit()
     return {"days": days, "duplicates": found}
