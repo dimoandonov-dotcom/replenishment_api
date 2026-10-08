@@ -289,10 +289,39 @@ def calculate_for_store(
 
     if combined is None:
         combined = generate_order_lines([], stock, order_date)
+    # последен ден на брошурата: зареждане за STOCKUP_DAYS дни по продажбите в брошурата (докато е отстъпката)
+    try:
+        su = _promo.stockup_targets(db, store_id, order_date)
+        if su:
+            from .engine import OrderLine, round_up_to_pack
+            by_aid = {ln.article_id: ln for ln in combined.lines}
+            for s_ in settings:
+                t = su.get(s_.article_id)
+                if t is None or s_.max_stock <= 0:   # спрян 0-0 не се зарежда
+                    continue
+                target, sdp, label = t
+                cur = float(stock.get(s_.article_id, 0.0) or 0.0)
+                need = max(target - max(cur, 0.0), 0.0)
+                q = round_up_to_pack(need, s_.pack_size, force_min_pack=need > 0)
+                ln = by_aid.get(s_.article_id)
+                if q <= 0:
+                    if ln is not None:
+                        combined.lines.remove(ln)
+                    continue
+                if ln is None:
+                    ln = OrderLine(store_id=store_id, article_id=s_.article_id, sku=s_.sku, name=s_.name,
+                                   supplier_id=s_.supplier_id, current_stock=cur, min_stock=s_.min_stock,
+                                   max_stock=s_.max_stock, effective_max=float(target), suggested_quantity=need,
+                                   ordered_quantity=q, pack_size=s_.pack_size)
+                    combined.lines.append(ln)
+                ln.ordered_quantity, ln.suggested_quantity, ln.effective_max = q, need, float(target)
+                ln.notes = label
+    except Exception:
+        db.rollback()
     try:   # брошура: защо се вдига количеството
         lab = _promo.labels(db, order_date)
         for ln in combined.lines:
-            if ln.article_id in lab:
+            if ln.article_id in lab and "брошура" not in (ln.notes or ""):
                 ln.notes = (lab[ln.article_id] + (" · " + ln.notes if ln.notes else ""))
     except Exception:
         db.rollback()

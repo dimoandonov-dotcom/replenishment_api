@@ -245,3 +245,37 @@ def sync_from_mistral(db: Session) -> dict:
             r = create(db, f"Брошура {s.strftime('%d.%m')}–{e.strftime('%d.%m')} (Мистрал)", s, e, mine)
             out.append({"start": str(s), "end": str(e), "items": r["items"]})
     return {"brochures": out}
+
+
+STOCKUP_DAYS = 30   # последен ден на брошурата: запас за толкова дни напред (докато е отстъпката)
+
+
+def stockup_targets(db: Session, store_id: int, day: date) -> dict[int, tuple[float, float, str]]:
+    """В последния ден на брошурата: article_id -> (цел бройки, продажби/ден в брошурата, етикет).
+    Целта = продажбите на ден в ТОЗИ магазин по време на брошурата × STOCKUP_DAYS."""
+    try:
+        _ensure(db)
+        rows = db.execute(text("""SELECT i.article_id, MIN(p.start_day), MAX(p.end_day) FROM promotion_items i
+                                  JOIN promotions p ON p.id = i.promo_id WHERE p.end_day = :d
+                                  GROUP BY i.article_id"""), {"d": day}).all()
+    except Exception:
+        db.rollback()
+        return {}
+    if not rows:
+        return {}
+    out = {}
+    for aid, s, e in rows:
+        until = day - timedelta(days=1)
+        n = (until - s).days + 1
+        if n <= 0:
+            continue
+        q = db.execute(select(func.coalesce(func.sum(m.SalesHistory.quantity_sold), 0)).where(
+            m.SalesHistory.store_id == store_id, m.SalesHistory.article_id == aid,
+            m.SalesHistory.sale_date >= s, m.SalesHistory.sale_date <= until)).scalar() or 0
+        sdp = max(float(q), 0.0) / n
+        if sdp <= 0:
+            continue
+        out[aid] = (math.ceil(sdp * STOCKUP_DAYS), round(sdp, 2),
+                    f"📰 последен ден на брошурата {s.strftime('%d.%m')}–{e.strftime('%d.%m')} — запас за {STOCKUP_DAYS} дни "
+                    f"({sdp:.1f} бр./ден)")
+    return out
