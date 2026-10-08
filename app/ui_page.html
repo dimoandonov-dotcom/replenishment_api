@@ -96,6 +96,8 @@ td input.changed { border-color:var(--amber); background:var(--amber-soft); }
 .tag.warn { background:var(--amber-soft); color:var(--amber); }
 .tag.bad { background:var(--danger-soft); color:var(--danger); }
 .tag.off { background:var(--line); color:var(--slate); }
+.tag.bro { background:#DC2626; color:#fff; }
+tr.bro > td { background:#FDECEC; } tr.bro > td:first-child { box-shadow: inset 4px 0 0 #DC2626; }
 .empty { padding:34px 12px; text-align:center; color:var(--slate); font-family:var(--mono); font-size:13px; }
 
 /* ---------- табло ---------- */
@@ -498,7 +500,10 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <select id="pmCamp"></select>
     <input id="pmQ" placeholder="търси артикул / доставчик" style="min-width:200px">
     <span class="note" id="pmInfo"></span>
+    <label class="warm" style="cursor:pointer;padding:8px 14px;border-radius:999px;background:#DB2777;color:#fff;font-weight:600">📤 Качи брошура (Excel или PDF)<input type="file" id="pmFile" accept=".xlsx,.pdf" style="display:none"></label>
   </div>
+  <div id="pmUp"></div>
+  <div id="pmList"></div>
   <p class="note" style="margin:0 0 14px;line-height:1.6">Акциите се четат от Мистрал (промо цените). <b>Брошура</b> — промоциите от брошурата; <b>тихи акции</b> — промо цени извън брошурата.
   Сравнява се средната продажба на ден <b>по време</b> на акцията с последните <b>14 дни преди</b> нея, за всички магазини и всички доставчици.</p>
   <div class="board" id="pmKpis"></div>
@@ -767,7 +772,8 @@ async function loadOrder() {
       const val = price != null ? price * l.ordered_quantity : null;
       if (val) value += val; units += l.ordered_quantity;
       const promo = art.promo_price != null ? `<span class="tag warn">промо до ${esc(art.promo_until)}</span>` : "";
-      return `<tr data-sku="${esc(l.sku)}">
+      const bro = (l.notes || "").includes("брошура") ? (l.notes.split(" · ")[0]) : "";
+      return `<tr data-sku="${esc(l.sku)}" class="${bro ? "bro" : ""}">
         <td>${esc(l.sku)}</td>
         <td class="name ox" style="cursor:pointer" title="Графика и обяснение">▸ ${esc(art.name || l.name)}</td>
         <td class="num ${l.current_stock < l.min_stock ? "low" : ""}">${fmtN(l.current_stock)}</td>
@@ -777,7 +783,7 @@ async function loadOrder() {
         <td class="num">${l.pack_size > 1 ? l.pack_size : "бр."}</td>
         <td class="num">${fmtE(price)}</td>
         <td class="num">${fmtE(val)}</td>
-        <td>${promo}${LOCK[l.sku] ? ' <span class="tag" title="Коригирано ръчно — ученето не го пипа">🔒</span>' : ''}</td></tr>
+        <td>${bro ? `<span class="tag bro">${esc(bro)}</span> ` : ""}${promo}${LOCK[l.sku] ? ' <span class="tag" title="Коригирано ръчно — ученето не го пипа">🔒</span>' : ''}</td></tr>
         <tr class="oxrow" data-for="${esc(l.sku)}" style="display:none"><td colspan="10" style="background:var(--paper)"></td></tr>`;
     });
     $("ordBody").innerHTML = rows.join("") || `<tr><td colspan="10" class="empty">В този магазин няма артикул под минимума.</td></tr>`;
@@ -1602,6 +1608,7 @@ async function showCmp(id) {
 /* ---------- брошура и тихи акции ---------- */
 let PM = { kind: "brochure", data: null, filter: "", sort: "rev" };
 function initPromo() {
+  $("pmFile").onchange = uploadBrochure; loadBroList();
   $("pmB").onclick = () => loadPromo("brochure"); $("pmS").onclick = () => loadPromo("silent");
   $("pmCamp").onchange = renderPromo; $("pmQ").oninput = renderPromo;
   loadPromo("brochure");
@@ -1618,6 +1625,53 @@ async function loadPromo(kind) {
   if (kind === "brochure") { const i = cs.findIndex(c => c.active); if (i >= 0) $("pmCamp").value = String(i); }
   $("pmInfo").textContent = PM.data.data_until ? `продажби до ${PM.data.data_until}` : "";
   renderPromo();
+}
+async function loadBroList() {
+  const ps = (await api("/ui/promos/list").catch(() => [])).filter(p => p.status !== "минала");
+  $("pmList").innerHTML = ps.length ? `<div class="head"><h2>📰 Брошури в заявките</h2><span class="note">3 дни преди старта зареждането се вдига постепенно</span></div>
+    <div class="scroll"><table><thead><tr><th>Брошура</th><th>Период</th><th>Статус</th><th class="num">Наши артикули</th><th></th></tr></thead><tbody>` +
+    ps.map(p => `<tr><td class="name">${esc(p.name)}</td><td>${p.start} – ${p.end}</td><td><span class="tag ${p.status === "активна" ? "bro" : "warn"}">${p.status}</span></td>
+      <td class="num">${p.items.length}</td><td class="num"><button data-pdel="${p.id}">Изтрий</button></td></tr>`).join("") + `</tbody></table></div>` : "";
+  document.querySelectorAll("[data-pdel]").forEach(b => b.onclick = async () => {
+    if (!confirm("Да изтрия ли брошурата? Заявките вече няма да вдигат тези артикули.")) return;
+    await api(`/promos/${b.dataset.pdel}`, { method: "DELETE" }); loadBroList(); });
+}
+let BRO = null;
+async function uploadBrochure() {
+  const f = $("pmFile").files[0]; if (!f) return;
+  $("pmUp").innerHTML = `<div class="note" style="margin:12px 0">Чета ${esc(f.name)}…</div>`;
+  const fd = new FormData(); fd.append("file", f);
+  try {
+    const r = await fetch("/promos/upload", { method: "POST", body: fd });
+    const d = await r.json(); if (!r.ok) throw new Error(d.detail || r.status);
+    BRO = d; renderBroUp(f.name);
+  } catch (e) { $("pmUp").innerHTML = `<div class="note" style="margin:12px 0;color:#DC2626">${esc(e.message)}</div>`; }
+  $("pmFile").value = "";
+}
+function renderBroUp(fname) {
+  const d = BRO, items = d.items || [];
+  const warn = d.source === "pdf" && !d.has_text ? `<p class="note" style="color:#DC2626">PDF-ът е само картинки — текстът не може да се прочете. Качете Excel или PDF с текст.</p>` : "";
+  $("pmUp").innerHTML = `<div class="tile" style="margin:12px 0;padding:16px">
+    <div class="l">КАЧЕНА БРОШУРА · ${esc(fname)}</div>
+    <div class="bar" style="margin-top:10px">от <input type="date" id="bS" value="${d.start || ""}"> до <input type="date" id="bE" value="${d.end || ""}">
+      <input id="bN" value="Брошура ${d.start ? d.start.slice(8, 10) + "." + d.start.slice(5, 7) : ""}${d.end ? "–" + d.end.slice(8, 10) + "." + d.end.slice(5, 7) : ""}" style="min-width:180px">
+      <button class="warm" id="bSave">Запиши в заявките</button><button id="bCancel">Откажи</button></div>
+    ${d.start ? "" : `<p class="note" style="color:#DC2626">Не открих датите в брошурата — въведете ги.</p>`}${warn}
+    <p class="note">Разпознати наши артикули: <b>${items.length}</b>${d.by_code ? " (по код)" : " — отметнатите са сигурни, провери останалите"}.</p>
+    <div class="scroll"><table><thead><tr><th></th><th>Код</th><th>Артикул</th><th>В брошурата</th><th class="num">Цена</th></tr></thead><tbody>
+    ${items.map((x, i) => `<tr><td><input type="checkbox" data-bi="${i}" ${x.sure ? "checked" : ""}></td><td>${esc(x.sku)}</td><td class="name">${esc(x.name)}</td>
+      <td class="muted" style="font-size:12px">${esc(x.found || "")}</td><td class="num">${fmtE(x.price)}</td></tr>`).join("") || `<tr><td colspan="5" class="empty">Не разпознах артикули.</td></tr>`}
+    </tbody></table></div></div>`;
+  $("bCancel").onclick = () => { $("pmUp").innerHTML = ""; BRO = null; };
+  $("bSave").onclick = async () => {
+    const skus = [...document.querySelectorAll("#pmUp [data-bi]:checked")].map(c => items[+c.dataset.bi].sku);
+    const start = $("bS").value, end = $("bE").value;
+    if (!start || !end) return alert("Въведете датите на брошурата.");
+    if (!skus.length) return alert("Няма отметнати артикули.");
+    await api("/promos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("bN").value || "Брошура", start, end, skus }) });
+    $("pmUp").innerHTML = `<div class="note" style="margin:12px 0">✅ Записано: ${skus.length} артикула. От 3 дни преди ${start.split("-").reverse().join(".")} заявките ще ги зареждат постепенно.</div>`;
+    loadBroList();
+  };
 }
 function pmRows() {
   const cs = (PM.data && PM.data.campaigns) || [], v = $("pmCamp").value;

@@ -944,6 +944,37 @@ def promos_create(payload: PromoIn, db: Session = Depends(get_db)):
     return promo.create(db, payload.name, payload.start, payload.end, payload.skus)
 
 
+@router.post("/promos/upload")
+async def promos_upload(request: Request, db: Session = Depends(get_db)):
+    """Качване на брошура (Excel/PDF) -> преглед: дати + разпознати артикули. Не записва."""
+    from . import brochure
+    form = await request.form()
+    f = form.get("file")
+    if f is None:
+        raise HTTPException(400, "Липсва файл")
+    data = await f.read()
+    if len(data) > 40 * 1024 * 1024:
+        raise HTTPException(400, "Файлът е над 40 MB")
+    try:
+        return brochure.parse(db, f.filename or "", data)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"Не мога да прочета файла: {type(e).__name__}")
+
+
+@router.get("/ui/promos/list")
+def ui_promos_list(db: Session = Depends(get_db)):
+    from . import promo
+    return promo.listing(db)
+
+
+@router.post("/promos/sync-mistral")
+def promos_sync_mistral(db: Session = Depends(get_db)):
+    from . import promo
+    return promo.sync_from_mistral(db)
+
+
 @router.get("/ui/promos")
 def ui_promos(db: Session = Depends(get_db)):
     from . import promo

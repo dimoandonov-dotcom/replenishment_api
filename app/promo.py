@@ -30,10 +30,17 @@ def _ensure(db: Session):
         PRIMARY KEY (promo_id, article_id))"""))
 
 
+RAMP_DAYS = 3   # толкова дни преди старта на брошурата зареждането се вдига постепенно
+
+
 def create(db: Session, name: str, start: date, end: date, skus: list[str]) -> dict:
+    """Нова промоция или добавяне към съществуваща със същите дати."""
     _ensure(db)
-    pid = db.execute(text("INSERT INTO promotions(name, start_day, end_day) VALUES (:n,:s,:e) RETURNING id"),
-                     {"n": name, "s": start, "e": end}).scalar()
+    pid = db.execute(text("""SELECT id FROM promotions WHERE start_day=:s AND ABS(end_day - CAST(:e AS date)) <= 1
+                             ORDER BY id LIMIT 1"""), {"s": start, "e": end}).scalar()
+    if pid is None:
+        pid = db.execute(text("INSERT INTO promotions(name, start_day, end_day) VALUES (:n,:s,:e) RETURNING id"),
+                         {"n": name, "s": start, "e": end}).scalar()
     ids = {a.sku: a.id for a in db.execute(select(m.Article)).scalars().all()}
     added, unknown = 0, []
     for s in skus:
@@ -80,15 +87,45 @@ def measure(db: Session, promo_id: int | None = None) -> list[dict]:
     return out
 
 
+def _factors(db: Session, day: date) -> tuple[dict[int, float], dict[int, float], dict[int, str]]:
+    """(започнали, предстоящи до RAMP_DAYS дни, етикети) - article_id -> коефициент за деня.
+    Преди старта коефициентът расте постепенно: 1/4, 2/4, 3/4 от вдигането, в деня на старта - цялото."""
+    _ensure(db)
+    run, ramp, label = {}, {}, {}
+    for a, u, s, e in db.execute(text("""SELECT i.article_id, i.uplift, p.start_day, p.end_day FROM promotion_items i
+                                         JOIN promotions p ON p.id = i.promo_id
+                                         WHERE p.end_day >= :d AND p.start_day <= :r"""),
+                                 {"d": day, "r": day + timedelta(days=RAMP_DAYS)}).all():
+        u = float(u)
+        per = f"{s.strftime('%d.%m')}–{e.strftime('%d.%m')}"
+        if s <= day:
+            if u > run.get(a, 0):
+                run[a] = u
+                label[a] = f"📰 брошура {per}"
+        else:
+            k = (s - day).days                      # 1..RAMP_DAYS дни до старта
+            f = 1 + (u - 1) * (RAMP_DAYS + 1 - k) / (RAMP_DAYS + 1)
+            if a not in run and f > ramp.get(a, 0):
+                ramp[a] = round(f, 2)
+                label[a] = f"📰 брошура от {s.strftime('%d.%m')} — зареждане {RAMP_DAYS + 1 - k}/{RAMP_DAYS + 1}"
+    for a in run:
+        ramp.pop(a, None)
+    return run, ramp, label
+
+
 def active(db: Session, day: date) -> dict[int, float]:
-    """article_id -> коефициент за деня (най-високият, ако артикулът е в няколко промоции)."""
+    """article_id -> коефициент за деня (започнала промоция или зареждане преди старта)."""
     try:
-        _ensure(db)
-        rows = db.execute(text("""SELECT i.article_id, MAX(i.uplift) FROM promotion_items i
-                                  JOIN promotions p ON p.id = i.promo_id
-                                  WHERE :d BETWEEN p.start_day AND p.end_day GROUP BY i.article_id"""),
-                          {"d": day}).all()
-        return {a: float(u) for a, u in rows}
+        run, ramp, _ = _factors(db, day)
+        return {**ramp, **run}
+    except Exception:
+        db.rollback()
+        return {}
+
+
+def labels(db: Session, day: date) -> dict[int, str]:
+    try:
+        return _factors(db, day)[2]
     except Exception:
         db.rollback()
         return {}
@@ -129,6 +166,7 @@ def listing(db: Session) -> list[dict]:
         today = datetime.now(SOFIA).date()
         out.append({"id": pid, "name": name, "start": s.strftime("%d.%m.%Y"), "end": e.strftime("%d.%m.%Y"),
                     "active": s <= today <= e,
+                    "status": "активна" if s <= today <= e else ("предстои" if s > today else "минала"),
                     "items": [{"sku": k, "name": n, "uplift": float(u), "measured": bool(mm)} for k, n, u, mm in items]})
     return out
 
@@ -139,9 +177,13 @@ def apply_store(db: Session, settings: list, day: date, store_id: int) -> list:
     но от реалната скорост на продажби в ТОЗИ магазин по време на промото (не умножаване).
     Ако промото още няма данни (първи ден) - вдигане най-много ×1.5.
     """
-    factors = active(db, day)
-    if not factors:
+    try:
+        run, ramp, _ = _factors(db, day)
+    except Exception:
+        db.rollback(); run, ramp = {}, {}
+    if not run and not ramp:
         return settings
+    factors = {**ramp, **run}
     from . import learning
     try:
         rows = db.execute(text("""SELECT p.start_day FROM promotions p
@@ -156,13 +198,17 @@ def apply_store(db: Session, settings: list, day: date, store_id: int) -> list:
     if days_ > 0:
         for aid, q in db.execute(select(m.SalesHistory.article_id, func.sum(m.SalesHistory.quantity_sold))
                                  .where(m.SalesHistory.store_id == store_id,
-                                        m.SalesHistory.article_id.in_(list(factors)),
+                                        m.SalesHistory.article_id.in_(list(run) or [0]),
                                         m.SalesHistory.sale_date >= start, m.SalesHistory.sale_date <= until)
                                  .group_by(m.SalesHistory.article_id)).all():
             sold[aid] = max(float(q or 0), 0.0)
     for s_ in settings:
         f = factors.get(s_.article_id)
         if not f or f <= 1.0 or s_.max_stock <= 0:
+            continue
+        if s_.article_id in ramp:                      # преди старта: постепенно вдигане
+            s_.min_stock = math.ceil(s_.min_stock * f)
+            s_.max_stock = max(math.ceil(s_.max_stock * f), s_.min_stock)
             continue
         if days_ > 0:
             sdp = sold.get(s_.article_id, 0.0) / days_
@@ -175,3 +221,27 @@ def apply_store(db: Session, settings: list, day: date, store_id: int) -> list:
             s_.min_stock = math.ceil(s_.min_stock * g)
             s_.max_stock = max(math.ceil(s_.max_stock * g), s_.min_stock)
     return settings
+
+
+def sync_from_mistral(db: Session) -> dict:
+    """Брошурата от Мистрал (тип 1, поне 20 артикула с едни дати) -> промоция за нашите артикули.
+    Ако брошурата е въведена в Мистрал преди старта, зареждането се вдига от 3 дни преди него."""
+    _ensure(db); db.commit()
+    today = datetime.now(SOFIA).date()
+    out = []
+    try:
+        ranges = db.execute(text("""SELECT start_day, end_day FROM sa_promo WHERE tp = 1 AND end_day >= :t
+                                    GROUP BY start_day, end_day HAVING COUNT(*) >= 20"""), {"t": today}).all()
+    except Exception:
+        db.rollback()
+        return {"error": "няма sa_promo"}
+    skus = {a.sku for a in db.execute(select(m.Article)).scalars().all()}
+    for s, e in ranges:
+        codes = [str(c) for (c,) in db.execute(text("SELECT code FROM sa_promo WHERE start_day=:s AND end_day=:e"),
+                                               {"s": s, "e": e}).all()]
+        mine = [c for c in codes if c in skus]
+        if mine:
+            # в Мистрал краят е денят след последния (00:00) - пазим датите както са
+            r = create(db, f"Брошура {s.strftime('%d.%m')}–{e.strftime('%d.%m')} (Мистрал)", s, e, mine)
+            out.append({"start": str(s), "end": str(e), "items": r["items"]})
+    return {"brochures": out}

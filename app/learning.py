@@ -99,6 +99,8 @@ def run(db: Session, apply: bool = True) -> dict:
         try:
             from . import salesall
             notes.append(f"всички доставчици: {salesall.sync(db, 3)}")
+            from . import promo as _pr
+            notes.append(f"брошура от Мистрал: {_pr.sync_from_mistral(db)}")
         except Exception as e:
             db.rollback()
             notes.append(f"всички доставчици: {type(e).__name__}")

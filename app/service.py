@@ -289,6 +289,13 @@ def calculate_for_store(
 
     if combined is None:
         combined = generate_order_lines([], stock, order_date)
+    try:   # брошура: защо се вдига количеството
+        lab = _promo.labels(db, order_date)
+        for ln in combined.lines:
+            if ln.article_id in lab:
+                ln.notes = (lab[ln.article_id] + (" · " + ln.notes if ln.notes else ""))
+    except Exception:
+        db.rollback()
     return combined
 
 
