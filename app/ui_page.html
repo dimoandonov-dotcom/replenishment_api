@@ -485,13 +485,13 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
 <section class="tab" id="tab-anom">
   <p class="note" style="margin:0 0 14px;line-height:1.6">Всяка нощ се дърпат от Мистрал <b>всички движения</b> на НДК стоката (продажби, доставки, брак, корекции) и <b>резултатите от ревизиите</b>.
   Тук са липсите и излишъците от ревизии, отрицателните наличности (продадено без заведена доставка), „фантомната“ наличност (по Мистрал има, но не се продава от 4+ дни — вероятно я няма на рафта)
-  и <b>доставките</b>: поръчано от Ани, но незаведено в Мистрал или доставено по-малко.</p>
+  и <b>недоставените заявки</b>: поръчано от Ани, но няма доставка в Мистрал или е доставено по-малко.</p>
   <div class="bar"><select id="anDays"><option value="7">7 дни</option><option value="14" selected>14 дни</option><option value="30">30 дни</option></select><span class="note" id="anUntil"></span></div>
   <div class="board" id="anKpis"></div>
   <div id="anDetail"></div>
   <div class="head"><h2>По магазини</h2><span class="note">най-голяма загуба отгоре · цъкни на магазин</span></div>
   <div class="scroll"><table>
-    <thead><tr><th>Магазин</th><th class="num">Липси €</th><th class="num">Излишъци €</th><th class="num">Нето €</th><th class="num">Липси бр. редове</th><th class="num">На минус</th><th class="num">Фантомни</th><th class="num">Незаведени доставки</th><th class="num">Брак</th></tr></thead>
+    <thead><tr><th>Магазин</th><th class="num">Липси €</th><th class="num">Излишъци €</th><th class="num">Нето €</th><th class="num">Липси бр. редове</th><th class="num">На минус</th><th class="num">Фантомни</th><th class="num">Недоставени заявки</th><th class="num">Брак</th></tr></thead>
     <tbody id="anBody"></tbody>
   </table></div>
 </section>

@@ -34,7 +34,7 @@ KIND = {
     "shortage": "Липси от ревизия", "surplus": "Излишъци от ревизия",
     "negative": "Отрицателна наличност", "phantom": "Фантомна наличност",
     "writeoff": "Брак / отписване", "correction": "Ръчни корекции надолу",
-    "undelivered": "Незаведена доставка", "short_delivery": "Непълна доставка",
+    "undelivered": "Недоставена заявка", "short_delivery": "Непълна доставка",
     "suspicious_delivery": "Подозрително голяма доставка (OCR?)",
     "double_delivery": "Двойно заведена доставка",
     "ocr_repeat": "Повтаряща се OCR грешка",
