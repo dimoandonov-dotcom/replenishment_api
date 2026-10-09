@@ -51,6 +51,10 @@ def _ensure(db: Session):
         store_id INT NOT NULL, article_id INT NOT NULL, inv_num INT NOT NULL, inv_at TIMESTAMPTZ,
         book_qty NUMERIC(14,3), found_qty NUMERIC(14,3), diff_qty NUMERIC(14,3), diff_money NUMERIC(14,4),
         PRIMARY KEY (store_id, article_id, inv_num))"""))
+    db.execute(text("""CREATE TABLE IF NOT EXISTS move_docs (
+        store_id INT NOT NULL, article_id INT NOT NULL, day DATE NOT NULL, optype INT NOT NULL, op_num BIGINT NOT NULL,
+        qty NUMERIC(14,3), doc_num TEXT, doc_date DATE, doc_sum NUMERIC(14,2), partner TEXT,
+        PRIMARY KEY (store_id, article_id, op_num, optype))"""))
     db.commit()
 
 
@@ -95,6 +99,48 @@ def sync(db: Session, days: int = 14) -> dict:
             FROM INVENTORY i JOIN INVENTORYCONTENT c ON c.INVENTORYNUM = i.INVENTORYNUM AND c.LOCATIONID = i.LOCATIONID
             WHERE i.DATEINVENTORY >= %s AND i.LOCATIONID IN ({L}) AND c.MATERIALCODE IN ({C})""", (since.isoformat(),))
         inv = cur.fetchall()
+        # документите зад движенията (без продажбите): номер, дата, сума, доставчик - за всяка аномалия
+        cur.execute(f"""
+            SELECT LOCATIONID AS loc, CAST(MIN(OPERATIONDATE) AS date) AS d, MATERIALCODE AS code, OPERATIONTYPE AS op,
+                   OPERAIONNUM AS num, SUM(QTY) AS q
+            FROM MATERIALQTYLOG WITH (NOLOCK)
+            WHERE OPERATIONDATE >= %s AND LOCATIONID IN ({L}) AND MATERIALCODE IN ({C}) AND OPERATIONTYPE <> 1
+            GROUP BY LOCATIONID, MATERIALCODE, OPERATIONTYPE, OPERAIONNUM""", (since.isoformat(),))
+        dm = cur.fetchall()
+        byloc = defaultdict(set)
+        for r in dm:
+            byloc[r["loc"]].add(int(r["num"]))
+        dmeta, pids = {}, set()
+        for loc, nums in byloc.items():
+            nums = sorted(nums)
+            for i in range(0, len(nums), 500):
+                cur.execute(f"""SELECT o.NUM, o.PARTNERNAMEID, od.DOCUMENTNUM, od.DOCUMENTDATE, od.DOCSUM
+                                FROM OPERATIONS o WITH (NOLOCK)
+                                LEFT JOIN OPERATIONDOCUMENT od WITH (NOLOCK) ON od.LOCATIONID = o.LOCATIONID AND od.NUM = o.NUM
+                                WHERE o.LOCATIONID = %s AND o.NUM IN ({','.join(map(str, nums[i:i+500]))})""", (loc,))
+                for r in cur.fetchall():
+                    dmeta[(loc, int(r["NUM"]))] = r
+                    if r["PARTNERNAMEID"]:
+                        pids.add(int(r["PARTNERNAMEID"]))
+        pn = {}
+        pl = sorted(pids)
+        for i in range(0, len(pl), 500):
+            cur.execute(f"SELECT ID, PARTNERNAME FROM PARTNERNAME WHERE ID IN ({','.join(map(str, pl[i:i+500]))})")
+            pn.update({int(r["ID"]): r["PARTNERNAME"] for r in cur.fetchall()})
+    db.execute(text("DELETE FROM move_docs WHERE day >= :d"), {"d": since})
+    drows = []
+    for r in dm:
+        if r["loc"] not in locs or int(r["code"]) not in arts:
+            continue
+        mm = dmeta.get((r["loc"], int(r["num"]))) or {}
+        dd = mm.get("DOCUMENTDATE")
+        drows.append({"s": locs[r["loc"]], "a": arts[int(r["code"])], "d": r["d"], "o": int(r["op"]), "n": int(r["num"]),
+                      "q": float(r["q"] or 0), "dn": str(mm.get("DOCUMENTNUM") or "").split(".")[0] or None,
+                      "dd": dd.date() if hasattr(dd, "date") else dd, "ds": float(mm.get("DOCSUM") or 0),
+                      "p": pn.get(int(mm.get("PARTNERNAMEID") or 0))})
+    for i in range(0, len(drows), 5000):
+        db.execute(text("""INSERT INTO move_docs(store_id, article_id, day, optype, op_num, qty, doc_num, doc_date, doc_sum, partner)
+                           VALUES (:s,:a,:d,:o,:n,:q,:dn,:dd,:ds,:p) ON CONFLICT DO NOTHING"""), drows[i:i + 5000])
     db.execute(text("DELETE FROM stock_movements WHERE day >= :d"), {"d": since})
     rows = [{"s": locs[r["loc"]], "a": arts[int(r["code"])], "d": r["d"], "o": int(r["op"]),
              "i": float(r["qin"] or 0), "u": float(r["qout"] or 0), "n": int(r["n"])}
@@ -115,10 +161,79 @@ def sync(db: Session, days: int = 14) -> dict:
                            SET inv_at = EXCLUDED.inv_at, book_qty = EXCLUDED.book_qty, found_qty = EXCLUDED.found_qty,
                                diff_qty = EXCLUDED.diff_qty, diff_money = EXCLUDED.diff_money"""), irows)
     db.commit()
-    return {"movements": len(rows), "inventory_lines": len(irows), "stores": len(set(locs.values())), "since": since.isoformat()}
+    return {"movements": len(rows), "inventory_lines": len(irows), "documents": len(drows),
+            "stores": len(set(locs.values())), "since": since.isoformat()}
 
 
 def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]:
+    """Всички аномалии + номера на документа зад всяка и дали номерът е дублиран (най-сигурният знак за грешка)."""
+    rows = _items(db, days, store_id)
+    try:
+        _attach_docs(db, rows, days)
+    except Exception:
+        db.rollback()
+    return rows
+
+
+# кои видове движения стоят зад всеки вид аномалия
+_KIND_OPS = {"suspicious_delivery": (2, 38), "ocr_repeat": (2,), "writeoff": (4,), "correction": (37,),
+             "short_delivery": (2,), "surplus": (38,), "shortage": (37,)}
+
+
+def _attach_docs(db: Session, rows: list[dict], days: int):
+    since = datetime.now(SOFIA).date() - timedelta(days=max(days, 14) + 3)
+    arts = {a.sku: a.id for a in db.execute(select(m.Article)).scalars().all()}
+    docs = defaultdict(list)
+    for sid, aid, d, op, num, q, dn, dd, ds, p in db.execute(text("""
+            SELECT store_id, article_id, day, optype, op_num, qty, doc_num, doc_date, doc_sum, partner
+            FROM move_docs WHERE day >= :d"""), {"d": since}).all():
+        docs[(sid, aid)].append((d, op, num, float(q or 0), dn, dd, float(ds or 0), p))
+    # дублиран номер: същият № от същия доставчик в същия магазин в друга операция
+    # (при ИТА номерът е винаги същият -> дублиран е само при същата дата на документа)
+    seen = defaultdict(set)
+    for (sid, aid), lst in docs.items():
+        for d, op, num, q, dn, dd, ds, p in lst:
+            if dn and op in (2, 3, 4):
+                ita = any(x in (p or "").upper() for x in SAME_NUMBER_SUPPLIERS)
+                seen[(sid, p, dn, dd if ita else None)].add(num)
+    dup_ops = set()
+    for k, ops_ in seen.items():
+        if len(ops_) > 1:
+            dup_ops |= {(k[0], o) for o in ops_}
+    try:
+        for sid_, oa, ob in db.execute(text("SELECT store_id, op_a, op_b FROM dup_docs WHERE op_a IS NOT NULL")).all():
+            dup_ops |= {(sid_, oa), (sid_, ob)}
+    except Exception:
+        db.rollback()
+    year = datetime.now(SOFIA).year
+    for r in rows:
+        aid = arts.get(r.get("sku"))
+        if aid is None or not r.get("day"):
+            continue
+        try:
+            dd_, mm_ = [int(x) for x in r["day"].split(".")[:2]]
+            day = date(year, mm_, dd_)
+        except ValueError:
+            continue
+        ops = _KIND_OPS.get(r["kind"])
+        cand = [x for x in docs.get((r["store_id"], aid), []) if (ops is None or x[1] in ops)
+                and abs((x[0] - day).days) <= (1 if ops else 0)]
+        if r["kind"] == "negative" and not cand:
+            # отрицателна: последният документ с движение преди/в деня
+            cand = sorted([x for x in docs.get((r["store_id"], aid), []) if x[0] <= day], key=lambda x: x[0])[-1:]
+        if not cand:
+            continue
+        cand.sort(key=lambda x: abs(x[3]), reverse=True)
+        nums = []
+        for d, op, num, q, dn, dd, ds, p in cand[:3]:
+            dup = (r["store_id"], num) in dup_ops
+            nums.append({"doc": dn or "—", "op": num, "date": dd.strftime("%d.%m.%Y") if dd else None,
+                         "partner": p, "dup": dup})
+        r["docs"] = nums
+        r["doc_dup"] = any(x["dup"] for x in nums)
+
+
+def _items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]:
     """Всички аномалии (ред по ред) за последните `days` дни."""
     _ensure(db)
     since = datetime.now(SOFIA).date() - timedelta(days=days)

@@ -1205,7 +1205,7 @@ function renderQual() {
   const f = (($("qlSearch") || {}).value || "").trim().toLowerCase(), had = document.activeElement && document.activeElement.id === "qlSearch";
   const rows = QL.rows.filter(r => !f || (r.store + " " + r.sku + " " + r.name).toLowerCase().includes(f)), shown = rows.slice(0, QL.lim);
   $("qDetail").innerHTML = `<div class="head"><h2>${esc(QL.title)}</h2><span class="note">${fmtN(rows.length)} позиции</span></div>
-  <div class="bar"><input type="search" id="qlSearch" placeholder="Търси магазин, код или артикул" value="${esc(f)}" style="flex:1;min-width:200px"><button id="qlClose">Затвори</button></div>
+  <div class="bar"><input type="search" id="qlSearch" placeholder="Търси магазин, код, артикул или № документ" value="${esc(f)}" style="flex:1;min-width:200px"><button id="qlClose">Затвори</button></div>
   <div class="scroll"><table><thead><tr><th>Магазин</th><th>Код</th><th>Артикул</th><th>Състояние</th><th class="num">Наличност</th><th class="num">Мин</th><th class="num">Макс</th><th class="num">Прод./ден</th><th class="num">Дни запас</th></tr></thead><tbody>
   ${shown.map(r => { const [l, c] = QST[r.status] || [r.status, "off"];
     return `<tr><td>${esc(r.store)}</td><td>${esc(r.sku)}</td><td class="name">${esc(r.name)}</td><td><span class="tag ${c}">${l}</span></td>
@@ -1337,21 +1337,21 @@ async function showAnom({ kind, store_id, title }) {
   $("anDetail").innerHTML = `<div class="empty loading">Зареждам…</div>`; $("anDetail").scrollIntoView({ behavior: "smooth" });
   const q = new URLSearchParams({ days: $("anDays").value }); if (kind) q.set("kind", kind); if (store_id) q.set("store_id", store_id);
   const d = await api(`/ui/anomalies/list?${q}`);
-  AL = { rows: d.rows.sort((a, b) => (!!a.fixed - !!b.fixed) || (a.eur || 0) - (b.eur || 0)), lim: 200, title, kinds: d.kinds };
+  AL = { rows: d.rows.sort((a, b) => (!!a.fixed - !!b.fixed) || (!!b.doc_dup - !!a.doc_dup) || (a.eur || 0) - (b.eur || 0)), lim: 200, title, kinds: d.kinds };
   renderAnom();
 }
 function renderAnom() {
   const f = (($("alSearch") || {}).value || "").trim().toLowerCase(), had = document.activeElement && document.activeElement.id === "alSearch";
-  const rows = AL.rows.filter(r => !f || (r.store + " " + r.sku + " " + r.name).toLowerCase().includes(f)), shown = rows.slice(0, AL.lim);
+  const rows = AL.rows.filter(r => !f || (r.store + " " + r.sku + " " + r.name + " " + (r.docs || []).map(x => x.doc).join(" ")).toLowerCase().includes(f)), shown = rows.slice(0, AL.lim);
   const kinds = [...new Set(rows.map(r => r.kind))];
   const help = kinds.filter(k => ANH[k]).map(k => `<div style="margin:4px 0"><span class="tag ${ANK[k] || "off"}">${esc(AL.kinds[k] || k)}</span>
     ${esc(ANH[k][0])} <b>→ ${esc(ANH[k][1])}</b></div>`).join("");
-  const nfx = rows.filter(r => r.fixed).length;
-  $("anDetail").innerHTML = `<div class="head"><h2>${esc(AL.title)}</h2><span class="note">${fmtN(rows.length - nfx)} за оправяне${nfx ? ` · <span style="color:#16A34A">● ${fmtN(nfx)} поправени</span>` : ""}</span></div>
+  const nfx = rows.filter(r => r.fixed).length, ndup = rows.filter(r => r.doc_dup && !r.fixed).length;
+  $("anDetail").innerHTML = `<div class="head"><h2>${esc(AL.title)}</h2><span class="note">${fmtN(rows.length - nfx)} за оправяне${ndup ? ` · <span style="color:#DC2626;font-weight:600">⚠ ${fmtN(ndup)} с дублиран № на документ</span>` : ""}${nfx ? ` · <span style="color:#16A34A">● ${fmtN(nfx)} поправени</span>` : ""}</span></div>
   ${help ? `<div class="card" style="padding:12px 16px;margin-bottom:12px;font-size:14px;line-height:1.55">${help}</div>` : ""}
-  <div class="bar"><input type="search" id="alSearch" placeholder="Търси магазин, код или артикул" value="${esc(f)}" style="flex:1;min-width:200px"><button id="alClose">Затвори</button></div>
+  <div class="bar"><input type="search" id="alSearch" placeholder="Търси магазин, код, артикул или № документ" value="${esc(f)}" style="flex:1;min-width:200px"><button id="alClose">Затвори</button></div>
   <div class="scroll"><table><thead><tr><th>Дата</th><th>Магазин</th><th>Код</th><th>Артикул</th><th>Вид</th><th class="num">Бройки</th><th class="num">€</th><th>Какво е</th><th>Какво да се направи</th></tr></thead><tbody>
-  ${shown.map(r => `<tr class="anrow${r.fixed ? " fixed" : ""}" data-ad="${r.store_id}|${esc(r.day || "")}|${esc(r.sku)}" style="cursor:pointer" title="Цъкни за документите"><td>${r.fixed ? `<span style="color:#16A34A">●</span> ` : ""}${esc(r.day || "")}</td><td>${esc(r.store)}</td><td>${esc(r.sku)}</td><td class="name">▸ ${esc(r.name)}${r.fixed ? `<br><span class="tag" style="background:#16A34A;color:#fff;margin-top:4px">✅ ПОПРАВЕНО</span>` : ""}</td>
+  ${shown.map(r => `<tr class="anrow${r.fixed ? " fixed" : ""}" data-ad="${r.store_id}|${esc(r.day || "")}|${esc(r.sku)}" style="cursor:pointer" title="Цъкни за документите"><td>${r.fixed ? `<span style="color:#16A34A">●</span> ` : ""}${esc(r.day || "")}</td><td>${esc(r.store)}</td><td>${esc(r.sku)}</td><td class="name">▸ ${esc(r.name)}${(r.docs || []).length ? `<br><span class="muted" style="font-size:12px">${r.docs.map(x => `№ <b>${esc(x.doc)}</b>${x.date ? ` от ${esc(x.date)}` : ""}${x.dup ? ` <span class="tag" style="background:#DC2626;color:#fff">⚠ ДУБЛИРАН №</span>` : ""}`).join(" · ")}</span>` : ""}${r.fixed ? `<br><span class="tag" style="background:#16A34A;color:#fff;margin-top:4px">✅ ПОПРАВЕНО</span>` : ""}</td>
     <td>${r.fixed ? `<span class="tag" style="background:#DCFCE7;color:#166534">✅ поправено</span>` : `<span class="tag ${ANK[r.kind] || "off"}">${esc(AL.kinds[r.kind] || r.kind)}</span>`}</td>
     <td class="num ${r.qty < 0 ? "low" : ""}">${fmtN(r.qty)}</td><td class="num ${r.eur < 0 ? "low" : ""}">${fmtE(r.eur)}</td>
     <td style="font-size:12.5px;min-width:220px">${esc(r.info || (ANH[r.kind] || [""])[0])}</td>
@@ -1493,7 +1493,7 @@ function renderNordList() {
   const shown = rows.slice(0, NLIST.lim);
   const hadFocus = document.activeElement && document.activeElement.id === "nlSearch";
   $("nDetail").innerHTML = `<div class="head"><h2>${esc(NLIST.title)}</h2><span class="note">${fmtN(rows.length)} позиции · всички магазини</span></div>
-  <div class="bar"><input type="search" id="nlSearch" placeholder="Търси магазин, код или артикул" value="${esc(f)}" style="flex:1;min-width:200px">
+  <div class="bar"><input type="search" id="nlSearch" placeholder="Търси магазин, код, артикул или № документ" value="${esc(f)}" style="flex:1;min-width:200px">
   <button id="nlBack">← По магазини</button></div>
   <div class="scroll"><table><thead><tr><th>Магазин</th><th>Код</th><th>Артикул</th><th>Причина</th><th class="num">Продажби 14 дни</th><th class="num">Наличност</th><th class="num">Мин</th><th class="num">Макс</th><th>Действие</th></tr></thead><tbody>
   ${shown.map((r, i) => { const editable = ["no_minmax", "stopped", "not_in_plano"].includes(r.reason);
