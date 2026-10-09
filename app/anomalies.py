@@ -479,7 +479,7 @@ def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
             byloc[loc].append(op)
         for loc, nums in byloc.items():
             for i in range(0, len(nums), 500):
-                cur.execute(f"""SELECT o.NUM, o.PARTNERNAMEID, o.DATESAVED, o.USERID, od.DOCUMENTNUM, od.DOCSUM
+                cur.execute(f"""SELECT o.NUM, o.PARTNERNAMEID, o.DATESAVED, o.USERID, od.DOCUMENTNUM, od.DOCSUM, od.DOCUMENTDATE
                                 FROM OPERATIONS o WITH (NOLOCK)
                                 LEFT JOIN OPERATIONDOCUMENT od WITH (NOLOCK) ON od.LOCATIONID = o.LOCATIONID AND od.NUM = o.NUM
                                 WHERE o.LOCATIONID = %s AND o.NUM IN ({','.join(map(str, nums[i:i+500]))})""", (loc,))
@@ -492,55 +492,54 @@ def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
             pn.update({int(r["ID"]): r["PARTNERNAME"] for r in cur.fetchall()})
     arts = {int(a.sku): a for a in db.execute(select(m.Article)).scalars().all() if a.sku.isdigit()}
     db.execute(text("DELETE FROM dup_docs WHERE day >= :d"), {"d": since})
+    # Двоен документ = СЪЩИЯТ номер + СЪЩАТА дата на документа + СЪЩАТА сума, от един доставчик, в един магазин
+    # (независимо в кой ден е въведен). Еднакъв номер с различна дата (напр. стоковите на ИТА за вестници)
+    # не е двоен. Допълнително: номер, различен с 1 цифра (грешно разчетен), при същата дата и сума.
+    def num(mm):
+        return str(mm["DOCUMENTNUM"] or "").split(".")[0].strip()
+
+    def ddate(mm):
+        v = mm.get("DOCUMENTDATE")
+        return v.date() if hasattr(v, "date") else v
+
     groups = defaultdict(list)
     for k in ops:
         mm = meta.get(k)
-        if not mm:
+        if not mm or not num(mm) or not ddate(mm):
             continue
-        groups[(k[0], opday[k], mm["PARTNERNAMEID"])].append(k)
-    for (loc, d, pid), ks in groups.items():
-        if len(ks) < 2 or loc not in locs:
+        groups[(k[0], mm["PARTNERNAMEID"], ddate(mm), round(float(mm["DOCSUM"] or 0), 2))].append(k)
+    for (loc, pid, dd, sm), ks in groups.items():
+        if len(ks) < 2 or loc not in locs or sm <= 0:
             continue
+        pname = (pn.get(int(pid or 0)) or "").upper()
+        own = any(x in pname for x in OWN_SUPPLIERS)
         for i in range(len(ks)):
             for j in range(i + 1, len(ks)):
-                a, b = ops[ks[i]], ops[ks[j]]
-                same = [c for c, q in a.items() if b.get(c) == q]
-                small = min(len(a), len(b))
                 ma, mb = meta[ks[i]], meta[ks[j]]
-                na = str(ma["DOCUMENTNUM"] or "").split(".")[0]; nb = str(mb["DOCUMENTNUM"] or "").split(".")[0]
-                pname = (pn.get(int(pid or 0)) or "").upper()
-                own = any(k in pname for k in OWN_SUPPLIERS)
-                same_num = bool(na) and na == nb
-                one_digit = bool(na) and len(na) == len(nb) and na != nb and sum(x != y for x, y in zip(na, nb)) == 1
-                same_sum = abs(float(ma["DOCSUM"] or 0) - float(mb["DOCSUM"] or 0)) < 0.05 and float(ma["DOCSUM"] or 0) > 0
-                share = len(same) / small if small else 0
-                if same_num and len(same) >= 3:
-                    conf = "сигурен — еднакъв номер на документа"
-                elif own:
-                    continue      # собствено производство: еднакви количества по няколко пъти на ден са нормални
-                elif one_digit and share >= 0.8 and len(same) >= 3:
-                    consecutive = na.isdigit() and nb.isdigit() and abs(int(na) - int(nb)) == 1
-                    conf = ("вероятен — последователни номера с почти еднакво съдържание (две фактури или двойно въведена)"
-                            if consecutive else "сигурен — номерата се различават с една цифра (грешно разчетен номер)")
-                elif same_sum and share >= 0.8 and len(same) >= 5:
-                    conf = "сигурен — еднаква сума и еднакви редове"
-                elif share >= 0.9 and len(same) >= 10:
-                    conf = "вероятен — 90%+ еднакви редове"
+                na, nb = num(ma), num(mb)
+                if na == nb:
+                    conf = "сигурен — еднакъв номер, дата и сума на документа"
+                elif (not own and len(na) == len(nb) and sum(x != y for x, y in zip(na, nb)) == 1):
+                    conf = "вероятен — еднаква дата и сума, номерът се различава с 1 цифра (грешно разчетен)"
                 else:
                     continue
-                if True:
-                    excess = min(abs(float(ma["DOCSUM"] or 0)), abs(float(mb["DOCSUM"] or 0))) * (len(same) / max(len(a), len(b)))
-                    ex = [conf] + [f"{(arts[c].supplier_name or arts[c].name) if c in arts else c}: {a[c]:g}" for c in same[:4]]
-                    ga, gb = sum(a.values()), sum(b.values())
-                    fixed = (ga > 0 and opnet[ks[i]] <= 0.1 * ga) or (gb > 0 and opnet[ks[j]] <= 0.1 * gb)
-                    db.execute(text("""INSERT INTO dup_docs VALUES (:s,:d,:da,:dbb,:p,:n,:la,:lb,:sa,:sb,:ta,:tb,:ua,:ub,:e,:x,:fx)
-                                       ON CONFLICT DO NOTHING"""),
-                               {"s": locs[loc], "d": d, "da": str(ma["DOCUMENTNUM"] or "").split(".")[0],
-                                "dbb": str(mb["DOCUMENTNUM"] or "").split(".")[0], "p": pn.get(int(pid or 0), "?"),
-                                "n": len(same), "la": len(a), "lb": len(b), "sa": float(ma["DOCSUM"] or 0),
-                                "sb": float(mb["DOCSUM"] or 0), "ta": str(ma["DATESAVED"])[11:16], "tb": str(mb["DATESAVED"])[11:16],
-                                "ua": str(ma["USERID"]), "ub": str(mb["USERID"]), "e": round(excess, 2), "x": " · ".join(ex),
-                                "fx": bool(fixed)})
-                    found += 1
+                a, b = ops[ks[i]], ops[ks[j]]
+                same = [c for c, q in a.items() if b.get(c) == q]
+                d = max(opday[ks[i]], opday[ks[j]])
+                excess = min(abs(float(ma["DOCSUM"] or 0)), abs(float(mb["DOCSUM"] or 0)))
+                ex = [conf, f"дата на документа {dd.strftime('%d.%m.%Y')}"] + \
+                     [f"{(arts[c].supplier_name or arts[c].name) if c in arts else c}: {a[c]:g}" for c in same[:4]]
+                ga, gb = sum(a.values()), sum(b.values())
+                fixed = (ga > 0 and opnet[ks[i]] <= 0.1 * ga) or (gb > 0 and opnet[ks[j]] <= 0.1 * gb)
+                db.execute(text("""INSERT INTO dup_docs VALUES (:s,:d,:da,:dbb,:p,:n,:la,:lb,:sa,:sb,:ta,:tb,:ua,:ub,:e,:x,:fx)
+                                   ON CONFLICT DO NOTHING"""),
+                           {"s": locs[loc], "d": d, "da": na, "dbb": nb, "p": pn.get(int(pid or 0), "?"),
+                            "n": len(same), "la": len(a), "lb": len(b), "sa": float(ma["DOCSUM"] or 0),
+                            "sb": float(mb["DOCSUM"] or 0),
+                            "ta": f"{opday[ks[i]].strftime('%d.%m')} {str(ma['DATESAVED'])[11:16]}",
+                            "tb": f"{opday[ks[j]].strftime('%d.%m')} {str(mb['DATESAVED'])[11:16]}",
+                            "ua": str(ma["USERID"]), "ub": str(mb["USERID"]), "e": round(excess, 2), "x": " · ".join(ex),
+                            "fx": bool(fixed)})
+                found += 1
     db.commit()
     return {"days": days, "duplicates": found}
