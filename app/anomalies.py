@@ -439,6 +439,7 @@ def summary(db: Session, days: int = 7) -> dict:
 # ---------------------------------------------------------------------------
 
 OWN_SUPPLIERS = ("ТРИСТА БГ", "БАНДИТС")
+SAME_NUMBER_SUPPLIERS = ("ИТА ООД",)   # номерът на стоковата е винаги същият - различават се по дата
 
 
 def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
@@ -507,9 +508,12 @@ def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
         mm = meta.get(k)
         if not mm or not num(mm) or not ddate(mm):
             continue
-        groups[(k[0], mm["PARTNERNAMEID"], ddate(mm), round(float(mm["DOCSUM"] or 0), 2))].append(k)
+        pname_ = (pn.get(int(mm["PARTNERNAMEID"] or 0)) or "").upper()
+        # ИТА: номерът на стоковата е винаги един и същ -> две стокови с една дата на документа = грешка (без значение сумата)
+        sm_key = None if any(x in pname_ for x in SAME_NUMBER_SUPPLIERS) else round(float(mm["DOCSUM"] or 0), 2)
+        groups[(k[0], mm["PARTNERNAMEID"], ddate(mm), sm_key)].append(k)
     for (loc, pid, dd, sm), ks in groups.items():
-        if len(ks) < 2 or loc not in locs or sm <= 0:
+        if len(ks) < 2 or loc not in locs or (sm is not None and sm <= 0):
             continue
         pname = (pn.get(int(pid or 0)) or "").upper()
         own = any(x in pname for x in OWN_SUPPLIERS)
@@ -517,7 +521,11 @@ def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
             for j in range(i + 1, len(ks)):
                 ma, mb = meta[ks[i]], meta[ks[j]]
                 na, nb = num(ma), num(mb)
-                if na == nb:
+                if sm is None:
+                    if float(ma["DOCSUM"] or 0) <= 0 or float(mb["DOCSUM"] or 0) <= 0:
+                        continue
+                    conf = "грешка — две стокови с една и съща дата на документа (при ИТА номерът е винаги един и същ)"
+                elif na == nb:
                     conf = "сигурен — еднакъв номер, дата и сума на документа"
                 elif (not own and len(na) == len(nb) and sum(x != y for x, y in zip(na, nb)) == 1):
                     conf = "вероятен — еднаква дата и сума, номерът се различава с 1 цифра (грешно разчетен)"
