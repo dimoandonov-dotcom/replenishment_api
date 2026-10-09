@@ -30,6 +30,13 @@ def _tick():
         try:
             _state["last_result"] = mistral.sync_stock(db)
             _state["last_error"] = None
+            # на всеки 2 часа: движенията и документите за 16 дни -> поправените аномалии стават зелени още същия ден
+            n = _state.get("ticks", 0) + 1
+            _state["ticks"] = n
+            if n % 4 == 1:
+                from . import anomalies
+                anomalies.sync(db, 16)
+                anomalies.detect_duplicate_docs(db, 16)
         except Exception as e:  # пробваме пак след 30 мин
             _state["last_error"] = f"{type(e).__name__}: {e}"[:300]
     _state["last_run"] = datetime.now(timezone.utc)

@@ -104,11 +104,11 @@ def run(db: Session, apply: bool = True) -> dict:
         except Exception as e:
             db.rollback()
             notes.append(f"всички доставчици: {type(e).__name__}")
-        # движения и ревизии: последните 3 дни (по-старите вече са в базата)
+        # движения и ревизии: 16 дни назад - корекциите на стари документи (сторно) също да се видят
         try:
             from . import anomalies
-            notes.append(f"движения/ревизии: {anomalies.sync(db, 3)}")
-            notes.append(f"двойни документи: {anomalies.detect_duplicate_docs(db, 3)}")
+            notes.append(f"движения/ревизии: {anomalies.sync(db, 16)}")
+            notes.append(f"двойни документи: {anomalies.detect_duplicate_docs(db, 16)}")
         except Exception as e:
             db.rollback()
             notes.append(f"аномалии: {type(e).__name__}")
