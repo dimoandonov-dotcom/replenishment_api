@@ -190,12 +190,18 @@ def _attach_docs(db: Session, rows: list[dict], days: int):
         docs[(sid, aid)].append((d, op, num, float(q or 0), dn, dd, float(ds or 0), p))
     # дублиран номер: същият № от същия доставчик в същия магазин в друга операция
     # (при ИТА номерът е винаги същият -> дублиран е само при същата дата на документа)
+    # само доставки (сума > 0); върнатата стока е със същия № като фактурата, но с минус -> не е дублиране
     seen = defaultdict(set)
+    returns = defaultdict(set)
     for (sid, aid), lst in docs.items():
         for d, op, num, q, dn, dd, ds, p in lst:
-            if dn and op in (2, 3, 4):
-                ita = any(x in (p or "").upper() for x in SAME_NUMBER_SUPPLIERS)
-                seen[(sid, p, dn, dd if ita else None)].add(num)
+            if not dn or op != 2:
+                continue
+            if ds < 0 or q < 0:
+                returns[(sid, p, dn)].add(num)
+                continue
+            ita = any(x in (p or "").upper() for x in SAME_NUMBER_SUPPLIERS)
+            seen[(sid, p, dn, dd if ita else None)].add(num)
     dup_ops = set()
     for k, ops_ in seen.items():
         if len(ops_) > 1:
@@ -226,9 +232,11 @@ def _attach_docs(db: Session, rows: list[dict], days: int):
         cand.sort(key=lambda x: abs(x[3]), reverse=True)
         nums = []
         for d, op, num, q, dn, dd, ds, p in cand[:3]:
-            dup = (r["store_id"], num) in dup_ops
+            is_ret = op == 2 and (ds < 0 or q < 0)
+            dup = (r["store_id"], num) in dup_ops and not is_ret
+            has_ret = (not is_ret) and bool(dn) and bool(returns.get((r["store_id"], p, dn), set()) - {num})
             nums.append({"doc": dn or "—", "op": num, "date": dd.strftime("%d.%m.%Y") if dd else None,
-                         "partner": p, "dup": dup})
+                         "partner": p, "dup": dup, "is_return": is_ret, "has_return": has_ret})
         r["docs"] = nums
         r["doc_dup"] = any(x["dup"] for x in nums)
 
