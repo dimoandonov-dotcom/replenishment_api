@@ -452,6 +452,16 @@ def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
         saved_a TEXT, saved_b TEXT, user_a TEXT, user_b TEXT, excess_eur NUMERIC(14,2),
         examples TEXT, PRIMARY KEY (store_id, day, doc_a, doc_b))"""))
     db.execute(text("ALTER TABLE dup_docs ADD COLUMN IF NOT EXISTS fixed BOOLEAN DEFAULT FALSE"))
+    db.execute(text("ALTER TABLE dup_docs ADD COLUMN IF NOT EXISTS op_a BIGINT"))
+    db.execute(text("ALTER TABLE dup_docs ADD COLUMN IF NOT EXISTS op_b BIGINT"))
+    # ключът трябва да включва операциите - иначе две двойки с един и същ номер се губят
+    pk = db.execute(text("""SELECT string_agg(a.attname, ',') FROM pg_index i JOIN pg_attribute a
+                            ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                            WHERE i.indrelid = 'dup_docs'::regclass AND i.indisprimary""")).scalar() or ""
+    if "op_a" not in pk:
+        db.execute(text("DELETE FROM dup_docs"))
+        db.execute(text("ALTER TABLE dup_docs DROP CONSTRAINT IF EXISTS dup_docs_pkey"))
+        db.execute(text("ALTER TABLE dup_docs ADD PRIMARY KEY (store_id, op_a, op_b)"))
     db.commit()
     since = datetime.now(SOFIA).date() - timedelta(days=days)
     found = 0
@@ -539,7 +549,9 @@ def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
                      [f"{(arts[c].supplier_name or arts[c].name) if c in arts else c}: {a[c]:g}" for c in same[:4]]
                 ga, gb = sum(a.values()), sum(b.values())
                 fixed = (ga > 0 and opnet[ks[i]] <= 0.1 * ga) or (gb > 0 and opnet[ks[j]] <= 0.1 * gb)
-                db.execute(text("""INSERT INTO dup_docs VALUES (:s,:d,:da,:dbb,:p,:n,:la,:lb,:sa,:sb,:ta,:tb,:ua,:ub,:e,:x,:fx)
+                db.execute(text("""INSERT INTO dup_docs (store_id, day, doc_a, doc_b, partner, same_lines, lines_a, lines_b,
+                                   sum_a, sum_b, saved_a, saved_b, user_a, user_b, excess_eur, examples, fixed, op_a, op_b)
+                                   VALUES (:s,:d,:da,:dbb,:p,:n,:la,:lb,:sa,:sb,:ta,:tb,:ua,:ub,:e,:x,:fx,:oa,:ob)
                                    ON CONFLICT DO NOTHING"""),
                            {"s": locs[loc], "d": d, "da": na, "dbb": nb, "p": pn.get(int(pid or 0), "?"),
                             "n": len(same), "la": len(a), "lb": len(b), "sa": float(ma["DOCSUM"] or 0),
@@ -547,7 +559,7 @@ def detect_duplicate_docs(db: Session, days: int = 3) -> dict:
                             "ta": f"{opday[ks[i]].strftime('%d.%m')} {str(ma['DATESAVED'])[11:16]}",
                             "tb": f"{opday[ks[j]].strftime('%d.%m')} {str(mb['DATESAVED'])[11:16]}",
                             "ua": str(ma["USERID"]), "ub": str(mb["USERID"]), "e": round(excess, 2), "x": " · ".join(ex),
-                            "fx": bool(fixed)})
+                            "fx": bool(fixed), "oa": ks[i][1], "ob": ks[j][1]})
                 found += 1
     db.commit()
     return {"days": days, "duplicates": found}
