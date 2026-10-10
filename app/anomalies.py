@@ -244,7 +244,7 @@ def _attach_docs(db: Session, rows: list[dict], days: int):
             is_ret = op == 2 and (ds < 0 or q < 0)
             dup = (r["store_id"], num) in dup_ops and not is_ret
             has_ret = (not is_ret) and bool(dn) and bool(returns.get((r["store_id"], p, dn), set()) - {num})
-            nums.append({"doc": dn or "—", "op": num, "date": dd.strftime("%d.%m.%Y") if dd else None,
+            nums.append({"doc": dn or f"операция {num}", "op": num, "date": dd.strftime("%d.%m.%Y") if dd else None,
                          "partner": p, "dup": dup, "is_return": is_ret, "has_return": has_ret})
         r["docs"] = nums
         r["doc_dup"] = any(x["dup"] for x in nums)
