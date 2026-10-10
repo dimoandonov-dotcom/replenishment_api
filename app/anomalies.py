@@ -19,6 +19,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
@@ -114,7 +116,10 @@ def sync(db: Session, days: int = 14) -> dict:
         for loc, nums in byloc.items():
             nums = sorted(nums)
             for i in range(0, len(nums), 500):
-                cur.execute(f"""SELECT o.NUM, o.PARTNERNAMEID, od.DOCUMENTNUM, od.DOCUMENTDATE, od.DOCSUM
+                cur.execute(f"""SELECT o.NUM, o.PARTNERNAMEID,
+                                       COALESCE(od.DOCUMENTNUM, o.DOCUMENTNUM) AS DOCUMENTNUM,
+                                       COALESCE(od.DOCUMENTDATE, o.DOCUMENTDATE, o.DATESAVED) AS DOCUMENTDATE,
+                                       COALESCE(od.DOCSUM, o.DOCUMENTSUM) AS DOCSUM
                                 FROM OPERATIONS o WITH (NOLOCK)
                                 LEFT JOIN OPERATIONDOCUMENT od WITH (NOLOCK) ON od.LOCATIONID = o.LOCATIONID AND od.NUM = o.NUM
                                 WHERE o.LOCATIONID = %s AND o.NUM IN ({','.join(map(str, nums[i:i+500]))})""", (loc,))
@@ -136,7 +141,7 @@ def sync(db: Session, days: int = 14) -> dict:
         dd = mm.get("DOCUMENTDATE")
         drows.append({"s": locs[r["loc"]], "a": arts[int(r["code"])], "d": r["d"], "o": int(r["op"]), "n": int(r["num"]),
                       "q": float(r["q"] or 0), "dn": str(mm.get("DOCUMENTNUM") or "").split(".")[0] or None,
-                      "dd": dd.date() if hasattr(dd, "date") else dd, "ds": float(mm.get("DOCSUM") or 0),
+                      "dd": (dd.date() if hasattr(dd, "date") else dd) or r["d"], "ds": float(mm.get("DOCSUM") or 0),
                       "p": pn.get(int(mm.get("PARTNERNAMEID") or 0))})
     for i in range(0, len(drows), 5000):
         db.execute(text("""INSERT INTO move_docs(store_id, article_id, day, optype, op_num, qty, doc_num, doc_date, doc_sum, partner)
@@ -177,7 +182,7 @@ def items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict]
 
 # кои видове движения стоят зад всеки вид аномалия
 _KIND_OPS = {"suspicious_delivery": (2, 38), "ocr_repeat": (2,), "writeoff": (4,), "correction": (37,),
-             "short_delivery": (2,), "surplus": (38,), "shortage": (37,)}
+             "short_delivery": (2,), "surplus": (38,), "shortage": (37,), "phantom": (2,), "undelivered": (2,)}
 
 
 def _attach_docs(db: Session, rows: list[dict], days: int):
@@ -213,6 +218,10 @@ def _attach_docs(db: Session, rows: list[dict], days: int):
         db.rollback()
     year = datetime.now(SOFIA).year
     for r in rows:
+        if r.get("docs") and r["kind"] in ("shortage", "surplus"):
+            continue
+        if r["kind"] == "double_delivery":
+            continue
         aid = arts.get(r.get("sku"))
         if aid is None or not r.get("day"):
             continue
@@ -224,7 +233,7 @@ def _attach_docs(db: Session, rows: list[dict], days: int):
         ops = _KIND_OPS.get(r["kind"])
         cand = [x for x in docs.get((r["store_id"], aid), []) if (ops is None or x[1] in ops)
                 and abs((x[0] - day).days) <= (1 if ops else 0)]
-        if r["kind"] == "negative" and not cand:
+        if r["kind"] in ("negative", "phantom") and not cand:
             # отрицателна: последният документ с движение преди/в деня
             cand = sorted([x for x in docs.get((r["store_id"], aid), []) if x[0] <= day], key=lambda x: x[0])[-1:]
         if not cand:
@@ -281,6 +290,8 @@ def _items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict
         out.append({"kind": kind, "store_id": sid, "store": stores[sid], "sku": sku(aid), "name": name(aid),
                     "qty": float(q), "eur": round(float(mny or 0) or float(q) * price(aid), 2),
                     "day": at.astimezone(SOFIA).strftime("%d.%m"),
+                    "docs": [{"doc": f"ревизия {num}", "op": None, "date": at.astimezone(SOFIA).strftime("%d.%m.%Y"),
+                              "partner": None, "dup": False, "is_return": False, "has_return": False}],
                     "info": f"по Мистрал {float(b):g}, намерено {float(f):g}"})
 
     # 2) брак и ръчни корекции надолу (корекциите в ден на ревизия са от нея - не ги броим двойно)
@@ -427,7 +438,13 @@ def _items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict
                 "user_a, user_b, excess_eur, examples, COALESCE(fixed, FALSE) FROM dup_docs WHERE day >= :d"), {"d": dsince2}).all():
             if (store_id and sid != store_id) or sid not in stores:
                 continue
+            ddm = re.search(r"дата на документа (\d\d\.\d\d\.\d{4})", x or "")
+            ddt = ddm.group(1) if ddm else None
             out.append({"kind": "double_delivery", "store_id": sid, "store": stores[sid], "sku": "",
+                        "docs": [{"doc": str(da), "op": None, "date": ddt, "partner": p, "dup": True,
+                                  "is_return": False, "has_return": False},
+                                 {"doc": str(dbb), "op": None, "date": ddt, "partner": p, "dup": True,
+                                  "is_return": False, "has_return": False}], "doc_dup": not fx,
                         "name": f"{p}: № {da} и № {dbb}", "qty": n, "eur": 0.0 if fx else float(e or 0),
                         "day": d.strftime("%d.%m"), "fixed": bool(fx),
                         "info": (f"№ {da} ({ta} ч., {float(sa or 0):.2f} €, {la} реда) и № {dbb} ({tb} ч., {float(sb or 0):.2f} €, "
