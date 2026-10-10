@@ -1335,8 +1335,10 @@ async function loadAnom() {
 let AL = { rows: [], lim: 200 };
 async function showAnom({ kind, store_id, title }) {
   $("anDetail").innerHTML = `<div class="empty loading">Зареждам…</div>`; $("anDetail").scrollIntoView({ behavior: "smooth" });
-  const q = new URLSearchParams({ days: $("anDays").value }); if (kind) q.set("kind", kind); if (store_id) q.set("store_id", store_id);
+  const rev = ["shortage", "surplus"].includes(kind);   // ревизия: липсите и излишъците заедно
+  const q = new URLSearchParams({ days: $("anDays").value }); if (kind && !rev) q.set("kind", kind); if (store_id) q.set("store_id", store_id);
   const d = await api(`/ui/anomalies/list?${q}`);
+  if (rev) { d.rows = d.rows.filter(r => ["shortage", "surplus"].includes(r.kind)); title = "Ревизии — липси и излишъци"; }
   AL = { rows: d.rows.sort((a, b) => (!!a.fixed - !!b.fixed) || (!!b.doc_dup - !!a.doc_dup) || (a.eur || 0) - (b.eur || 0)), lim: 200, title, kinds: d.kinds };
   renderAnom();
 }
