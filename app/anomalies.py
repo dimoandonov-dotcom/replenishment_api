@@ -549,7 +549,13 @@ def _items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict
 
 def summary(db: Session, days: int = 7) -> dict:
     rows = items(db, days)
-    tot = {k: {"n": 0, "qty": 0.0, "eur": 0.0, "fixed": 0} for k in KIND}
+    tot = {k: {"n": 0, "qty": 0.0, "eur": 0.0, "fixed": 0, "revs": 0} for k in KIND}
+    revs = defaultdict(set)
+    for r in rows:
+        if r["kind"] in ("shortage", "surplus"):
+            revs[r["kind"]].add((r["store_id"], ((r.get("docs") or [{}])[0]).get("doc")))
+    for k_, v_ in revs.items():
+        tot[k_]["revs"] = len(v_)
     by = defaultdict(lambda: {k: {"n": 0, "qty": 0.0, "eur": 0.0} for k in KIND})
     names = {}
     for r in rows:
