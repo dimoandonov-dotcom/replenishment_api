@@ -174,7 +174,7 @@ def calculate_line(
     ):
         return None
 
-    if avg_daily_sales and avg_daily_sales > 0 and current_stock >= avg_daily_sales * SKIP_COVER_DAYS:
+    if avg_daily_sales and avg_daily_sales > 0 and current_stock >= avg_daily_sales * (SKIP_COVER_DAYS + extra_days):
         return None   # стига за 2+ дни, а доставка има всеки ден
 
     if avg_daily_sales and avg_daily_sales > 0:
@@ -196,7 +196,7 @@ def calculate_line(
         elif current_stock <= 0:
             force = True                       # свършил е и се продава - рафтът да не е празен
         else:
-            force = current_stock < avg_daily_sales * MIN_PACK_COVER_DAYS
+            force = current_stock < avg_daily_sales * (MIN_PACK_COVER_DAYS + extra_days)
         # бавен артикул, който се поръчва само на цели опаковки: ако една опаковка стига
         # за повече от MAX_PACK_COVER_DAYS дни - не се поръчва автоматично (решава човек)
         if force and setting.pack_size > 1 and setting.pack_size / avg_daily_sales > MAX_PACK_COVER_DAYS:
@@ -406,6 +406,12 @@ def generate_order_lines(
         )
 
         cover_extra = 1 if order_date.isoweekday() == 6 else 0   # събота: неделя без доставка
+        # по графика на магазина: колко дни до следващата доставка (напр. Надежда - от четвъртък до понеделник)
+        deliv = {e.delivery_weekday for e in entries if e.delivery_weekday}
+        if deliv:
+            wd = order_date.isoweekday()
+            gap = next((k for k in range(1, 8) if ((wd - 1 + k) % 7) + 1 in deliv), 1)
+            cover_extra = max(gap - 1, 0)
         # 1) явен период на затваряне (Коледа/Великден) - приоритетен
         # буфер
         if sched_today and closures:
