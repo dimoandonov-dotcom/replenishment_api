@@ -944,6 +944,38 @@ def promos_create(payload: PromoIn, db: Session = Depends(get_db)):
     return promo.create(db, payload.name, payload.start, payload.end, payload.skus)
 
 
+class CustOrderIn(BaseModel):
+    store_id: int
+    sku: str
+    qty: float
+    for_date: date
+    customer: str | None = None
+    note: str | None = None
+
+
+@router.get("/ui/customer-orders")
+def ui_customer_orders(store_id: int | None = None, db: Session = Depends(get_db)):
+    from . import custorders
+    return custorders.listing(db, store_id)
+
+
+@router.post("/customer-orders")
+def customer_orders_create(payload: CustOrderIn, request: Request, db: Session = Depends(get_db)):
+    from . import custorders
+    try:
+        return custorders.create(db, payload.store_id, payload.sku.strip(), payload.qty, payload.for_date,
+                                 payload.customer, payload.note, getattr(request.state, "user", None))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.delete("/customer-orders/{oid}")
+def customer_orders_cancel(oid: int, db: Session = Depends(get_db)):
+    from . import custorders
+    custorders.cancel(db, oid)
+    return {"cancelled": oid}
+
+
 @router.post("/promos/upload")
 async def promos_upload(request: Request, db: Session = Depends(get_db)):
     """Качване на брошура (Excel/PDF) -> преглед: дати + разпознати артикули. Не записва."""

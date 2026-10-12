@@ -200,6 +200,7 @@ def calculate_for_store(
     supplier_id: int | None = None,
     respect_schedule: bool = True,
     stock_override: dict | None = None,
+    run_id: int | None = None,
 ):
     """
     Изчислява (без да записва) какво трябва да се поръча за един магазин.
@@ -231,6 +232,7 @@ def calculate_for_store(
             )
         }
         settings = [s for s in settings if s.supplier_id in allowed]
+    delivery_day = (not respect_schedule) or bool(allowed)
 
     stock = stock_override if stock_override is not None else latest_stock_map(db, store_id)
     closures = load_closures(db)
@@ -318,6 +320,13 @@ def calculate_for_store(
                 ln.notes = label
     except Exception:
         db.rollback()
+    # поръчки от клиенти - над нормалната заявка, в първия ден с доставка
+    if delivery_day:
+        try:
+            from . import custorders as _co
+            _co.apply(db, store_id, order_date, combined, settings, stock, run_id)
+        except Exception:
+            db.rollback()
     try:   # брошура: защо се вдига количеството
         lab = _promo.labels(db, order_date)
         for ln in combined.lines:
@@ -397,6 +406,9 @@ def run_dispatch(
         if not res.lines:
             continue
         pos = persist_orders(db, res, sid, dispatch_run_id=run.id)
+        if any("поръчка от клиент" in (ln.notes or "") for ln in res.lines):
+            from . import custorders as _co
+            _co.mark_included(db, sid, order_date, run.id)
         orders_created += len(pos)
         lines_created += len(res.lines)
 
@@ -472,7 +484,7 @@ def recalc_run(db: Session, run_id: int, add_new: bool = False) -> dict:
             stock = {**stock_as_of(db, po.store_id, po.created_at), **stock}
         # артикулите, които сутринта не са поръчани, остават неподредени (наличност "достатъчна")
         res = calculate_for_store(db, po.store_id, po.created_at.date(), po.supplier_id,
-                                  respect_schedule=False, stock_override=stock)
+                                  respect_schedule=False, stock_override=stock, run_id=run_id)
         # другите артикули (без сутрешна наличност) калкулаторът ги пропуска като „без данни"
         new = {ln.article_id: ln for ln in res.lines if ln.article_id in old}
         if add_new:

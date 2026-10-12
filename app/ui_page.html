@@ -101,6 +101,8 @@ th[title], th.tipped { cursor:help; } th[title]::after, th.tipped::after { conte
 #thTip { position:fixed; z-index:9999; max-width:260px; background:#1f1a14; color:#fff; font-size:13px; line-height:1.4;
   padding:8px 11px; border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,.25); display:none; }
 tr.anrow.fixed > td { background:#DCFCE7 !important; } tr.anrow.fixed > td:first-child { box-shadow: inset 4px 0 0 #16A34A; }
+tr.cust > td { background:#E0ECFF; } tr.cust > td:first-child { box-shadow: inset 4px 0 0 #2563EB; }
+.tag.cust { background:#2563EB; color:#fff; }
 tr.bro > td { background:#FDECEC; } tr.bro > td:first-child { box-shadow: inset 4px 0 0 #DC2626; }
 .empty { padding:34px 12px; text-align:center; color:var(--slate); font-family:var(--mono); font-size:13px; }
 
@@ -360,8 +362,10 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <button class="go" id="reloadOrder">Преизчисли</button>
     <button class="warm" id="xlsOrder">Свали Excel</button>
     <button id="oxAll">Покажи всички графики</button>
+    <button id="coBtn" style="background:#2563EB;color:#fff">👤 Поръчка от клиент</button>
     <span class="msg" id="ordMsg"></span>
   </div>
+  <div id="coPanel"></div>
   <div class="totals" id="ordTotals"></div>
   <div class="scroll"><table>
     <thead><tr>
@@ -764,7 +768,8 @@ async function loadBoard() {
 let ordLines = [], edits = {}, curIdx = 0, ORD_EX = { days: [], items: {} };
 async function initOrders() {
   const list = await stores(); fillStoreSelect($("storeSel"), list);
-  $("storeSel").onchange = () => loadOrder();
+  $("storeSel").onchange = () => { loadOrder(); if ($("coList")) coList(); };
+  $("coBtn").onclick = coOpen;
   $("prevStore").onclick = () => step(-1);
   $("nextStore").onclick = () => step(1);
   $("reloadOrder").onclick = () => loadOrder();
@@ -801,8 +806,10 @@ async function loadOrder() {
       const val = price != null ? price * l.ordered_quantity : null;
       if (val) value += val; units += l.ordered_quantity;
       const promo = art.promo_price != null ? `<span class="tag warn">промо до ${esc(art.promo_until)}</span>` : "";
-      const bro = (l.notes || "").includes("брошура") ? (l.notes.split(" · ")[0]) : "";
-      return `<tr data-sku="${esc(l.sku)}" class="${bro ? "bro" : ""}">
+      const nts = (l.notes || "").split(" · ");
+      const cust = nts.find(x => x.includes("поръчка от клиент")) || "";
+      const bro = nts.find(x => x.includes("брошура")) || "";
+      return `<tr data-sku="${esc(l.sku)}" class="${cust ? "cust" : bro ? "bro" : ""}">
         <td>${esc(l.sku)}</td>
         <td class="name ox" style="cursor:pointer" title="Графика и обяснение">▸ ${esc(art.name || l.name)}</td>
         <td class="num ${l.current_stock < l.min_stock ? "low" : ""}">${fmtN(l.current_stock)}</td>
@@ -812,7 +819,7 @@ async function loadOrder() {
         <td class="num">${l.pack_size > 1 ? l.pack_size : "бр."}</td>
         <td class="num">${fmtE(price)}</td>
         <td class="num">${fmtE(val)}</td>
-        <td>${bro ? `<span class="tag bro">${esc(bro)}</span> ` : ""}${promo}${LOCK[l.sku] ? ' <span class="tag" title="Коригирано ръчно — ученето не го пипа">🔒</span>' : ''}</td></tr>
+        <td>${cust ? `<span class="tag cust">${esc(cust)}</span> ` : ""}${bro ? `<span class="tag bro">${esc(bro)}</span> ` : ""}${promo}${LOCK[l.sku] ? ' <span class="tag" title="Коригирано ръчно — ученето не го пипа">🔒</span>' : ''}</td></tr>
         <tr class="oxrow" data-for="${esc(l.sku)}" style="display:none"><td colspan="10" style="background:var(--paper)"></td></tr>`;
     });
     $("ordBody").innerHTML = rows.join("") || `<tr><td colspan="10" class="empty">В този магазин няма артикул под минимума.</td></tr>`;
@@ -1725,6 +1732,52 @@ document.addEventListener("click", e => {
   clearTimeout(tip._t); tip._t = setTimeout(() => tip.style.display = "none", 4000);
 });
 document.addEventListener("scroll", () => { const t = document.getElementById("thTip"); if (t) t.style.display = "none"; }, true);
+
+/* ---------- поръчки от клиенти ---------- */
+function nextDay() { const d = new Date(Date.now() + 3 * 3600e3); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); }
+async function coList() {
+  const sid = $("storeSel").value; if (!sid) return;
+  const rows = await api(`/ui/customer-orders?store_id=${sid}`).catch(() => []);
+  const open = rows.filter(r => r.status !== "отказана");
+  $("coList") && ($("coList").innerHTML = open.length ? `<div class="scroll" style="margin-top:8px"><table><thead><tr><th>За дата</th><th>Код</th><th>Артикул</th><th class="num">Бройки</th><th>Клиент</th><th>Статус</th><th></th></tr></thead><tbody>
+    ${open.map(r => `<tr><td>${esc(r.for_date)}</td><td>${esc(r.sku)}</td><td class="name">${esc(r.name)}</td><td class="num"><b>${fmtN(r.qty)}</b></td>
+      <td>${esc(r.customer)}${r.note ? `<div class="muted" style="font-size:12px">${esc(r.note)}</div>` : ""}</td>
+      <td><span class="tag ${r.status === "в заявка" ? "" : "cust"}">${esc(r.status)}${r.included ? " " + esc(r.included) : ""}</span></td>
+      <td>${r.status === "чака" ? `<button class="mini" data-codel="${r.id}">Откажи</button>` : ""}</td></tr>`).join("")}</tbody></table></div>` : `<div class="note" style="margin-top:6px">Няма поръчки от клиенти за този магазин.</div>`);
+  document.querySelectorAll("[data-codel]").forEach(b => b.onclick = async () => {
+    if (!confirm("Да откажа ли тази поръчка от клиент?")) return;
+    await api(`/customer-orders/${b.dataset.codel}`, { method: "DELETE" }); coList(); loadOrder && loadOrder(); });
+}
+async function coOpen() {
+  const p = $("coPanel");
+  if (p.innerHTML) { p.innerHTML = ""; return; }
+  const a = await arts();
+  const opts = Object.values(a).filter(x => !x.no_order).map(x => `<option value="${esc(x.sku)} · ${esc(x.name)}">`).join("");
+  p.innerHTML = `<div class="tile" style="margin:10px 0;padding:14px">
+    <div class="l">👤 ПОРЪЧКА ОТ КЛИЕНТ — ${esc($("storeSel").selectedOptions[0]?.textContent || "")}</div>
+    <p class="note" style="margin:6px 0 10px">Добавя се <b>над</b> нормалната заявка (не пипа мин/макс), в първата заявка за избраната дата или след нея. Редът е в синьо.</p>
+    <div class="bar" style="flex-wrap:wrap">
+      <input id="coArt" list="coArts" placeholder="код или име на артикул" style="min-width:260px;flex:1">
+      <datalist id="coArts">${opts}</datalist>
+      <input id="coQty" type="number" min="1" step="1" placeholder="бройки" style="width:90px">
+      <input id="coDate" type="date" value="${nextDay()}">
+      <input id="coCust" placeholder="клиент (име / телефон)" style="min-width:180px">
+      <input id="coNote" placeholder="бележка" style="min-width:140px">
+      <button class="warm" id="coSave">Добави</button><span class="msg" id="coMsg"></span>
+    </div>
+    <div id="coList"></div></div>`;
+  $("coSave").onclick = async () => {
+    const sku = ($("coArt").value || "").split(" · ")[0].trim(), qty = +$("coQty").value;
+    if (!sku || !qty) return msg("coMsg", "Избери артикул и бройки", false);
+    try {
+      await api("/customer-orders", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ store_id: +$("storeSel").value, sku, qty, for_date: $("coDate").value, customer: $("coCust").value, note: $("coNote").value }) });
+      msg("coMsg", "✅ Добавено"); $("coArt").value = ""; $("coQty").value = ""; $("coCust").value = ""; $("coNote").value = "";
+      coList(); if (typeof loadOrder === "function") loadOrder();
+    } catch (e) { msg("coMsg", e.message, false); }
+  };
+  coList();
+}
 
 /* ---------- брошура и тихи акции ---------- */
 let PM = { kind: "brochure", data: null, filter: "", sort: "rev" };
