@@ -32,6 +32,7 @@ GRP_DROP_EUR = 15.0          # ... и поне 15 € на ден загуба
 ART_DROP_EUR = 2.0           # артикул в причините: поне 2 € на ден загуба
 CHAIN_PCT = -10.0            # групата пада и във веригата -> общ спад
 HOURS_DIFF_MIN = 45          # отворил по-късно / затворил по-рано с 45+ мин.
+SHELF_MIN_PER_DAY = 3.0      # „не се продава при наличност“ само за артикули с 3+ бр./ден (иначе 0 е случайност)
 
 CAUSES = {
     "stock": "Свършила наличност",
@@ -42,6 +43,7 @@ CAUSES = {
     "traffic": "По-малко клиенти",
     "hours": "Работил по-кратко",
     "closed": "Без оборот (затворен / няма данни)",
+    "noise": "Нормално колебание (малки артикули)",
     "other": "По-слаби продажби (без ясна причина)",
 }
 
@@ -99,6 +101,49 @@ def sync_receipts(db: Session, days: int = 3) -> dict:
                 n += 1
             db.commit()
     return {"days": days, "rows": n}
+
+
+def resync_sales_day(db: Session, d: date) -> int:
+    """Пак дърпа продажбите за деня (в 02:30 някои магазини още не са качили всички бележки)."""
+    from . import mistral
+    from .anomalies import _loc_map
+    from .salesall import _bulk
+    with mistral.connect() as conn:
+        cur = conn.cursor()
+        locs = _loc_map(db, cur)
+        L = ",".join(map(str, locs))
+        cur.execute(f"""
+            SELECT c.LOCATIONID AS loc, c.MATERIALCODE AS code, SUM(c.QTY) AS q,
+                   SUM(c.QTY * c.SALEPRICE) AS rev, SUM(c.QTY * c.AVGDELIVERYPRICE) AS cost
+            FROM SALE s WITH (NOLOCK)
+            JOIN SALECONTENT c WITH (NOLOCK) ON c.NUM = s.NUM AND c.LOCATIONID = s.LOCATIONID
+            WHERE s.REPORTINGDATE = %s AND s.LOCATIONID IN ({L})
+            GROUP BY c.LOCATIONID, c.MATERIALCODE""", (d.isoformat(),))
+        agg: dict[tuple, list] = {}
+        for r in cur.fetchall():
+            sid = locs.get(r["loc"])
+            if sid is None:
+                continue
+            a = agg.setdefault((sid, int(r["code"])), [0.0, 0.0, 0.0])
+            a[0] += float(r["q"] or 0); a[1] += float(r["rev"] or 0); a[2] += float(r["cost"] or 0)
+    if not agg:
+        return 0
+    db.execute(text("DELETE FROM sa_sales WHERE day = :d"), {"d": d})
+    _bulk(db, "INSERT INTO sa_sales(store_id, code, day, qty, rev, cost) VALUES %s",
+          [(k[0], k[1], d, v[0], v[1], v[2]) for k, v in agg.items()])
+    db.commit()
+    return len(agg)
+
+
+def morning(db: Session) -> dict:
+    """Сутрешна поправка (08:00): вчерашните продажби и бонове пак, после отчетът наново."""
+    y = datetime.now(SOFIA).date() - timedelta(days=1)
+    out = {"day": y.isoformat(), "sales_rows": resync_sales_day(db, y)}
+    out["receipts"] = sync_receipts(db, 1)
+    out["rollup"] = rollup(db, 1)
+    for n in (1, 7):
+        report(db, y, n, refresh=True)
+    return out
 
 
 def rollup(db: Session, days: int = 3) -> int:
@@ -415,8 +460,10 @@ def _article_causes(db: Session, day: date, n: int, flagged, base_weeks, chain_p
             k, t = "promo", f"свърши акцията (продаваше {qb / n:.1f}/ден в акция, сега {q0 / n:.1f})"
         elif (sq is not None and sq <= 0) or (sq is None and q0 == 0):
             k, t = "stock", f"свършила наличност ({'0 бр.' if sq is None else f'{sq:g} бр.'} в края на деня)"
-        elif q0 == 0 and sq and sq > 0:
-            k, t = "shelf", f"0 продажби при наличност {sq:g} бр. — провери рафта/цената/срока"
+        elif q0 == 0 and sq and sq > 0 and qb / n >= SHELF_MIN_PER_DAY:
+            k, t = "shelf", f"0 продажби при наличност {sq:g} бр. (обикновено {qb / n:.1f}/ден) — провери рафта/цената/срока"
+        elif qb / n < SHELF_MIN_PER_DAY and q0 < qb:
+            k, t = "noise", f"малки продажби ({qb / n:.1f}/ден) — нормално колебание"
         elif p0 and pb and p0 > pb * 1.04:
             k, t = "price", f"по-висока цена: {p0:.2f} € срещу {pb:.2f} € ({_pct(p0, pb):+.0f}%)"
         elif sq is not None and qb > 0 and sq < qb / n * 0.5:
@@ -440,7 +487,7 @@ def _article_causes(db: Session, day: date, n: int, flagged, base_weeks, chain_p
             # частта от спада, която идва от общия спад във веригата
             chain_part = max(0.0, min(lost_g, gr["base"] * -cp / 100))
             causes.append({"k": "chain", "t": f"групата пада и в цялата верига ({cp:+.0f}%) — сезон, време, празник или доставчик"})
-        for k in ("stock", "promo", "price", "shelf"):
+        for k in ("stock", "promo", "price", "shelf", "noise"):
             if split.get(k):
                 nn = sum(1 for a in arts if a["k"] == k)
                 causes.append({"k": k, "t": f"{CAUSES[k]}: {nn} арт. (−{_eur(split[k])})"})

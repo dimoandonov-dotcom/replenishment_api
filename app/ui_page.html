@@ -244,7 +244,7 @@ nav a:hover { transform:translateY(-2px); }
 nav a.on { background:var(--c,var(--amber)); color:#fff; box-shadow:0 8px 20px color-mix(in srgb,var(--c,var(--amber)) 40%,transparent); }
 nav a.on::before { background:#fff; box-shadow:0 0 0 3px rgba(255,255,255,.35); }
 nav a[data-tab="board"]{--c:#D9621C} nav a[data-tab="orders"]{--c:#2F7DD1} nav a[data-tab="assort"]{--c:#E9A23B}
-nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A} nav a[data-tab="qual"]{--c:#0EA5A4} nav a[data-tab="anal"]{--c:#C026D3} nav a[data-tab="anom"]{--c:#9F1239} nav a[data-tab="promo"]{--c:#DB2777}
+nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A} nav a[data-tab="qual"]{--c:#0EA5A4} nav a[data-tab="anal"]{--c:#C026D3} nav a[data-tab="anom"]{--c:#9F1239} nav a[data-tab="promo"]{--c:#DB2777} nav a[data-tab="turn"]{--c:#0F766E}
 
 /* ---------- бутони ---------- */
 button { border-radius:10px; border:1px solid var(--line-strong); background:var(--raised); font-family:var(--head); font-weight:700;
@@ -332,6 +332,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <a href="#plano" data-tab="plano">Планограма</a>
   <a href="#anal" data-tab="anal">Анализи</a>
   <a href="#promo" data-tab="promo">Брошура и акции</a>
+  <a href="#turn" data-tab="turn">Обороти</a>
   <a href="#qual" data-tab="qual">Качество</a>
   <a href="#anom" data-tab="anom">Аномалии</a>
   <a href="#nord" data-tab="nord">Не се поръчват</a>
@@ -546,6 +547,54 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   </table></div>
 </section>
 
+<!-- ============ ОБОРОТИ ============ -->
+<section class="tab" id="tab-turn">
+  <div class="bar">
+    <input type="date" id="tuDay">
+    <select id="tuN"><option value="1">1 ден</option><option value="7">7 дни</option></select>
+    <button id="tuRe">↻ Преизчисли</button>
+    <button id="tuTxt" class="warm">📋 Резюме за Viber</button>
+    <span class="note" id="tuInfo"></span><span class="msg" id="tuMsg"></span>
+  </div>
+  <details class="help" style="margin:0 0 14px;background:var(--paper,#fffaf3);border:1px solid var(--line,#e7dccb);border-radius:14px;padding:10px 14px">
+    <summary style="cursor:pointer;font-weight:600">❓ Как да чета този раздел</summary>
+    <div class="note" style="line-height:1.7;margin-top:8px;font-size:12.5px">
+    Всяка нощ (02:30) се дърпат касовите бележки от Мистрал за всички доставчици и тук излиза отчетът за <b>вчера</b>.<br><br>
+    <b>С какво се сравнява</b> — с <b>обичайното ниво</b>: средното от <b>същия ден от седмицата през предните 4 седмици</b> (вторник с вторници, събота със съботи). При „7 дни“ — последните 7 дни срещу същите 7 дни от предните 4 седмици. Дни, в които магазинът няма оборот, не влизат в базата.<br><br>
+    <b>Кога е спад</b> — магазин в червено при −8% и повече; група в магазин — при −15% и поне 15 € загуба на ден.<br><br>
+    <b>Как се търси причината</b><br>
+    • <b>Свършила наличност</b> — артикулът се продава обикновено, а вчера е на 0 или почти 0 в края на деня.<br>
+    • <b>Свършила акция</b> — в базовите дни е бил в промоция, вчера не.<br>
+    • <b>По-висока цена</b> — средната продажна цена е с 4%+ над обичайната.<br>
+    • <b>Не се продава при наличност</b> — 0 продажби, но по Мистрал има бройки: провери рафта, цената, срока (или наличността е фантомна).<br>
+    • <b>Общ спад във веригата</b> — групата пада във всички магазини: сезон, време, празник, доставчик. Не е проблем на магазина.<br>
+    • <b>По-малко клиенти / работил по-кратко</b> — по броя касови бонове и първия/последния бон.<br>
+    • <b>Нормално колебание</b> — артикули с под 3 бр. на ден: ден с 0 продажби е случайност, не проблем.<br>
+    • <b>Без ясна причина</b> — нищо от горното; тук трябва разговор с управителя.<br><br>
+    <b>Данните</b> се дърпат в 02:30 и пак в 08:00 (някои магазини качват бележките със закъснение) — сутрешният отчет е окончателният.<br><br>
+    <b>Как да анализираш</b>: 1) плочките и „Причини“ — откъде идва загубата; 2) „Най-големи спадове“ — цъкни на ред за артикулите; 3) „Магазини“ — цъкни за всички групи и графика за 8 седмици.
+    </div>
+  </details>
+  <div class="board" id="tuKpis"></div>
+  <div id="tuCauses"></div>
+  <div id="tuStore"></div>
+  <div class="head"><h2>Най-големи спадове</h2><span class="note">магазин × група · цъкни за артикулите и причините</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Магазин</th><th>Група</th><th class="num">Загуба €</th><th class="num" title="Спрямо обичайното за магазина">Спад %</th><th class="num" title="Как се движи групата във всички магазини">Верига %</th><th>Причини</th></tr></thead>
+    <tbody id="tuDrops"></tbody>
+  </table></div>
+  <div class="head"><h2>Магазини</h2><span class="note">най-големият спад отгоре · цъкни за групите</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Магазин</th><th class="num">Оборот €</th><th class="num">Обичайно €</th><th class="num">Разлика €</th><th class="num">%</th><th class="num" title="Касови бонове: вчера / обичайно">Бонове</th><th class="num" title="Средна сметка: вчера / обичайно">Ср. сметка €</th><th title="Първи и последен бон">Часове</th><th>Причини</th></tr></thead>
+    <tbody id="tuStores"></tbody>
+  </table></div>
+  <div class="head"><h2>Групи във веригата</h2><span class="note">всички магазини заедно</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Група</th><th class="num">Оборот €</th><th class="num">Обичайно €</th><th class="num">Разлика €</th><th class="num">%</th></tr></thead>
+    <tbody id="tuGroups"></tbody>
+  </table></div>
+</section>
+
 <!-- ============ НЕ СЕ ПОРЪЧВАТ ============ -->
 <section class="tab" id="tab-nord">
   <p class="note" style="margin:0 0 14px;line-height:1.6">Всичко, което при сегашните настройки <b>никога няма да влезе в заявка</b>, по магазини и по причина.
@@ -691,7 +740,7 @@ const loaded = {};
 function show(tab) {
   document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + tab));
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: loadAnom, promo: initPromo, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: loadAnom, promo: initPromo, turn: initTurn, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -1779,6 +1828,104 @@ async function coOpen() {
   coList();
 }
 
+/* ---------- обороти ---------- */
+let TU = null;
+const TUC = { stock: "#DC2626", promo: "#DB2777", price: "#D97706", shelf: "#7C3AED", chain: "#64748B", traffic: "#2563EB", hours: "#0891B2", closed: "#111827", basket: "#2563EB", noise: "#CBD5E1", other: "#A8A29E" };
+const pctS = p => p == null ? "—" : (p > 0 ? "+" : "") + Number(p).toLocaleString("bg-BG", { maximumFractionDigits: 1 }) + "%";
+const pctC = p => p == null ? "" : (p <= -8 ? "low" : (p >= 5 ? "" : ""));
+function tuCause(c) { return `<span style="display:inline-block;margin:1px 4px 1px 0;padding:1px 8px;border-radius:999px;font-size:11.5px;background:${TUC[c.k] || "#999"}1a;color:${TUC[c.k] || "#555"};border:1px solid ${TUC[c.k] || "#999"}55">${esc(c.t)}</span>`; }
+function initTurn() {
+  $("tuN").onchange = () => loadTurn(); $("tuDay").onchange = () => loadTurn();
+  $("tuRe").onclick = () => loadTurn(true); $("tuTxt").onclick = tuSummary;
+  loadTurn();
+}
+async function loadTurn(refresh) {
+  $("tuMsg").textContent = refresh ? "смятам…" : "";
+  const q = new URLSearchParams({ n: $("tuN").value }); if ($("tuDay").value) q.set("day", $("tuDay").value); if (refresh) q.set("refresh", "1");
+  const d = await api(`/ui/analytics/turnover?${q}`).catch(e => ({ ready: false, reason: e.message }));
+  TU = d; $("tuMsg").textContent = "";
+  if (!d.ready) { $("tuKpis").innerHTML = `<div class="empty">${esc(d.reason || "Няма данни")}</div>`; ["tuCauses", "tuStore", "tuDrops", "tuStores", "tuGroups"].forEach(i => $(i).innerHTML = ""); return; }
+  if (!$("tuDay").value) $("tuDay").value = d.day;
+  $("tuInfo").textContent = `${d.period} (${d.n === 1 ? d.weekday : "7 дни"}) · сравнено със ${d.base_info}${d.partial_base ? " · ⚠ базата е непълна" : ""} · смятано ${d.built_at || ""}`;
+  const t = d.totals;
+  const tiles = [
+    ["ОБОРОТ", fmtE(t.rev) + " €", t.pct <= -3 ? "a" : "t", `обичайно ${fmtE(t.base)} € · <b>${pctS(t.pct)}</b> (${t.diff >= 0 ? "+" : ""}${fmtE(t.diff)} €)`],
+    ["КАСОВИ БОНОВЕ", fmtN(t.receipts), (t.receipts && t.receipts_base && t.receipts < t.receipts_base * 0.97) ? "a" : "t", t.receipts_base ? `обичайно ${fmtN(t.receipts_base)} · <b>${pctS(t.receipts_base ? 100 * (t.receipts - t.receipts_base) / t.receipts_base : null)}</b>` : "броят се от тази нощ"],
+    ["СРЕДНА СМЕТКА", t.basket ? fmtE(t.basket) + " €" : "—", "", t.basket_base ? `обичайно ${fmtE(t.basket_base)} €` : ""],
+    ["МАГАЗИНИ В СПАД", `${t.stores_down} <span style="font-size:13px">от ${t.stores}</span>`, t.stores_down ? "a" : "t", "оборот −8% и повече спрямо обичайното"],
+    ["ЗАГУБА В ГРУПИТЕ", fmtE(t.lost) + " €", t.lost > 0 ? "a" : "t", "сума на спадовете по групи в магазините"]];
+  $("tuKpis").innerHTML = tiles.map(([l, v, c, sub]) => `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${sub}</div></div>`).join("");
+  const cs = d.causes || [], mx = Math.max(...cs.map(c => c.eur), 1);
+  $("tuCauses").innerHTML = cs.length ? `<div class="head"><h2>Причини за спада</h2><span class="note">загубени € по причина, за всички магазини</span></div>
+    <div style="max-width:760px;margin-bottom:14px">${cs.map(c => `<div style="display:flex;align-items:center;gap:10px;margin:5px 0;font-size:13px">
+      <div style="width:210px;flex:none">${esc(c.name)}</div>
+      <div style="flex:1;background:var(--line);border-radius:6px;height:16px;overflow:hidden"><div style="width:${100 * c.eur / mx}%;height:100%;background:${TUC[c.k] || "#999"}"></div></div>
+      <div style="width:120px;text-align:right;font-family:var(--mono)">${fmtE(c.eur)} € · ${c.share}%</div></div>`).join("")}</div>` : "";
+  $("tuDrops").innerHTML = (d.drops || []).map((r, i) => `<tr data-dr="${i}" style="cursor:pointer"><td class="name">${esc(r.store)}</td><td>▸ ${esc(r.grp)}</td>
+    <td class="num low"><b>−${fmtE(r.lost)}</b></td><td class="num low">${pctS(r.pct)}</td><td class="num ${r.chain_pct <= -10 ? "low" : ""}">${pctS(r.chain_pct)}</td>
+    <td style="min-width:260px">${(r.causes || []).map(tuCause).join("")}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">Няма групи в спад 🎉</td></tr>`;
+  document.querySelectorAll("#tuDrops tr[data-dr]").forEach(tr => tr.onclick = () => tuToggleArts(tr, d.drops[+tr.dataset.dr], 6));
+  $("tuStores").innerHTML = d.stores.map(r => `<tr data-ts="${r.store_id}" style="cursor:pointer${r.flag ? ";background:#FEF2F2" : ""}"><td class="name">${esc(r.store)}</td>
+    <td class="num"><b>${fmtE(r.rev)}</b></td><td class="num">${fmtE(r.base)}</td><td class="num ${r.diff < 0 ? "low" : ""}">${r.diff >= 0 ? "+" : ""}${fmtE(r.diff)}</td>
+    <td class="num ${r.flag ? "low" : ""}"><b>${pctS(r.pct)}</b></td>
+    <td class="num">${r.receipts != null ? fmtN(r.receipts) : "—"}${r.receipts_base ? `<span class="muted"> / ${fmtN(r.receipts_base)}</span>` : ""}</td>
+    <td class="num">${r.basket ? fmtE(r.basket) : "—"}${r.basket_base ? `<span class="muted"> / ${fmtE(r.basket_base)}</span>` : ""}</td>
+    <td style="white-space:nowrap">${r.first ? `${r.first}–${r.last}` : "—"}</td>
+    <td style="min-width:220px">${r.causes.map(tuCause).join("")}${r.groups.filter(g => g.flag).length ? `<span class="muted" style="font-size:12px">${r.groups.filter(g => g.flag).length} групи в спад</span>` : ""}</td></tr>`).join("");
+  document.querySelectorAll("#tuStores tr[data-ts]").forEach(tr => tr.onclick = () => tuStore(+tr.dataset.ts));
+  $("tuGroups").innerHTML = (d.groups || []).map(g => `<tr><td class="name">${esc(g.grp)}</td><td class="num"><b>${fmtE(g.rev)}</b></td><td class="num">${fmtE(g.base)}</td>
+    <td class="num ${g.diff < 0 ? "low" : ""}">${g.diff >= 0 ? "+" : ""}${fmtE(g.diff)}</td><td class="num ${g.pct <= -10 ? "low" : ""}"><b>${pctS(g.pct)}</b></td></tr>`).join("");
+}
+function tuArtsTable(arts) {
+  if (!arts || !arts.length) return `<div class="note" style="padding:6px">Няма отделни артикули със загуба над 2 € — спадът е разпределен по много артикули.</div>`;
+  return `<div class="scroll"><table><thead><tr><th>Код</th><th>Артикул</th><th class="num">Бр. сега</th><th class="num">Бр. обичайно</th><th class="num">Наличност</th><th class="num">Загуба €</th><th>Причина</th></tr></thead><tbody>
+    ${arts.map(a => `<tr><td>${esc(a.code)}</td><td class="name">${esc(a.name)}</td><td class="num">${fmtN(a.qty)}</td><td class="num">${fmtN(a.qty_base)}</td>
+      <td class="num ${a.stock != null && a.stock <= 0 ? "low" : ""}">${a.stock == null ? "—" : fmtN(a.stock)}</td><td class="num low">−${fmtE(a.lost)}</td><td>${tuCause({ k: a.k, t: a.cause })}</td></tr>`).join("")}</tbody></table></div>`;
+}
+function tuToggleArts(tr, drop, cols) {
+  const nx = tr.nextElementSibling;
+  if (nx && nx.classList.contains("tuarts")) { nx.remove(); return; }
+  const st = TU.stores.find(s => s.store_id === drop.store_id), g = st && st.groups.find(x => x.grp === drop.grp);
+  const row = document.createElement("tr"); row.className = "tuarts";
+  row.innerHTML = `<td colspan="${cols}" style="background:var(--paper)"><div style="padding:6px 4px;position:sticky;left:0;max-width:min(1100px, calc(100vw - 48px))">${g ? tuArtsTable(g.articles) : st ? `<div class="note">${(st.causes || []).map(c => esc(c.t)).join(" · ")}</div>` : ""}</div></td>`;
+  tr.after(row);
+}
+async function tuStore(sid) {
+  const st = TU.stores.find(s => s.store_id === sid); if (!st) return;
+  const box = $("tuStore");
+  box.innerHTML = `<div class="tile" style="margin:10px 0;padding:14px"><div class="l">${esc(st.store)} — ${esc(TU.period)}</div><div class="empty loading">Зареждам…</div></div>`;
+  box.scrollIntoView({ behavior: "smooth" });
+  const h = await api(`/ui/analytics/turnover/store?store_id=${sid}`).catch(() => ({ days: [] }));
+  const ds = h.days || [], mx = Math.max(...ds.map(x => x.rev), 1), W = 8, H = 90;
+  const bars = ds.map((x, i) => `<rect x="${i * W}" y="${H - H * x.rev / mx}" width="${W - 2}" height="${H * x.rev / mx}" rx="1.5" fill="${i === ds.length - 1 ? "#0F766E" : (x.wd === "н" || x.wd === "с" && i % 7 === 5 ? "#94A3B8" : "#CBD5E1")}"><title>${x.day} (${x.wd}) · ${fmtE(x.rev)} €${x.receipts != null ? " · " + x.receipts + " бона" : ""}</title></rect>`).join("");
+  box.innerHTML = `<div class="tile" style="margin:10px 0;padding:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div class="l">${esc(st.store)} — ${esc(TU.period)} · ${pctS(st.pct)}</div><button class="mini" onclick="$('tuStore').innerHTML=''">✕</button></div>
+    <div style="margin:6px 0">${st.causes.map(tuCause).join("")}</div>
+    <div class="note" style="margin:6px 0 2px">Оборот по дни, последните 8 седмици (задръж/цъкни на стълбче за стойността)</div>
+    <svg viewBox="0 0 ${ds.length * W} ${H}" style="width:100%;max-width:${ds.length * 12}px;height:${H}px" preserveAspectRatio="none">${bars}</svg>
+    <div class="scroll" style="margin-top:8px"><table><thead><tr><th>Група</th><th class="num">Оборот €</th><th class="num">Обичайно €</th><th class="num">Разлика €</th><th class="num">%</th><th class="num">Верига %</th><th>Причини</th></tr></thead><tbody id="tuSG">
+    ${st.groups.map((g, i) => `<tr data-g="${i}" style="${g.flag ? "cursor:pointer;background:#FEF2F2" : ""}"><td class="name">${g.flag ? "▸ " : ""}${esc(g.grp)}</td><td class="num"><b>${fmtE(g.rev)}</b></td><td class="num">${fmtE(g.base)}</td>
+      <td class="num ${g.diff < 0 ? "low" : ""}">${g.diff >= 0 ? "+" : ""}${fmtE(g.diff)}</td><td class="num ${g.flag ? "low" : ""}">${pctS(g.pct)}</td><td class="num">${pctS(g.chain_pct)}</td>
+      <td style="min-width:220px">${(g.causes || []).map(tuCause).join("")}</td></tr>`).join("")}</tbody></table></div></div>`;
+  document.querySelectorAll("#tuSG tr[data-g]").forEach(tr => { const g = st.groups[+tr.dataset.g]; if (g.flag) tr.onclick = () => tuToggleArts(tr, { store_id: sid, grp: g.grp }, 7); });
+}
+function tuSummary() {
+  const d = TU; if (!d || !d.ready) return;
+  const t = d.totals, L = [];
+  L.push(`📊 Обороти ${d.period}${d.n === 1 ? " (" + d.weekday + ")" : ""}`);
+  L.push(`Оборот: ${fmtE(t.rev)} € (${pctS(t.pct)} спрямо обичайното ${fmtE(t.base)} €)`);
+  if (t.receipts && t.receipts_base) L.push(`Бонове: ${fmtN(t.receipts)} (обичайно ${fmtN(t.receipts_base)}) · ср. сметка ${fmtE(t.basket)} €`);
+  L.push(`Магазини в спад: ${t.stores_down} от ${t.stores}`);
+  if (d.causes.length) { L.push(""); L.push("Причини (загуба €):"); d.causes.slice(0, 6).forEach(c => L.push(`• ${c.name}: ${fmtE(c.eur)} € (${c.share}%)`)); }
+  const down = d.stores.filter(s => s.flag).slice(0, 8);
+  if (down.length) { L.push(""); L.push("Най-голям спад:"); down.forEach(s => L.push(`• ${s.store}: ${pctS(s.pct)} (${fmtE(s.diff)} €)${s.causes.length ? " — " + s.causes.map(c => c.t).join("; ") : ""}`)); }
+  const dr = (d.drops || []).slice(0, 8);
+  if (dr.length) { L.push(""); L.push("Групи с най-голяма загуба:"); dr.forEach(r => L.push(`• ${r.store} / ${r.grp}: −${fmtE(r.lost)} € (${pctS(r.pct)}) — ${(r.causes || []).map(c => c.t).join("; ")}`)); }
+  const txt = L.join("\n");
+  (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => msg("tuMsg", "✅ Копирано — постави във Viber"))
+    .catch(() => { $("tuStore").innerHTML = `<textarea style="width:100%;height:260px;margin:10px 0">${esc(txt)}</textarea>`; });
+}
+
 /* ---------- брошура и тихи акции ---------- */
 let PM = { kind: "brochure", data: null, filter: "", sort: "rev" };
 function initPromo() {
@@ -2102,8 +2249,8 @@ fetch("/ui/summary").then(r => {
   if (r.status === 401) { showLogin(); return; }
   api("/ui/me").then(m => { const w = document.getElementById("whoami"); if (w && m.name) w.textContent = "👤 " + m.name;
     if (m.analytics_only) {   // профил само за „Анализи"
-      document.querySelectorAll('nav a').forEach(a => { if (!["anal", "promo"].includes(a.dataset.tab)) a.remove(); });
-      document.querySelectorAll('section.tab').forEach(t => { if (!["tab-anal", "tab-promo"].includes(t.id)) t.remove(); });
+      document.querySelectorAll('nav a').forEach(a => { if (!["anal", "promo", "turn"].includes(a.dataset.tab)) a.remove(); });
+      document.querySelectorAll('section.tab').forEach(t => { if (!["tab-anal", "tab-promo", "tab-turn"].includes(t.id)) t.remove(); });
       ["kpis", "freshInfo"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
       if (location.hash !== "#anal") location.hash = "#anal";
     }
@@ -2113,8 +2260,8 @@ fetch("/ui/summary").then(r => {
       ["kpis", "freshInfo"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
       if (location.hash !== "#anom") location.hash = "#anom";
     }
-    if (!m.analytics) { ["anal", "promo"].forEach(k => { const a = document.querySelector(`nav a[data-tab="${k}"]`); if (a) a.remove();
-      const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (["#anal", "#promo"].includes(location.hash)) location.hash = "#board"; } }).catch(() => {});
+    if (!m.analytics) { ["anal", "promo", "turn"].forEach(k => { const a = document.querySelector(`nav a[data-tab="${k}"]`); if (a) a.remove();
+      const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (["#anal", "#promo", "#turn"].includes(location.hash)) location.hash = "#board"; } }).catch(() => {});
   show((location.hash || "#board").slice(1));
   updateFresh();
 });
