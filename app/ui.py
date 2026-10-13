@@ -1089,6 +1089,31 @@ def an_campaigns(kind: str = Query("brochure", pattern="^(brochure|silent)$"), d
     return salesall.campaigns(db, kind)
 
 
+@router.get("/ui/analytics/turnover")
+def an_turnover(day: date | None = None, n: int = Query(1, ge=1, le=7), refresh: bool = False,
+                db: Session = Depends(get_db)):
+    from . import turnover
+    return turnover.report(db, day, n, refresh)
+
+
+@router.get("/ui/analytics/turnover/store")
+def an_turnover_store(store_id: int, days: int = Query(56, ge=7, le=60), db: Session = Depends(get_db)):
+    from . import turnover
+    return turnover.store_history(db, store_id, days)
+
+
+@router.post("/analytics/turnover/backfill")
+def an_turnover_backfill(days: int = Query(56, ge=1, le=60)):
+    from . import turnover
+    return turnover.start_backfill(days)
+
+
+@router.get("/ui/analytics/turnover/status")
+def an_turnover_status():
+    from . import turnover
+    return turnover.status()
+
+
 @router.get("/ui/analytics/nomenclature")
 def an_nomenclature(group: str, days: int = Query(30, ge=1, le=60), db: Session = Depends(get_db)):
     from . import salesall
