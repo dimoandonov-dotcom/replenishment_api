@@ -34,6 +34,7 @@ from fastapi.responses import JSONResponse
 #  - хора: потребител + парола (APP_USER / APP_PASSWORD) -> бисквитка за сесия
 #  - машини (cron, скриптове): header X-API-Key (API_KEY)
 _API_KEY = _os.getenv("API_KEY", "").strip()
+_READONLY_API_KEY = _os.getenv("READONLY_API_KEY", "").strip()  # само GET, напр. за „Сигнали“
 APP_USER = _os.getenv("APP_USER", "").strip()
 APP_PASSWORD = _os.getenv("APP_PASSWORD", "").strip()
 SESSION_COOKIE = "minmax_session"
@@ -100,6 +101,10 @@ def is_authenticated(request: Request) -> bool:
             and _hmac.compare_digest(request.headers.get("X-Ingest-Token", ""), INGEST_TOKEN)):
         return True
     if _API_KEY and _hmac.compare_digest(request.headers.get("X-API-Key", ""), _API_KEY):
+        return True
+    # ключ само за четене (напр. за приложението „Сигнали“) - пуска само GET заявки
+    if (_READONLY_API_KEY and request.method == "GET"
+            and _hmac.compare_digest(request.headers.get("X-API-Key", ""), _READONLY_API_KEY)):
         return True
     user = session_user(request)
     if user:
