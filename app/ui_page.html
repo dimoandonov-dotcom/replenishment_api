@@ -1830,7 +1830,7 @@ async function coOpen() {
 
 /* ---------- обороти ---------- */
 let TU = null;
-const TUC = { stock: "#DC2626", promo: "#DB2777", price: "#D97706", shelf: "#7C3AED", chain: "#64748B", traffic: "#2563EB", hours: "#0891B2", closed: "#111827", basket: "#2563EB", noise: "#CBD5E1", other: "#A8A29E" };
+const TUC = { stock: "#DC2626", promo: "#DB2777", price: "#D97706", shelf: "#7C3AED", chain: "#64748B", traffic: "#2563EB", hours: "#0891B2", closed: "#111827", basket: "#2563EB", noise: "#94A3B8", other: "#A8A29E" };
 const pctS = p => p == null ? "—" : (p > 0 ? "+" : "") + Number(p).toLocaleString("bg-BG", { maximumFractionDigits: 1 }) + "%";
 const pctC = p => p == null ? "" : (p <= -8 ? "low" : (p >= 5 ? "" : ""));
 function tuCause(c) { return `<span style="display:inline-block;margin:1px 4px 1px 0;padding:1px 8px;border-radius:999px;font-size:11.5px;background:${TUC[c.k] || "#999"}1a;color:${TUC[c.k] || "#555"};border:1px solid ${TUC[c.k] || "#999"}55">${esc(c.t)}</span>`; }
@@ -1858,9 +1858,9 @@ async function loadTurn(refresh) {
   const cs = d.causes || [], mx = Math.max(...cs.map(c => c.eur), 1);
   $("tuCauses").innerHTML = cs.length ? `<div class="head"><h2>Причини за спада</h2><span class="note">загубени € по причина, за всички магазини</span></div>
     <div style="max-width:760px;margin-bottom:14px">${cs.map(c => `<div style="display:flex;align-items:center;gap:10px;margin:5px 0;font-size:13px">
-      <div style="width:210px;flex:none">${esc(c.name)}</div>
+      <div style="width:min(210px,38vw);flex:none">${esc(c.name)}</div>
       <div style="flex:1;background:var(--line);border-radius:6px;height:16px;overflow:hidden"><div style="width:${100 * c.eur / mx}%;height:100%;background:${TUC[c.k] || "#999"}"></div></div>
-      <div style="width:120px;text-align:right;font-family:var(--mono)">${fmtE(c.eur)} € · ${c.share}%</div></div>`).join("")}</div>` : "";
+      <div style="width:150px;flex:none;text-align:right;font-family:var(--mono);white-space:nowrap">${fmtE(c.eur)} € · ${c.share}%</div></div>`).join("")}</div>` : "";
   $("tuDrops").innerHTML = (d.drops || []).map((r, i) => `<tr data-dr="${i}" style="cursor:pointer"><td class="name">${esc(r.store)}</td><td>▸ ${esc(r.grp)}</td>
     <td class="num low"><b>−${fmtE(r.lost)}</b></td><td class="num low">${pctS(r.pct)}</td><td class="num ${r.chain_pct <= -10 ? "low" : ""}">${pctS(r.chain_pct)}</td>
     <td style="min-width:260px">${(r.causes || []).map(tuCause).join("")}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">Няма групи в спад 🎉</td></tr>`;
