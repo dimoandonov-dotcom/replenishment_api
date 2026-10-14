@@ -103,13 +103,14 @@ def proposals(db: Session, include_seasonal: bool = False) -> dict:
         if d and d[0] == "keep" and (datetime.now(timezone.utc) - d[3]).days < KEEP_HIDE_DAYS:
             continue
         daily = q / days
-        reason = {
-            "dead": f"0 продажби за {days} дни, а има {sq:g} бр. в {nst} маг. ({sv:,.0f} € замразени)".replace(",", " "),
-            "slow": f"{q:g} бр. за {days} дни в {stores} маг. = {per_store_month:.2f} бр./магазин на месец; "
-                    f"{share:.1f}% от оборота на подгрупата",
-            "falling": f"първа половина {q1:g} бр. → втора {q2:g} бр. ({100 * (q2 - q1) / q1:+.0f}%); "
-                       f"{per_store_month:.1f} бр./магазин на месец",
-        }[kind]
+        if kind == "dead":
+            reason = f"0 продажби за {days} дни, а има {sq:g} бр. в {nst} маг. ({sv:,.0f} € замразени)".replace(",", " ")
+        elif kind == "slow":
+            reason = (f"{q:g} бр. за {days} дни в {stores} маг. = {per_store_month:.2f} бр./магазин на месец; "
+                      f"{share:.1f}% от оборота на подгрупата")
+        else:
+            reason = (f"първа половина {q1:g} бр. → втора {q2:g} бр. ({100 * (q2 - q1) / q1:+.0f}%); "
+                      f"{per_store_month:.1f} бр./магазин на месец")
         stats[kind][0] += 1; stats[kind][1] += sv
         out.append({"code": code, "name": name or str(code), "grp": grp, "sub": sub or "", "supplier": sup or "",
                     "kind": kind, "reason": reason, "units": round(q, 1), "rev": round(r, 2),
