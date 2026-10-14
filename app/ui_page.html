@@ -572,13 +572,14 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     • <b>Нормално колебание</b> — артикули с под 3 бр. на ден: ден с 0 продажби е случайност, не проблем.<br>
     • <b>Без ясна причина</b> — нищо от горното; тук трябва разговор с управителя.<br><br>
     <b>Данните</b> се дърпат в 02:30 и пак в 08:00, 12:00 и 16:00 — някои магазини (особено 24-часовите) качват бележките със закъснение. Отчетът след 12:00 е най-точен.<br><br>
-    <b>Как да работиш</b>: всичко се цъка. Плочките и лентите с причините отварят списъка отдолу. <b>„По причини“</b> е работният списък: първо са нещата, по които се действа (свършила наличност, рафт, работно време…), отдолу са информативните (общ спад, свършили акции, колебания). <b>„По магазини“</b> — цъкни на магазин за всички групи и графика за 8 седмици. <b>„По групи“</b> — цъкни на група за магазините, в които пада.
+    <b>Как да работиш</b>: всичко се цъка. <b>„Оборот по магазини“</b> — оборотът на всеки магазин за деня, с бонове, средна сметка и марж. Плочките и лентите с причините отварят списъка отдолу. <b>„По причини“</b> е работният списък: първо са нещата, по които се действа (свършила наличност, рафт, работно време…), отдолу са информативните (общ спад, свършили акции, колебания). <b>„По магазини“</b> — цъкни на магазин за всички групи и графика за 8 седмици. <b>„По групи“</b> — цъкни на група за магазините, в които пада.
     </div>
   </details>
   <div class="board" id="tuKpis"></div>
   <div id="tuCauses"></div>
   <div id="tuStore"></div>
   <div class="bar" id="tuSeg" style="margin-top:14px;flex-wrap:wrap">
+    <button data-v="list">💶 Оборот по магазини</button>
     <button data-v="causes">🎯 По причини</button>
     <button data-v="stores">🏪 По магазини</button>
     <button data-v="groups">📦 По групи</button>
@@ -1848,7 +1849,7 @@ async function loadTurn(refresh) {
     ["СРЕДНА СМЕТКА", t.basket ? fmtE(t.basket) + " €" : "—", "", t.basket_base ? `обичайно ${fmtE(t.basket_base)} €` : ""],
     ["МАГАЗИНИ В СПАД", `${t.stores_down} <span style="font-size:13px">от ${t.stores}</span>`, t.stores_down ? "a" : "t", "оборот −8% и повече спрямо обичайното"],
     ["ЗАГУБА В ГРУПИТЕ", fmtE(t.lost) + " €", t.lost > 0 ? "a" : "t", "сума на спадовете по групи в магазините"]];
-  const tact = [{ view: "stores", sort: "diff", only: false }, { view: "stores", sort: "rec", only: false }, { view: "stores", sort: "basket", only: false }, { view: "stores", sort: "pct", only: true }, { view: "causes", open: null }];
+  const tact = [{ view: "list", lsort: "rev" }, { view: "stores", sort: "rec", only: false }, { view: "stores", sort: "basket", only: false }, { view: "stores", sort: "pct", only: true }, { view: "causes", open: null }];
   $("tuKpis").innerHTML = tiles.map(([l, v, c, sub], i) => `<div class="tile" data-ti="${i}" style="cursor:pointer"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${sub} · <u>виж →</u></div></div>`).join("");
   document.querySelectorAll("#tuKpis .tile[data-ti]").forEach(el => el.onclick = () => { Object.assign(TUV, tact[+el.dataset.ti]); tuRender(true); });
   const cs = d.causes || [], mx = Math.max(...cs.map(c => c.eur), 1);
@@ -1862,7 +1863,7 @@ async function loadTurn(refresh) {
 }
 
 /* обороти: работният списък отдолу */
-let TUV = { view: "causes", open: null, sort: "pct", only: false };
+let TUV = { view: "list", open: null, sort: "pct", only: false, lsort: "rev" };
 const TU_ORDER = ["closed", "stock", "neg", "shelf", "hours", "traffic", "price", "other", "promo", "chain", "noise"];
 const TU_INFO = new Set(["promo", "chain", "noise"]);
 const TU_NAME = { closed: "Без оборот (затворен / няма данни)", stock: "Свършила наличност", neg: "Минусова наличност (данните не са верни)", shelf: "Не се продава при наличност", hours: "Работил по-кратко", traffic: "По-малко клиенти",
@@ -1883,7 +1884,7 @@ function tuMatch(...xs) { const q = ($("tuQ").value || "").trim().toLowerCase();
 function tuRender(scroll) {
   if (!TU || !TU.ready) return;
   tuSegBtns();
-  ({ causes: tuViewCauses, stores: tuViewStores, groups: tuViewGroups })[TUV.view]();
+  ({ list: tuViewList, causes: tuViewCauses, stores: tuViewStores, groups: tuViewGroups })[TUV.view]();
   if (scroll) $("tuSeg").scrollIntoView({ behavior: "smooth" });
 }
 function tuCauseItems(k) {
@@ -1903,6 +1904,20 @@ function tuCauseItems(k) {
     by[st.store_id].lost += a.lost; by[st.store_id].arts.push({ ...a, grp: g.grp });
   })));
   return { kind: "art", rows: Object.values(by).sort((a, b) => b.lost - a.lost) };
+}
+function tuViewList() {
+  const key = { rev: r => -r.rev, name: r => r.store, pct: r => r.pct ?? 0, margin: r => -(r.margin ?? 0) }[TUV.lsort];
+  const rows = TU.stores.filter(r => tuMatch(r.store)).sort((a, b) => { const x = key(a), y = key(b); return typeof x === "string" ? x.localeCompare(y, "bg") : x - y; });
+  const T = rows.reduce((a, r) => ({ rev: a.rev + r.rev, base: a.base + r.base, rec: a.rec + (r.receipts || 0), mar: a.mar + (r.margin || 0) }), { rev: 0, base: 0, rec: 0, mar: 0 });
+  const th = (k, l, cls) => `<th class="${cls || ""}" data-ls="${k}" style="cursor:pointer">${l}${TUV.lsort === k ? " ▾" : ""}</th>`;
+  $("tuView").innerHTML = `<div class="note" style="margin:4px 0 8px">Оборот за ${esc(TU.period)}${TU.n === 1 ? " (" + esc(TU.weekday) + ")" : ""} · цъкни на заглавие за подреждане, на магазин — за групите</div>
+    <div class="scroll"><table><thead><tr><th class="num">#</th>${th("name", "Магазин")}${th("rev", "Оборот €", "num")}<th class="num">Бонове</th><th class="num">Ср. сметка €</th>${th("margin", "Марж €", "num")}<th class="num">Марж %</th>${th("pct", "Спрямо обичайното", "num")}</tr></thead><tbody>
+    ${rows.map((r, i) => `<tr data-ts="${r.store_id}" style="cursor:pointer"><td class="num muted">${i + 1}</td><td class="name">${esc(r.store)}</td><td class="num"><b>${fmtE(r.rev)}</b></td>
+      <td class="num">${r.receipts != null ? fmtN(r.receipts) : "—"}</td><td class="num">${r.basket ? fmtE(r.basket) : "—"}</td><td class="num">${fmtE(r.margin)}</td><td class="num">${r.margin_pct != null ? fmtN(r.margin_pct) + "%" : "—"}</td>
+      <td class="num ${r.flag ? "low" : ""}">${pctS(r.pct)}</td></tr>`).join("")}
+    <tr style="background:var(--paper);font-weight:700"><td></td><td>Общо ${rows.length} магазина</td><td class="num">${fmtE(T.rev)}</td><td class="num">${fmtN(T.rec)}</td><td class="num">${T.rec ? fmtE(T.rev / T.rec) : "—"}</td><td class="num">${fmtE(T.mar)}</td><td class="num">${T.rev ? fmtN(Math.round(1000 * T.mar / T.rev) / 10) + "%" : "—"}</td><td class="num">${pctS(T.base ? Math.round(1000 * (T.rev - T.base) / T.base) / 10 : null)}</td></tr></tbody></table></div>`;
+  document.querySelectorAll("#tuView th[data-ls]").forEach(h => h.onclick = () => { TUV.lsort = h.dataset.ls; tuRender(); });
+  document.querySelectorAll("#tuView tr[data-ts]").forEach(tr => tr.onclick = () => tuStore(+tr.dataset.ts));
 }
 function tuViewCauses() {
   const eur = Object.fromEntries((TU.causes || []).map(c => [c.k, c]));

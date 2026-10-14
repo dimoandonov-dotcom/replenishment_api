@@ -334,6 +334,9 @@ def build(db: Session, day: date, n: int = 1) -> dict:
                "basket": round(bask0, 2) if bask0 else None, "basket_base": round(baskb, 2) if baskb else None,
                "first": _hm(r0[1]) if r0 and n == 1 else None, "last": _hm(r0[2]) if r0 and n == 1 else None,
                "causes": causes, "groups": [], "weeks": len(base_weeks.get(sid) or [])}
+        cost0 = sum(ws[0][1] for (s3, _g), ws in sg.items() if s3 == sid)
+        row["margin"] = round(cur_r - cost0, 2)
+        row["margin_pct"] = round(100 * (cur_r - cost0) / cur_r, 1) if cur_r else None
         store_rows.append(row)
 
         # групите на магазина
