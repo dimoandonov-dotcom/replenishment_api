@@ -51,6 +51,15 @@ def _tick():
                 db.rollback()
                 _state["morning_result"] = f"{type(e).__name__}: {e}"[:300]
                 _state["morning"] = (now.date(), slot)
+        # 12:30 - сутрешната справка с оборотите във Viber (на Асен)
+        if (now.hour, now.minute) >= (12, 30) and _state.get("viber_day") != now.date():
+            _state["viber_day"] = now.date()
+            try:
+                from . import viber
+                _state["viber_result"] = viber.daily(db)
+            except Exception as e:
+                db.rollback()
+                _state["viber_result"] = f"{type(e).__name__}: {e}"[:300]
     _state["last_run"] = datetime.now(timezone.utc)
 
 

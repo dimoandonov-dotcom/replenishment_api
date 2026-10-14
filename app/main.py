@@ -24,6 +24,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
+import json
 import hmac as _hmac
 import hashlib as _hashlib
 import os as _os
@@ -41,6 +42,7 @@ SESSION_COOKIE = "minmax_session"
 _OPEN_PATHS = {
     "/", "/health", "/docs", "/openapi.json", "/redoc",
     "/dashboard", "/orders-view", "/ui/login", "/ui/logout", "/brand/logo",
+    "/viber/webhook",   # Viber бот - проверява се подписът на Viber
 }
 
 
@@ -650,6 +652,52 @@ from .ui import router as ui_router  # noqa: E402
 app.include_router(ui_router)
 
 
+# ---------------------------------------------------------------- Viber бот
+@app.post("/viber/webhook", include_in_schema=False)
+async def viber_webhook(request: Request):
+    from . import viber
+    from .db import SessionLocal
+    body = await request.body()
+    if not viber.verify(body, request.headers.get("X-Viber-Content-Signature", "")):
+        return JSONResponse(status_code=403, content={"detail": "bad signature"})
+    ev = json.loads(body.decode() or "{}")
+    with SessionLocal() as db:
+        try:
+            r = viber.handle(db, ev)
+        except Exception as e:  # Viber не трябва да получава грешка - иначе спира уебкука
+            r = None
+            print("viber:", type(e).__name__, e)
+    return JSONResponse(r or {})
+
+
+@app.get("/ui/viber/status")
+def viber_status(db: Session = Depends(get_db)):
+    from . import viber
+    return viber.status(db)
+
+
+@app.post("/viber/set-webhook")
+def viber_set_webhook():
+    from . import viber
+    try:
+        return viber.set_webhook()
+    except Exception as e:
+        raise HTTPException(502, f"{type(e).__name__}: {e}")
+
+
+@app.post("/viber/send-now")
+def viber_send_now(db: Session = Depends(get_db)):
+    from . import viber
+    return viber.daily(db, force=True)
+
+
+@app.get("/ui/viber/preview")
+def viber_preview(db: Session = Depends(get_db)):
+    from . import viber
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(viber.summary(db))
+
+
 # Автоматично опресняване на наличностите от Мистрал (на всеки 30 мин, 07-22 ч.)
 @app.on_event("startup")
 def _start_refresher():
@@ -657,3 +705,13 @@ def _start_refresher():
     if __os.getenv("DISABLE_REFRESHER") != "1":
         from . import refresher
         refresher.start()
+    import threading as __th
+
+    def _vb():
+        try:
+            from . import viber
+            if viber.token():
+                print("viber webhook:", viber.set_webhook())
+        except Exception as e:
+            print("viber webhook:", type(e).__name__, e)
+    __th.Timer(20, _vb).start()   # след като сървърът е готов да приеме проверката на Viber
