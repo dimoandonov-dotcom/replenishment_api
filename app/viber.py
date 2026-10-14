@@ -145,7 +145,37 @@ def _p(x) -> str:
     return "—" if x is None else f"{x:+.1f}%".replace(".", ",")
 
 
+def _n(x) -> str:
+    if x is None:
+        return "0"
+    return (f"{x:,.0f}" if abs(x - round(x)) < 0.05 else f"{x:,.1f}").replace(",", " ").replace(".", ",")
+
+
+def _short(name: str, n: int = 38) -> str:
+    name = (name or "").split(" / ")[0].strip()
+    return name if len(name) <= n else name[:n - 1] + "…"
+
+
+def _store(s: str) -> str:
+    return s.replace("м-н ", "").replace("Супермаркет ", "")
+
+
+ACTION = [
+    ("stock", "🔴 СВЪРШИЛА НАЛИЧНОСТ", "провери заявките/доставката",
+     lambda a: f"{_short(a['name'])} — продадени {_n(a['qty'])} (обикн. {_n(a['qty_base'])}), остават {_n(a['stock'])} бр."),
+    ("neg", "🟠 МИНУСОВА НАЛИЧНОСТ", "заведи доставките, иначе заявките са грешни",
+     lambda a: f"{_short(a['name'])} — наличност {_n(a['stock'])} бр. по Мистрал"),
+    ("shelf", "🟣 НЕ СЕ ПРОДАВА, А ИМА НАЛИЧНОСТ", "провери рафта, цената, срока",
+     lambda a: f"{_short(a['name'])} — 0 продадени (обикн. {_n(a['qty_base'])}/ден), по Мистрал {_n(a['stock'])} бр."),
+    ("price", "🔵 ПО-ВИСОКА ЦЕНА", "провери поскъпването",
+     lambda a: f"{_short(a['name'])} — {a['cause'].replace('по-висока цена: ', '')}"),
+    ("other", "⚪ СПАД БЕЗ ЯСНА ПРИЧИНА", "питай управителя",
+     lambda a: f"{_short(a['name'])} — продадени {_n(a['qty'])} (обикн. {_n(a['qty_base'])})"),
+]
+
+
 def summary(db: Session, day=None) -> str:
+    from collections import defaultdict
     from . import turnover
     d = turnover.report(db, day, 1)
     if not d.get("ready"):
@@ -154,27 +184,72 @@ def summary(db: Session, day=None) -> str:
     L = [f"📊 ОБОРОТИ {d['period']} ({d['weekday']})",
          f"Общо: {_e(t['rev'])} € ({_p(t['pct'])} спрямо обичайното {_e(t['base'])} €)"]
     if t.get("receipts") and t.get("receipts_base"):
-        L.append(f"Бонове: {_e(t['receipts'])} (обикн. {_e(t['receipts_base'])}) · ср. сметка {t['basket']:.2f} €".replace(".", ",").replace("обикн,", "обикн.").replace("ср, сметка", "ср. сметка"))
+        bk = f"{t['basket']:.2f}".replace(".", ",") if t.get("basket") else "—"
+        L.append(f"Бонове: {_e(t['receipts'])} (обикн. {_e(t['receipts_base'])}) · ср. сметка {bk} €")
     L.append(f"Магазини в спад: {t['stores_down']} от {t['stores']}")
+
     down = [s for s in d["stores"] if s.get("flag")]
     if down:
-        L += ["", "🔻 СПАД (над 8%):"]
+        L += ["", "🏪 МАГАЗИНИ В СПАД (над 8%):"]
         for s in down[:12]:
-            why = "; ".join(c["t"] for c in s["causes"][:2])
-            L.append(f"• {s['store']}: {_p(s['pct'])} ({_e(s['diff'])} €)" + (f" — {why}" if why else ""))
-    if d.get("causes"):
-        L += ["", "🎯 ПРИЧИНИ (загуба €):"]
-        for c in d["causes"][:6]:
-            L.append(f"• {c['name']}: {_e(c['eur'])} € ({c['share']:.0f}%)")
-    dr = d.get("drops") or []
-    if dr:
-        L += ["", "📦 НАЙ-ГОЛЕМИ СПАДОВЕ ПО ГРУПИ:"]
-        for r in dr[:8]:
-            why = "; ".join(c["t"] for c in (r.get("causes") or [])[:2])
-            L.append(f"• {r['store']} / {r['grp']}: −{_e(r['lost'])} € ({_p(r['pct'])})" + (f" — {why}" if why else ""))
+            L.append(f"• {_store(s['store'])}: {_p(s['pct'])} ({_e(s['diff'])} €), {_e(s['rev'])} € вместо {_e(s['base'])} €")
+            for c in s["causes"][:2]:
+                L.append(f"   ↳ {c['t']}")
+            bad = [g for g in s["groups"] if g.get("flag")][:3]
+            if bad:
+                L.append("   ↳ падат: " + ", ".join(f"{g['grp']} {_e(g['diff'])} €" for g in bad))
+
+    # артикулите по причина: магазин -> артикули
+    arts = defaultdict(lambda: defaultdict(list))
+    for s in d["stores"]:
+        for g in s["groups"]:
+            for a in g.get("articles") or []:
+                arts[a["k"]][s["store"]].append(a)
+    eur = {c["k"]: c["eur"] for c in d.get("causes") or []}
+    L += ["", "✅ ЗА ДЕЙСТВИЕ"]
+    any_ = False
+    for k, title, todo, fmt in ACTION:
+        by = arts.get(k)
+        if not by:
+            continue
+        any_ = True
+        stores = sorted(by.items(), key=lambda x: -sum(a["lost"] for a in x[1]))
+        tot_a = sum(len(v) for v in by.values())
+        L += ["", f"{title} — {todo} (−{_e(eur.get(k, sum(a['lost'] for v in by.values() for a in v)))} €, {tot_a} арт.)"]
+        for st, lst in stores[:6]:
+            lst = sorted(lst, key=lambda a: -a["lost"])
+            L.append(f"• {_store(st)} (−{_e(sum(a['lost'] for a in lst))} €):")
+            for a in lst[:4]:
+                L.append(f"   – {fmt(a)}")
+            if len(lst) > 4:
+                L.append(f"   – и още {len(lst) - 4} арт.")
+        if len(stores) > 6:
+            L.append(f"• … и още {len(stores) - 6} магазина")
+    if not any_:
+        L.append("Няма артикули за действие 🎉")
+
+    # информативно
+    info = []
+    chain = [g for g in d.get("groups") or [] if g.get("pct") is not None and g["pct"] <= -10]
+    if chain:
+        info.append("• Пада във всички магазини (сезон/време): " + ", ".join(f"{g['grp']} {_p(g['pct'])}" for g in chain[:5]))
+    pr = arts.get("promo")
+    if pr:
+        allp = sorted((a for v in pr.values() for a in v), key=lambda a: -a["lost"])
+        names = []
+        for a in allp:
+            nm = _short(a["name"], 30)
+            if nm not in names:
+                names.append(nm)
+        info.append(f"• Свършили акции (−{_e(eur.get('promo', 0))} €): " + ", ".join(names[:5]))
+    if eur.get("noise"):
+        info.append(f"• Малки артикули, нормално колебание (−{_e(eur['noise'])} €) — не се действа")
+    if info:
+        L += ["", "ℹ️ ИНФОРМАТИВНО (не изисква действие)"] + info
+
     L += ["", "💶 ОБОРОТ ПО МАГАЗИНИ:"]
     for i, s in enumerate(sorted(d["stores"], key=lambda s: -s["rev"]), 1):
-        L.append(f"{i}. {s['store']}: {_e(s['rev'])} € ({_p(s['pct'])})")
+        L.append(f"{i}. {_store(s['store'])}: {_e(s['rev'])} € ({_p(s['pct'])})")
     L += ["", f"Подробно (с вход): {PUBLIC_URL}/#turn"]
     return "\n".join(L)
 
