@@ -1928,10 +1928,11 @@ function tuCauseBody(k, it) {
     ${it.rows.map(r => `<tr data-tsx="${r.store_id}" style="cursor:pointer"><td class="name">${esc(r.store)}</td><td>${esc(r.text)}</td><td class="num low">${pctS(r.pct)}</td><td class="num low">−${fmtE(r.lost)}</td></tr>`).join("")}</tbody></table></div>`;
   if (it.kind === "chain") return `<div class="scroll"><table><thead><tr><th>Група</th><th class="num">Верига %</th><th class="num">Под обичайното €</th><th class="num">Магазини в спад</th></tr></thead><tbody>
     ${it.rows.map(r => `<tr><td class="name">${esc(r.grp)}</td><td class="num low">${pctS(r.pct)}</td><td class="num low">−${fmtE(r.lost)}</td><td class="num">${r.stores}</td></tr>`).join("")}</tbody></table></div>`;
-  return `<div class="scroll"><table><thead><tr><th>Група</th><th>Код</th><th>Артикул</th><th class="num">Бр. сега</th><th class="num">Бр. обичайно</th><th class="num">Наличност</th><th class="num">Загуба €</th><th>Подробно</th></tr></thead><tbody>
-    ${it.rows.map(st => `<tr data-tsx="${st.store_id}" style="cursor:pointer;background:var(--paper)"><td colspan="6"><b>🏪 ${esc(st.store)}</b> <span class="muted" style="font-size:12px">· ${st.arts.length} арт. · цъкни за магазина</span></td><td class="num low"><b>−${fmtE(st.lost)}</b></td><td></td></tr>
-      ${st.arts.sort((a, b) => b.lost - a.lost).map(a => `<tr><td class="muted" style="font-size:12px">${esc(a.grp)}</td><td>${esc(a.code)}</td><td class="name">${esc(a.name)}</td><td class="num">${fmtN(a.qty)}</td><td class="num">${fmtN(a.qty_base)}</td>
-        <td class="num ${a.stock != null && a.stock <= 0 ? "low" : ""}">${a.stock == null ? "0" : fmtN(a.stock)}</td><td class="num low">−${fmtE(a.lost)}</td><td style="font-size:12px">${esc(a.cause)}</td></tr>`).join("")}`).join("")}</tbody></table></div>`;
+  return `<table style="width:100%"><thead><tr><th>Артикул</th><th class="num">Загуба €</th></tr></thead><tbody>
+    ${it.rows.map(st => `<tr data-tsx="${st.store_id}" style="cursor:pointer;background:var(--paper)"><td><b>🏪 ${esc(st.store)}</b> <span class="muted" style="font-size:12px">· ${st.arts.length} арт. · цъкни за магазина</span></td><td class="num low"><b>−${fmtE(st.lost)}</b></td></tr>
+      ${st.arts.sort((a, b) => b.lost - a.lost).map(a => `<tr><td style="white-space:normal"><div class="name" style="font-weight:600">${esc(a.name)}</div>
+        <div class="muted" style="font-size:11.5px;margin-top:2px">${esc(a.code)} · ${esc(a.grp)} · продадени <b>${fmtN(a.qty)}</b> (обикн. ${fmtN(a.qty_base)}) · наличност <b class="${a.stock == null || a.stock <= 0 ? "low" : ""}">${a.stock == null ? 0 : fmtN(a.stock)}</b></div>
+        <div style="font-size:12px;margin-top:2px">${esc(a.cause)}</div></td><td class="num low" style="vertical-align:top">−${fmtE(a.lost)}</td></tr>`).join("")}`).join("")}</tbody></table>`;
 }
 function tuViewStores() {
   const pr = (a, b) => (a && b) ? 100 * (a - b) / b : null;
