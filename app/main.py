@@ -728,10 +728,12 @@ def viber_send_now(db: Session = Depends(get_db)):
 
 
 @app.get("/ui/viber/preview")
-def viber_preview(db: Session = Depends(get_db)):
+def viber_preview(part: str = Query("all", pattern="^(all|main|stores)$"), db: Session = Depends(get_db)):
     from . import viber
     from fastapi.responses import PlainTextResponse
-    return PlainTextResponse(viber.summary(db))
+    if part == "all":
+        return PlainTextResponse("\n\n━━━━━━━━━━ ОТЧЕТ 2 ━━━━━━━━━━\n\n".join(viber.reports(db)))
+    return PlainTextResponse(viber.summary(db, None, part))
 
 
 # Автоматично опресняване на наличностите от Мистрал (на всеки 30 мин, 07-22 ч.)

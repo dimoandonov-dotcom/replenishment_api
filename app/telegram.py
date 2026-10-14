@@ -127,8 +127,9 @@ def handle(db: Session, upd: dict):
         db.execute(text("UPDATE tg_users SET reports = TRUE WHERE chat_id = :i"), {"i": cid}); db.commit()
         send(cid, "Сутрешната справка е пусната (всеки ден в 12:30). Напиши „отчет“ за справката сега.")
     elif low in ("отчет", "otchet", "справка", "оборот", "обороти"):
-        from .viber import summary
-        send(cid, summary(db))
+        from .viber import reports
+        for r in reports(db):
+            send(cid, r)
     else:
         send(cid, "Команди: „отчет“, „стоп“, „старт“.")
 
@@ -140,13 +141,16 @@ def daily(db: Session, force: bool = False) -> dict:
     if not force and db.execute(text("""SELECT 1 FROM tg_log WHERE kind = 'daily' AND ok
             AND (at AT TIME ZONE 'Europe/Sofia')::date = (now() AT TIME ZONE 'Europe/Sofia')::date LIMIT 1""")).first():
         return {"sent": 0, "reason": "днес вече е пратена"}
-    from .viber import summary
-    msg = summary(db)
+    from .viber import reports
+    msgs = reports(db)
     sent, errs = 0, []
     for cid, user in db.execute(text("SELECT chat_id, username FROM tg_users WHERE reports AND username IS NOT NULL")).all():
         if user.lower() not in report_users():
             continue
-        r = send(cid, msg); ok = bool(r.get("ok"))
+        r = {}
+        for mm in msgs:
+            r = send(cid, mm)
+        ok = bool(r.get("ok"))
         sent += ok
         if not ok:
             errs.append(f"{user}: {r.get('description')}")

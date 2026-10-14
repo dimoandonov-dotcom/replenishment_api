@@ -130,7 +130,8 @@ def handle(db: Session, ev: dict) -> dict | None:
         db.execute(text("UPDATE viber_users SET reports = TRUE WHERE viber_id = :i"), {"i": vid}); db.commit()
         send(vid, "Пуснах сутрешната справка (12:30).")
     elif low in ("отчет", "справка", "оборот", "обороти"):
-        send(vid, summary(db))
+        for r in reports(db):
+            send(vid, r)
     else:
         send(vid, "Команди: „отчет“, „стоп“, „старт“.")
     return None
@@ -174,7 +175,7 @@ ACTION = [
 ]
 
 
-def summary(db: Session, day=None) -> str:
+def summary(db: Session, day=None, part: str = "all") -> str:
     from collections import defaultdict
     from . import turnover
     d = turnover.report(db, day, 1)
@@ -252,8 +253,13 @@ def summary(db: Session, day=None) -> str:
     if info:
         L += ["", "ℹ️ ИНФОРМАТИВНО (не изисква действие)"] + info
 
-    L += ["", "💶 МАГАЗИН ПО МАГАЗИН (от най-големия ръст към най-големия спад)",
-          "оборот вчера (обичайно) · бонове · ср. сметка · кои групи растат ↑ и падат ↓"]
+    link = f"Подробно (с вход): {PUBLIC_URL}/#turn"
+    main_txt = "\n".join(L + ["", "➡️ Магазин по магазин — в следващия отчет.", link])
+    if part == "main":
+        return main_txt
+    L = [f"💶 МАГАЗИН ПО МАГАЗИН — {d['period']} ({d['weekday']})",
+         "от най-големия ръст към най-големия спад",
+         "оборот вчера (обичайно) · бонове · ср. сметка · кои групи растат ↑ и падат ↓"]
     for s in sorted(d["stores"], key=lambda s: -(s["pct"] if s["pct"] is not None else 0)):
         pc = s["pct"] or 0
         ic = "🟢" if pc >= 3 else ("🔴" if pc <= -8 else ("🟠" if pc <= -3 else "⚪"))
@@ -274,8 +280,16 @@ def summary(db: Session, day=None) -> str:
             L.append("   ↑ " + ", ".join(f"{g['grp']} +{_e(g['diff'])} €" for g in up))
         if dn:
             L.append("   ↓ " + ", ".join(f"{g['grp']} {_e(g['diff'])} €" for g in dn))
-    L += ["", f"Подробно (с вход): {PUBLIC_URL}/#turn"]
-    return "\n".join(L)
+    L += ["", link]
+    stores_txt = "\n".join(L)
+    if part == "stores":
+        return stores_txt
+    return main_txt + "\n\n" + stores_txt
+
+
+def reports(db: Session, day=None) -> list[str]:
+    """Двата отчета: 1) общо, спадове и задачи; 2) магазин по магазин."""
+    return [summary(db, day, "main"), summary(db, day, "stores")]
 
 
 def daily(db: Session, force: bool = False) -> dict:
@@ -286,7 +300,7 @@ def daily(db: Session, force: bool = False) -> dict:
     if not force and db.execute(text("""SELECT 1 FROM viber_log WHERE kind = 'daily' AND ok
             AND (at AT TIME ZONE 'Europe/Sofia')::date = (now() AT TIME ZONE 'Europe/Sofia')::date LIMIT 1""")).first():
         return {"sent": 0, "reason": "днес вече е пратена"}
-    msg = summary(db)
+    msg = "\n\n".join(reports(db))
     sent, errs = 0, []
     for vid, user in db.execute(text("""SELECT viber_id, username FROM viber_users
                                         WHERE reports AND username IS NOT NULL""")).all():
