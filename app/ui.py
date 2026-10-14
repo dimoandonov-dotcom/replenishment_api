@@ -1154,6 +1154,12 @@ def an_delist(seasonal: bool = False, db: Session = Depends(get_db)):
     return delist.proposals(db, seasonal)
 
 
+@router.get("/ui/analytics/delist/article")
+def an_delist_article(code: int, db: Session = Depends(get_db)):
+    from . import delist
+    return delist.article(db, code)
+
+
 class DelistIn(BaseModel):
     code: int
     decision: str = Field(pattern="^(delist|keep|clear)$")

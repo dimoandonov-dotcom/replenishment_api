@@ -613,8 +613,9 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <span class="note" id="dlInfo"></span>
   </div>
   <div class="board" id="dlKpis"></div>
+  <div id="dlShown"></div>
   <div class="scroll"><table>
-    <thead><tr><th>Артикул</th><th class="num" title="Продадени бройки за периода">Продадени</th><th class="num" title="Бройки на магазин на месец">Бр./маг./мес.</th><th class="num">Магазини с наличност</th><th class="num">Наличност</th><th class="num">Замразени €</th><th class="num">Последна продажба</th><th>Решение</th></tr></thead>
+    <thead><tr><th>Артикул</th><th class="num" title="Продадени бройки за периода">Продадени</th><th class="num" title="Бройки на магазин на месец">Бр./маг./мес.</th><th class="num">Магазини с наличност</th><th class="num">Наличност</th><th class="num">Замразени €</th><th class="num">Последна продажба / доставка</th><th>Решение</th></tr></thead>
     <tbody id="dlBody"></tbody>
   </table></div>
   <div id="dlMore"></div>
@@ -1830,6 +1831,24 @@ async function loadDelist() {
   $("dlSup").innerHTML = `<option value="">Всички доставчици</option>` + uniq("supplier").map(g => `<option>${esc(g)}</option>`).join(""); $("dlSup").value = keepS;
   renderDelist();
 }
+async function dlArticle(tr, code) {
+  const nx = tr.nextElementSibling;
+  if (nx && nx.classList.contains("dlinfo")) { nx.remove(); return; }
+  const row = document.createElement("tr"); row.className = "dlinfo";
+  row.innerHTML = `<td colspan="8" style="background:var(--paper)"><div class="empty loading">Зареждам от Мистрал…</div></td>`;
+  tr.after(row);
+  const d = await api(`/ui/analytics/delist/article?code=${code}`).catch(e => ({ error: e.message }));
+  if (d.error) { row.firstElementChild.innerHTML = `<div class="note">${esc(d.error)}</div>`; return; }
+  const mx = Math.max(...d.weeks.map(w => w.qty), 1);
+  row.firstElementChild.innerHTML = `<div style="padding:8px 4px;position:sticky;left:0;max-width:min(1100px, calc(100vw - 48px))">
+    <div class="note" style="margin-bottom:6px">Продажби по седмици (цялата верига)</div>
+    <div style="display:flex;gap:6px;align-items:flex-end;height:70px;margin-bottom:4px">${d.weeks.map(w => `<div title="от ${w.from}: ${fmtN(w.qty)} бр." style="flex:1;max-width:60px;text-align:center;font-size:11px">
+      <div style="height:${Math.max(2, 50 * w.qty / mx)}px;background:${w.qty ? "#0F766E" : "#E7E5E4"};border-radius:3px"></div>${fmtN(w.qty)}<div class="muted" style="font-size:10px">${w.from}</div></div>`).join("")}</div>
+    <div class="scroll" style="margin-top:8px"><table><thead><tr><th>Магазин</th><th class="num">Наличност</th><th class="num">Продадени (59 дни)</th><th class="num">Оборот €</th><th class="num">Последна продажба</th><th class="num">Последна доставка</th></tr></thead><tbody>
+    ${d.stores.map(x => `<tr><td class="name">${esc(x.store)}</td><td class="num">${fmtN(x.stock)}</td><td class="num">${fmtN(x.sold)}</td><td class="num">${fmtE(x.rev)}</td>
+      <td class="num">${x.last_sale || "—"}</td><td class="num">${x.last_delivery || "—"}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">Няма данни</td></tr>`}</tbody></table></div></div>`;
+}
+
 function renderDelist() {
   const d = DL.data; if (!d || !d.ready) return;
   const g = $("dlGrp").value, sp = $("dlSup").value, q = ($("dlQ").value || "").trim().toLowerCase(), dec = $("dlDec").checked;
@@ -1841,19 +1860,22 @@ function renderDelist() {
     + tile("dead", "МЪРТВИ", `0 продажби · ${fmtE(st.dead?.e || 0)} € замразени`)
     + tile("slow", "МНОГО БАВНИ", `под 1 бр./магазин на месец · ${fmtE(st.slow?.e || 0)} €`)
     + tile("falling", "ИЗПАДАЩИ", `силен спад на продажбите · ${fmtE(st.falling?.e || 0)} €`);
-  document.querySelectorAll("#dlKpis .tile").forEach(el => el.onclick = () => { DL.kind = DL.kind === el.dataset.k ? "" : el.dataset.k; DL.lim = 200; renderDelist(); });
+  document.querySelectorAll("#dlKpis .tile").forEach(el => el.onclick = () => { DL.kind = DL.kind === el.dataset.k ? "" : el.dataset.k; DL.lim = 200; renderDelist(); $("dlShown").scrollIntoView({ behavior: "smooth" }); });
   const rows = base.filter(r => !DL.kind || r.kind === DL.kind);
+  const KN = { dead: "Мъртви", slow: "Много бавни", falling: "Изпадащи" };
+  $("dlShown").innerHTML = `<div class="head"><h2>${DL.kind ? KN[DL.kind] : "Всички предложения"} — ${fmtN(rows.length)} арт.</h2><span class="note">цъкни на артикул за подробности по магазини${DL.kind ? " · цъкни пак плочката за всички" : ""}</span></div>`;
   $("dlBody").innerHTML = rows.slice(0, DL.lim).map(r => `<tr${r.decision === "delist" ? ' style="background:#F5F5F4"' : ""}>
-    <td style="white-space:normal;min-width:280px"><div class="name" style="font-weight:600"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${DLC[r.kind]};margin-right:6px"></span>${esc(r.code)} · ${esc(r.name)}</div>
+    <td data-dlart="${r.code}" style="white-space:normal;min-width:280px;cursor:pointer"><div class="name" style="font-weight:600">▸ <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${DLC[r.kind]};margin-right:6px"></span>${esc(r.code)} · ${esc(r.name)}</div>
       <div class="muted" style="font-size:11.5px;margin-top:2px">${esc(r.grp)}${r.sub && r.sub !== r.grp ? " / " + esc(r.sub) : ""} · ${esc(r.supplier)}${r.margin_pct != null ? " · марж " + fmtN(r.margin_pct) + "%" : ""}</div>
       <div style="font-size:12px;margin-top:2px">${esc(r.reason)}</div></td>
     <td class="num">${fmtN(r.units)}</td><td class="num">${fmtN(r.per_store_month)}</td><td class="num">${r.stores_stock}</td>
-    <td class="num">${fmtN(r.stock)}</td><td class="num"><b>${fmtE(r.stock_eur)}</b></td><td class="num">${r.last_sale || "—"}</td>
+    <td class="num">${fmtN(r.stock)}</td><td class="num"><b>${fmtE(r.stock_eur)}</b></td><td class="num">${r.last_sale || "—"}${r.last_delivery ? `<div class="muted" style="font-size:11px">дост. ${r.last_delivery}</div>` : ""}</td>
     <td style="white-space:nowrap">${r.decision === "delist" ? `<span class="tag bad">делистваме</span> <button class="mini" data-dl="${r.code}" data-d="clear">отмени</button>`
       : `<button class="mini" data-dl="${r.code}" data-d="delist">✔ Делистваме</button> <button class="mini" data-dl="${r.code}" data-d="keep">✖ Оставяме</button>`}</td></tr>`).join("")
     || `<tr><td colspan="8" class="empty">Няма предложения</td></tr>`;
   $("dlMore").innerHTML = rows.length > DL.lim ? `<div style="text-align:center;margin:10px"><button id="dlMoreB">Покажи още (${rows.length - DL.lim})</button></div>` : "";
   if ($("dlMoreB")) $("dlMoreB").onclick = () => { DL.lim += 300; renderDelist(); };
+  document.querySelectorAll("#dlBody [data-dlart]").forEach(td => td.onclick = () => dlArticle(td.parentElement, +td.dataset.dlart));
   document.querySelectorAll("#dlBody [data-dl]").forEach(b => b.onclick = async () => {
     b.disabled = true;
     await api("/analytics/delist/decide", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: +b.dataset.dl, decision: b.dataset.d }) });
