@@ -169,8 +169,8 @@ ACTION = [
      lambda a: f"{_short(a['name'])} — 0 продадени (обикн. {_n(a['qty_base'])}/ден), по Мистрал {_n(a['stock'])} бр."),
     ("price", "🔵 ПО-ВИСОКА ЦЕНА", "провери поскъпването",
      lambda a: f"{_short(a['name'])} — {a['cause'].replace('по-висока цена: ', '')}"),
-    ("other", "⚪ СПАД БЕЗ ЯСНА ПРИЧИНА", "питай управителя",
-     lambda a: f"{_short(a['name'])} — продадени {_n(a['qty'])} (обикн. {_n(a['qty_base'])})"),
+    ("other", "⚪ ПРОДАВАТ СЕ ПО-МАЛКО, А ВСИЧКО Е НАРЕД", "имат наличност, цената и акцията са същите, клиентите не са по-малко — питай управителя дали ги има на рафта и защо не вървят",
+     lambda a: f"{_short(a['name'])} — продадени {_n(a['qty'])} (обикн. {_n(a['qty_base'])}), наличност {_n(a['stock'])}"),
 ]
 
 
@@ -202,8 +202,12 @@ def summary(db: Session, day=None) -> str:
     # артикулите по причина: магазин -> артикули
     arts = defaultdict(lambda: defaultdict(list))
     for s in d["stores"]:
+        # в магазин с по-малко клиенти/по-кратко работно време спадът вече е обяснен
+        explained = any(c["k"] in ("traffic", "hours", "closed") for c in s["causes"])
         for g in s["groups"]:
             for a in g.get("articles") or []:
+                if a["k"] == "other" and explained:
+                    continue
                 arts[a["k"]][s["store"]].append(a)
     eur = {c["k"]: c["eur"] for c in d.get("causes") or []}
     L += ["", "✅ ЗА ДЕЙСТВИЕ"]
@@ -215,7 +219,8 @@ def summary(db: Session, day=None) -> str:
         any_ = True
         stores = sorted(by.items(), key=lambda x: -sum(a["lost"] for a in x[1]))
         tot_a = sum(len(v) for v in by.values())
-        L += ["", f"{title} — {todo} (−{_e(eur.get(k, sum(a['lost'] for v in by.values() for a in v)))} €, {tot_a} арт.)"]
+        lost_k = sum(a['lost'] for v in by.values() for a in v) if k == "other" else eur.get(k, sum(a['lost'] for v in by.values() for a in v))
+        L += ["", f"{title} (−{_e(lost_k)} €, {tot_a} арт.)", f"👉 {todo}"]
         for st, lst in stores[:6]:
             lst = sorted(lst, key=lambda a: -a["lost"])
             L.append(f"• {_store(st)} (−{_e(sum(a['lost'] for a in lst))} €):")
