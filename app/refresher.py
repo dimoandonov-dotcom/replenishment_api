@@ -39,17 +39,18 @@ def _tick():
                 anomalies.detect_duplicate_docs(db, 16)
         except Exception as e:  # пробваме пак след 30 мин
             _state["last_error"] = f"{type(e).__name__}: {e}"[:300]
-        # веднъж сутрин след 08:00: вчерашните продажби пак (закъснели бележки) и отчетът за оборотите
+        # в 08:00, 12:00 и 16:00: вчерашните продажби пак (закъснели бележки, особено 24-часовите) и отчетът за оборотите
         now = datetime.now(SOFIA)
-        if now.hour >= 8 and _state.get("morning") != now.date():
+        slot = max([h for h in (8, 12, 16) if now.hour >= h], default=None)   # 08:00, 12:00, 16:00 - закъснели бонове
+        if slot is not None and _state.get("morning") != (now.date(), slot):
             try:
                 from . import turnover
                 _state["morning_result"] = turnover.morning(db)
-                _state["morning"] = now.date()
+                _state["morning"] = (now.date(), slot)
             except Exception as e:
                 db.rollback()
                 _state["morning_result"] = f"{type(e).__name__}: {e}"[:300]
-                _state["morning"] = now.date()
+                _state["morning"] = (now.date(), slot)
     _state["last_run"] = datetime.now(timezone.utc)
 
 

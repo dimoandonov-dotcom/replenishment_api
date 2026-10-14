@@ -184,8 +184,9 @@ def nightly(db: Session) -> dict:
         out["rollup"] = rollup(db, 3)
         last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
         if last:
-            for n in (1, 7):
-                report(db, last, n, refresh=True)
+            for i in range(3):          # продажбите за 3 дни се дърпат наново -> и отчетите им
+                for n in (1, 7):
+                    report(db, last - timedelta(days=i), n, refresh=True)
             out["report"] = last.isoformat()
     except Exception as e:
         db.rollback(); out["report"] = f"{type(e).__name__}: {e}"[:200]
