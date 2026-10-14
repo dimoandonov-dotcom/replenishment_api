@@ -153,6 +153,16 @@ def morning(db: Session) -> dict:
     out["rollup"] = rollup(db, 1)
     for n in (1, 7):
         report(db, y, n, refresh=True)
+    # последните 7 дни: сверка с Мистрал, непълните дни се дърпат наново
+    fixed = []
+    for i in range(2, 9):
+        d = y - timedelta(days=i - 1)
+        try:
+            if any(r["status"] == "непълно в базата" for r in check(db, d)["rows"]):
+                resync(db, d); fixed.append(d.isoformat())
+        except Exception:
+            db.rollback()
+    out["fixed_days"] = fixed
     return out
 
 
