@@ -682,6 +682,12 @@ def telegram_set_webhook():
     return telegram.set_webhook()
 
 
+@app.post("/telegram/invite")
+def telegram_invite(user: str, db: Session = Depends(get_db)):
+    from . import telegram
+    return telegram.invite(db, user)
+
+
 @app.post("/telegram/send-now")
 def telegram_send_now(db: Session = Depends(get_db)):
     from . import telegram

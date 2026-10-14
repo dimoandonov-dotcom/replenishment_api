@@ -39,6 +39,8 @@ def _ensure(db: Session):
     db.execute(text("""CREATE TABLE IF NOT EXISTS tg_users (chat_id BIGINT PRIMARY KEY, name TEXT,
         username TEXT, linked_at TIMESTAMPTZ, reports BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now())"""))
+    db.execute(text("""CREATE TABLE IF NOT EXISTS tg_invites (code TEXT PRIMARY KEY, username TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(), used_at TIMESTAMPTZ, used_by BIGINT)"""))
     db.execute(text("""CREATE TABLE IF NOT EXISTS tg_log (id SERIAL PRIMARY KEY, at TIMESTAMPTZ NOT NULL DEFAULT now(),
         chat_id BIGINT, kind TEXT, ok BOOLEAN, info TEXT)"""))
     db.commit()
@@ -98,6 +100,23 @@ def handle(db: Session, upd: dict):
     db.commit()
     row = db.execute(text("SELECT username FROM tg_users WHERE chat_id = :i"), {"i": cid}).first()
     low = txt.lower().lstrip("/")
+    # покана с един клик: t.me/<бот>?start=<код> -> свързва директно, без потребител и ПИН
+    if txt.startswith("/start ") and len(txt.split()) == 2:
+        code = txt.split()[1]
+        inv = db.execute(text("""SELECT username FROM tg_invites WHERE code = :c AND used_at IS NULL
+                                 AND created_at > now() - interval '30 days'"""), {"c": code}).first()
+        if inv:
+            user = inv[0]
+            db.execute(text("UPDATE tg_users SET username = :u, linked_at = now(), reports = TRUE WHERE chat_id = :i"),
+                       {"u": user, "i": cid})
+            db.execute(text("UPDATE tg_invites SET used_at = now(), used_by = :i WHERE code = :c"), {"i": cid, "c": code})
+            db.commit()
+            send(cid, f"✅ Готово, {name or user}! Всеки ден в 12:30 ще получаваш отчетите с оборотите на магазините.\n"
+                      "Команди: „отчет“ – отчетите сега, „стоп“ – спри ги, „старт“ – пусни ги пак.")
+            return
+        if not (row and row[0]):
+            send(cid, "Този линк вече е използван или е изтекъл. Поискай нов от Димо.")
+            return
     if not (row and row[0]):
         parts = txt.split()
         if len(parts) == 2 and not txt.startswith("/"):
@@ -172,3 +191,15 @@ def status(db: Session) -> dict:
             "users": [{"name": n, "user": u, "reports": r, "linked": l.astimezone(SOFIA).strftime("%d.%m %H:%M") if l else None}
                       for n, u, r, l in rows],
             "log": [{"at": a.astimezone(SOFIA).strftime("%d.%m %H:%M"), "kind": k, "ok": o, "info": i} for a, k, o, i in log]}
+
+
+def invite(db: Session, username: str) -> dict:
+    """Линк-покана с един клик за потребител (важи 30 дни, веднъж)."""
+    import secrets
+    _ensure(db)
+    code = secrets.token_urlsafe(12).replace("-", "").replace("_", "")[:16]
+    db.execute(text("INSERT INTO tg_invites(code, username) VALUES (:c, :u)"), {"c": code, "u": username.lower()})
+    db.commit()
+    me = _call("getMe", {}) if token() else {}
+    bot = (me.get("result") or {}).get("username") or "minmax300_bot"
+    return {"user": username.lower(), "link": f"https://t.me/{bot}?start={code}"}
