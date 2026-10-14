@@ -1117,6 +1117,15 @@ def an_turnover_resync(day: date, db: Session = Depends(get_db)):
         raise HTTPException(502, f"{type(e).__name__}: {e}")
 
 
+@router.get("/ui/analytics/turnover/check")
+def an_turnover_check(day: date, db: Session = Depends(get_db)):
+    from . import turnover
+    try:
+        return turnover.check(db, day)
+    except Exception as e:
+        raise HTTPException(502, f"{type(e).__name__}: {e}")
+
+
 @router.get("/ui/analytics/turnover/status")
 def an_turnover_status():
     from . import turnover

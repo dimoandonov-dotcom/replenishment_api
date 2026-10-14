@@ -563,3 +563,54 @@ def store_history(db: Session, store_id: int, days: int = 56) -> dict:
         out.append({"day": d.strftime("%d.%m"), "wd": "пвсчпсн"[d.weekday()], "rev": round(rev.get(d, 0), 2),
                     "receipts": rec.get(d)})
     return {"store_id": store_id, "days": out}
+
+
+def check(db: Session, day: date) -> dict:
+    """Пълнота на данните за деня: всеки обект в Мистрал срещу нашата база (оборот, бонове, последен бон)."""
+    from . import mistral
+    from .anomalies import _loc_map
+    _ensure(db)
+    stores = {s.id: (s.name, s.is_active) for s in db.execute(select(m.Store)).scalars()}
+    with mistral.connect() as conn:
+        cur = conn.cursor()
+        locs = _loc_map(db, cur)
+        cur.execute("SELECT ID, NAME FROM LOCATION")
+        lname = {r["ID"]: r["NAME"] for r in cur.fetchall()}
+        cur.execute("""SELECT s.LOCATIONID AS loc, COUNT(DISTINCT s.NUM) AS n, MAX(s.SALEDATE) AS l,
+                              SUM(c.QTY * c.SALEPRICE) AS rev
+                       FROM SALE s WITH (NOLOCK) JOIN SALECONTENT c WITH (NOLOCK) ON c.NUM = s.NUM AND c.LOCATIONID = s.LOCATIONID
+                       WHERE s.REPORTINGDATE = %s GROUP BY s.LOCATIONID""", (day.isoformat(),))
+        live = {r["loc"]: (int(r["n"] or 0), r["l"], float(r["rev"] or 0)) for r in cur.fetchall()}
+    ours = {sid: float(r or 0) for sid, r in db.execute(text(
+        "SELECT store_id, SUM(rev) FROM sa_sales WHERE day = :d GROUP BY store_id"), {"d": day}).all()}
+    rec = {sid: (n, l) for sid, n, l in db.execute(text(
+        "SELECT store_id, receipts, last_at FROM to_receipts WHERE day = :d"), {"d": day}).all()}
+    rows, by_sid = [], defaultdict(lambda: [0, None, 0.0, []])
+    for loc, (n, l, rev) in live.items():
+        sid = locs.get(loc)
+        if sid is None:
+            rows.append({"loc": loc, "mistral": lname.get(loc, str(loc)), "store": None, "status": "не е вързан към магазин",
+                         "live_rev": round(rev, 2), "live_receipts": n, "live_last": l.strftime("%H:%M") if l else None})
+            continue
+        a = by_sid[sid]; a[0] += n; a[2] += rev; a[3].append(lname.get(loc, str(loc)))
+        if l and (a[1] is None or l > a[1]): a[1] = l
+    for sid, (name, active) in stores.items():
+        if not active:
+            continue
+        n, l, rev, ln = by_sid.get(sid, [0, None, 0.0, []])
+        o = ours.get(sid, 0.0); rc = rec.get(sid, (None, None))
+        diff = round(rev - o, 2)
+        if not ln:
+            st = "няма продажби в Мистрал"
+        elif abs(diff) < max(1.0, rev * 0.002):
+            st = "ok"
+        else:
+            st = "непълно в базата"
+        rows.append({"store_id": sid, "store": name, "mistral": ", ".join(ln), "status": st,
+                     "live_rev": round(rev, 2), "our_rev": round(o, 2), "diff": diff,
+                     "live_receipts": n, "our_receipts": rc[0],
+                     "live_last": l.strftime("%H:%M") if l else None, "our_last": rc[1].strftime("%H:%M") if rc[1] else None})
+    rows.sort(key=lambda r: (r["status"] == "ok", -(abs(r.get("diff") or 0))))
+    return {"day": day.isoformat(), "checked_at": datetime.now(SOFIA).strftime("%d.%m %H:%M"),
+            "stores": sum(1 for r in rows if r.get("store_id")), "ok": sum(1 for r in rows if r["status"] == "ok"),
+            "rows": rows}
