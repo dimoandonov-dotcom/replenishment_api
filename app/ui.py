@@ -1108,6 +1108,15 @@ def an_turnover_backfill(days: int = Query(56, ge=1, le=60)):
     return turnover.start_backfill(days)
 
 
+@router.post("/analytics/turnover/resync")
+def an_turnover_resync(day: date, db: Session = Depends(get_db)):
+    from . import turnover
+    try:
+        return turnover.resync(db, day)
+    except Exception as e:
+        raise HTTPException(502, f"{type(e).__name__}: {e}")
+
+
 @router.get("/ui/analytics/turnover/status")
 def an_turnover_status():
     from . import turnover

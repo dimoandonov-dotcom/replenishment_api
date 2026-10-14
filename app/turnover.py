@@ -39,6 +39,7 @@ CAUSES = {
     "promo": "Свършила акция",
     "price": "По-висока цена",
     "shelf": "Не се продава при наличност",
+    "neg": "Минусова наличност (данните не са верни)",
     "chain": "Общ спад във веригата",
     "traffic": "По-малко клиенти",
     "hours": "Работил по-кратко",
@@ -65,7 +66,7 @@ def _ensure(db: Session):
 
 
 # ------------------------------------------------------------------ данни
-def sync_receipts(db: Session, days: int = 3) -> dict:
+def sync_receipts(db: Session, days: int = 3, only: date | None = None) -> dict:
     """Брой касови бонове и първи/последен бон на ден по магазин (от Мистрал)."""
     from . import mistral
     from .anomalies import _loc_map
@@ -76,8 +77,7 @@ def sync_receipts(db: Session, days: int = 3) -> dict:
         cur = conn.cursor()
         locs = _loc_map(db, cur)
         L = ",".join(map(str, locs))
-        for i in range(days, 0, -1):
-            d = today - timedelta(days=i)
+        for d in ([only] if only else [today - timedelta(days=i) for i in range(days, 0, -1)]):
             _job["progress"] = f"бонове {d.strftime('%d.%m')}"
             cur.execute(f"""SELECT LOCATIONID AS loc, COUNT(*) AS n, MIN(SALEDATE) AS f, MAX(SALEDATE) AS l
                             FROM SALE WITH (NOLOCK) WHERE REPORTINGDATE = %s AND LOCATIONID IN ({L})
@@ -133,6 +133,16 @@ def resync_sales_day(db: Session, d: date) -> int:
           [(k[0], k[1], d, v[0], v[1], v[2]) for k, v in agg.items()])
     db.commit()
     return len(agg)
+
+
+def resync(db: Session, d: date) -> dict:
+    """Ръчно: пак продажбите и боновете за деня, после отчетите, в които влиза."""
+    out = {"day": d.isoformat(), "sales_rows": resync_sales_day(db, d), "receipts": sync_receipts(db, only=d)}
+    last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
+    out["rollup"] = rollup(db, (last - d).days + 1) if last else 0
+    report(db, d, 1, refresh=True)
+    report(db, d, 7, refresh=True)
+    return out
 
 
 def morning(db: Session) -> dict:
@@ -458,6 +468,8 @@ def _article_causes(db: Session, day: date, n: int, flagged, base_weeks, chain_p
         promo_end = code in promo_b and promo_b[code] >= max(len(base_days) // 3, 1) and code not in promo_c
         if promo_end:
             k, t = "promo", f"свърши акцията (продаваше {qb / n:.1f}/ден в акция, сега {q0 / n:.1f})"
+        elif sq is not None and sq < 0:
+            k, t = "neg", f"наличност {sq:g} бр. по Мистрал — незаведени доставки, не се знае дали е свършил"
         elif (sq is not None and sq <= 0) or (sq is None and q0 == 0):
             k, t = "stock", f"свършила наличност ({'0 бр.' if sq is None else f'{sq:g} бр.'} в края на деня)"
         elif q0 == 0 and sq and sq > 0 and qb / n >= SHELF_MIN_PER_DAY:
@@ -487,7 +499,7 @@ def _article_causes(db: Session, day: date, n: int, flagged, base_weeks, chain_p
             # частта от спада, която идва от общия спад във веригата
             chain_part = max(0.0, min(lost_g, gr["base"] * -cp / 100))
             causes.append({"k": "chain", "t": f"групата пада и в цялата верига ({cp:+.0f}%) — сезон, време, празник или доставчик"})
-        for k in ("stock", "promo", "price", "shelf", "noise"):
+        for k in ("stock", "neg", "promo", "price", "shelf", "noise"):
             if split.get(k):
                 nn = sum(1 for a in arts if a["k"] == k)
                 causes.append({"k": k, "t": f"{CAUSES[k]}: {nn} арт. (−{_eur(split[k])})"})
