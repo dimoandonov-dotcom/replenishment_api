@@ -1148,6 +1148,24 @@ def an_turnover_status():
     return turnover.status()
 
 
+@router.get("/ui/analytics/delist")
+def an_delist(seasonal: bool = False, db: Session = Depends(get_db)):
+    from . import delist
+    return delist.proposals(db, seasonal)
+
+
+class DelistIn(BaseModel):
+    code: int
+    decision: str = Field(pattern="^(delist|keep|clear)$")
+    note: str | None = None
+
+
+@router.post("/analytics/delist/decide")
+def an_delist_decide(payload: DelistIn, request: Request, db: Session = Depends(get_db)):
+    from . import delist
+    return delist.decide(db, payload.code, payload.decision, payload.note, getattr(request.state, "user", None))
+
+
 @router.get("/ui/analytics/nomenclature")
 def an_nomenclature(group: str, days: int = Query(30, ge=1, le=60), db: Session = Depends(get_db)):
     from . import salesall
