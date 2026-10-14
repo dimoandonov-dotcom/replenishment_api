@@ -244,7 +244,7 @@ nav a:hover { transform:translateY(-2px); }
 nav a.on { background:var(--c,var(--amber)); color:#fff; box-shadow:0 8px 20px color-mix(in srgb,var(--c,var(--amber)) 40%,transparent); }
 nav a.on::before { background:#fff; box-shadow:0 0 0 3px rgba(255,255,255,.35); }
 nav a[data-tab="board"]{--c:#D9621C} nav a[data-tab="orders"]{--c:#2F7DD1} nav a[data-tab="assort"]{--c:#E9A23B}
-nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A} nav a[data-tab="qual"]{--c:#0EA5A4} nav a[data-tab="anal"]{--c:#C026D3} nav a[data-tab="anom"]{--c:#9F1239} nav a[data-tab="promo"]{--c:#DB2777} nav a[data-tab="turn"]{--c:#0F766E}
+nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A} nav a[data-tab="qual"]{--c:#0EA5A4} nav a[data-tab="anal"]{--c:#C026D3} nav a[data-tab="anom"]{--c:#9F1239} nav a[data-tab="promo"]{--c:#DB2777} nav a[data-tab="turn"]{--c:#0F766E} nav a[data-tab="delist"]{--c:#57534E}
 
 /* ---------- бутони ---------- */
 button { border-radius:10px; border:1px solid var(--line-strong); background:var(--raised); font-family:var(--head); font-weight:700;
@@ -333,6 +333,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <a href="#anal" data-tab="anal">Анализи</a>
   <a href="#promo" data-tab="promo">Брошура и акции</a>
   <a href="#turn" data-tab="turn">Обороти</a>
+  <a href="#delist" data-tab="delist">Делистване</a>
   <a href="#qual" data-tab="qual">Качество</a>
   <a href="#anom" data-tab="anom">Аномалии</a>
   <a href="#nord" data-tab="nord">Не се поръчват</a>
@@ -589,6 +590,36 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <div id="tuView"></div>
 </section>
 
+<!-- ============ ДЕЛИСТВАНЕ ============ -->
+<section class="tab" id="tab-delist">
+  <details class="help" style="margin:0 0 14px;background:var(--paper,#fffaf3);border:1px solid var(--line,#e7dccb);border-radius:14px;padding:10px 14px">
+    <summary style="cursor:pointer;font-weight:600">❓ Как се избират предложенията</summary>
+    <div class="note" style="line-height:1.7;margin-top:8px;font-size:12.5px">
+    Гледат се продажбите на <b>всички доставчици във всички магазини</b> за последните ~60 дни (колкото има в базата) и наличността в момента.<br>
+    • <b>Мъртъв</b> — 0 продажби за целия период, а има наличност в магазините. Подредени по замразени пари.<br>
+    • <b>Много бавен</b> — под 1 бр. на магазин на месец и е в последните 5% от оборота на своята подгрупа (има заместители, които продават).<br>
+    • <b>Изпада</b> — във втората половина на периода продава под 40% от първата и и без това е слаб.<br>
+    Не се предлагат: нови артикули (първа продажба в последните 3 седмици), артикули в текуща акция, сезонни групи (сладоледи, яйца) и служебни групи.<br>
+    <b>Внимание:</b> току-що заредени артикули без продажби още може да излязат като „мъртви“ — проверете датата на зареждане.<br>
+    Бутоните: <b>✔ Делистваме</b> — записва решението (остава в списъка, маркиран); <b>✖ Оставяме</b> — скрива предложението за 90 дни.
+    </div>
+  </details>
+  <div class="bar" style="flex-wrap:wrap">
+    <select id="dlGrp"><option value="">Всички групи</option></select>
+    <select id="dlSup"><option value="">Всички доставчици</option></select>
+    <input id="dlQ" placeholder="търси артикул / код" style="min-width:180px;flex:1">
+    <label class="note"><input type="checkbox" id="dlDec"> само решените</label>
+    <label class="note"><input type="checkbox" id="dlSeas"> със сезонните</label>
+    <span class="note" id="dlInfo"></span>
+  </div>
+  <div class="board" id="dlKpis"></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Артикул</th><th class="num" title="Продадени бройки за периода">Продадени</th><th class="num" title="Бройки на магазин на месец">Бр./маг./мес.</th><th class="num">Магазини с наличност</th><th class="num">Наличност</th><th class="num">Замразени €</th><th class="num">Последна продажба</th><th>Решение</th></tr></thead>
+    <tbody id="dlBody"></tbody>
+  </table></div>
+  <div id="dlMore"></div>
+</section>
+
 <!-- ============ НЕ СЕ ПОРЪЧВАТ ============ -->
 <section class="tab" id="tab-nord">
   <p class="note" style="margin:0 0 14px;line-height:1.6">Всичко, което при сегашните настройки <b>никога няма да влезе в заявка</b>, по магазини и по причина.
@@ -734,7 +765,7 @@ const loaded = {};
 function show(tab) {
   document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + tab));
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: loadAnom, promo: initPromo, turn: initTurn, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: loadAnom, promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -1778,6 +1809,60 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("scroll", () => { const t = document.getElementById("thTip"); if (t) t.style.display = "none"; }, true);
 
+/* ---------- делистване ---------- */
+let DL = { data: null, kind: "", lim: 200 };
+const DLC = { dead: "#DC2626", slow: "#D97706", falling: "#7C3AED" };
+function initDelist() {
+  ["dlGrp", "dlSup", "dlDec"].forEach(id => $(id).onchange = () => { DL.lim = 200; renderDelist(); });
+  $("dlSeas").onchange = loadDelist;
+  let t; $("dlQ").oninput = () => { clearTimeout(t); t = setTimeout(() => { DL.lim = 200; renderDelist(); }, 300); };
+  loadDelist();
+}
+async function loadDelist() {
+  $("dlBody").innerHTML = `<tr><td colspan="8" class="empty loading">Смятам…</td></tr>`;
+  const d = await api(`/ui/analytics/delist?seasonal=${$("dlSeas").checked ? 1 : 0}`);
+  DL.data = d;
+  if (!d.ready) { $("dlBody").innerHTML = `<tr><td colspan="8" class="empty">Няма данни</td></tr>`; return; }
+  $("dlInfo").textContent = `продажби ${d.from}–${d.to} (${d.days} дни)`;
+  const uniq = k => [...new Set(d.rows.map(r => r[k]).filter(Boolean))].sort((a, b) => a.localeCompare(b, "bg"));
+  const keepG = $("dlGrp").value, keepS = $("dlSup").value;
+  $("dlGrp").innerHTML = `<option value="">Всички групи</option>` + uniq("grp").map(g => `<option>${esc(g)}</option>`).join(""); $("dlGrp").value = keepG;
+  $("dlSup").innerHTML = `<option value="">Всички доставчици</option>` + uniq("supplier").map(g => `<option>${esc(g)}</option>`).join(""); $("dlSup").value = keepS;
+  renderDelist();
+}
+function renderDelist() {
+  const d = DL.data; if (!d || !d.ready) return;
+  const g = $("dlGrp").value, sp = $("dlSup").value, q = ($("dlQ").value || "").trim().toLowerCase(), dec = $("dlDec").checked;
+  const base = d.rows.filter(r => (!g || r.grp === g) && (!sp || r.supplier === sp) && (!q || (r.name + " " + r.code).toLowerCase().includes(q)) && (!dec || r.decision));
+  const st = {}; base.forEach(r => { st[r.kind] = st[r.kind] || { n: 0, e: 0 }; st[r.kind].n++; st[r.kind].e += r.stock_eur; });
+  const tot = base.reduce((a, r) => a + r.stock_eur, 0), nd = base.filter(r => r.decision === "delist").length;
+  const tile = (k, l, sub) => `<div class="tile" data-k="${k}" style="cursor:pointer;${DL.kind === k ? "outline:3px solid " + (DLC[k] || "#0F766E") : ""}"><div class="l">${l}</div><div class="v" style="color:${DLC[k] || "inherit"}">${fmtN(k ? (st[k]?.n || 0) : base.length)}</div><div class="s">${sub}</div></div>`;
+  $("dlKpis").innerHTML = tile("", "ВСИЧКИ ПРЕДЛОЖЕНИЯ", `${fmtE(tot)} € замразени в наличност · ${nd} решени за делистване`)
+    + tile("dead", "МЪРТВИ", `0 продажби · ${fmtE(st.dead?.e || 0)} € замразени`)
+    + tile("slow", "МНОГО БАВНИ", `под 1 бр./магазин на месец · ${fmtE(st.slow?.e || 0)} €`)
+    + tile("falling", "ИЗПАДАЩИ", `силен спад на продажбите · ${fmtE(st.falling?.e || 0)} €`);
+  document.querySelectorAll("#dlKpis .tile").forEach(el => el.onclick = () => { DL.kind = DL.kind === el.dataset.k ? "" : el.dataset.k; DL.lim = 200; renderDelist(); });
+  const rows = base.filter(r => !DL.kind || r.kind === DL.kind);
+  $("dlBody").innerHTML = rows.slice(0, DL.lim).map(r => `<tr${r.decision === "delist" ? ' style="background:#F5F5F4"' : ""}>
+    <td style="white-space:normal;min-width:280px"><div class="name" style="font-weight:600"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${DLC[r.kind]};margin-right:6px"></span>${esc(r.code)} · ${esc(r.name)}</div>
+      <div class="muted" style="font-size:11.5px;margin-top:2px">${esc(r.grp)}${r.sub && r.sub !== r.grp ? " / " + esc(r.sub) : ""} · ${esc(r.supplier)}${r.margin_pct != null ? " · марж " + fmtN(r.margin_pct) + "%" : ""}</div>
+      <div style="font-size:12px;margin-top:2px">${esc(r.reason)}</div></td>
+    <td class="num">${fmtN(r.units)}</td><td class="num">${fmtN(r.per_store_month)}</td><td class="num">${r.stores_stock}</td>
+    <td class="num">${fmtN(r.stock)}</td><td class="num"><b>${fmtE(r.stock_eur)}</b></td><td class="num">${r.last_sale || "—"}</td>
+    <td style="white-space:nowrap">${r.decision === "delist" ? `<span class="tag bad">делистваме</span> <button class="mini" data-dl="${r.code}" data-d="clear">отмени</button>`
+      : `<button class="mini" data-dl="${r.code}" data-d="delist">✔ Делистваме</button> <button class="mini" data-dl="${r.code}" data-d="keep">✖ Оставяме</button>`}</td></tr>`).join("")
+    || `<tr><td colspan="8" class="empty">Няма предложения</td></tr>`;
+  $("dlMore").innerHTML = rows.length > DL.lim ? `<div style="text-align:center;margin:10px"><button id="dlMoreB">Покажи още (${rows.length - DL.lim})</button></div>` : "";
+  if ($("dlMoreB")) $("dlMoreB").onclick = () => { DL.lim += 300; renderDelist(); };
+  document.querySelectorAll("#dlBody [data-dl]").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    await api("/analytics/delist/decide", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: +b.dataset.dl, decision: b.dataset.d }) });
+    const r = d.rows.find(x => x.code === +b.dataset.dl);
+    if (b.dataset.d === "keep") d.rows = d.rows.filter(x => x !== r); else if (r) r.decision = b.dataset.d === "clear" ? null : "delist";
+    renderDelist();
+  });
+}
+
 /* ---------- провери артикул ---------- */
 async function acCheck() {
   const q = ($("acQ").value || "").trim(), p = $("acPanel");
@@ -2378,8 +2463,8 @@ fetch("/ui/summary").then(r => {
   if (r.status === 401) { showLogin(); return; }
   api("/ui/me").then(m => { const w = document.getElementById("whoami"); if (w && m.name) w.textContent = "👤 " + m.name;
     if (m.analytics_only) {   // профил само за „Анализи"
-      document.querySelectorAll('nav a').forEach(a => { if (!["anal", "promo", "turn"].includes(a.dataset.tab)) a.remove(); });
-      document.querySelectorAll('section.tab').forEach(t => { if (!["tab-anal", "tab-promo", "tab-turn"].includes(t.id)) t.remove(); });
+      document.querySelectorAll('nav a').forEach(a => { if (!["anal", "promo", "turn", "delist"].includes(a.dataset.tab)) a.remove(); });
+      document.querySelectorAll('section.tab').forEach(t => { if (!["tab-anal", "tab-promo", "tab-turn", "tab-delist"].includes(t.id)) t.remove(); });
       ["kpis", "freshInfo"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
       if (location.hash !== "#anal") location.hash = "#anal";
     }
@@ -2389,8 +2474,8 @@ fetch("/ui/summary").then(r => {
       ["kpis", "freshInfo"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
       if (location.hash !== "#anom") location.hash = "#anom";
     }
-    if (!m.analytics) { ["anal", "promo", "turn"].forEach(k => { const a = document.querySelector(`nav a[data-tab="${k}"]`); if (a) a.remove();
-      const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (["#anal", "#promo", "#turn"].includes(location.hash)) location.hash = "#board"; } }).catch(() => {});
+    if (!m.analytics) { ["anal", "promo", "turn", "delist"].forEach(k => { const a = document.querySelector(`nav a[data-tab="${k}"]`); if (a) a.remove();
+      const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (["#anal", "#promo", "#turn", "#delist"].includes(location.hash)) location.hash = "#board"; } }).catch(() => {});
   show((location.hash || "#board").slice(1));
   updateFresh();
 });

@@ -81,7 +81,7 @@ def proposals(db: Session, include_seasonal: bool = False) -> dict:
         grp = grp or "Без група"
         if grp in SKIP_GROUPS or (grp in SEASONAL and not include_seasonal):
             continue
-        if (name or "").upper().startswith(("АМБАЛАЖ", "ТОРБА", "ТОРБИЧКА")):
+        if "АМБАЛАЖ" in (name or "").upper() or (name or "").upper().startswith(("ТОРБА", "ТОРБИЧКА")):
             continue
         q, r, c, q1, q2, sq, sv = map(lambda x: float(x or 0), (q, r, c, q1, q2, sq, sv))
         stores = max(int(nst or 0), int(ns or 0), 1)
@@ -104,7 +104,8 @@ def proposals(db: Session, include_seasonal: bool = False) -> dict:
             continue
         daily = q / days
         if kind == "dead":
-            reason = f"0 продажби за {days} дни, а има {sq:g} бр. в {nst} маг. ({sv:,.0f} € замразени)".replace(",", " ")
+            eur = f"{sv:,.0f}".replace(",", " ")
+            reason = f"0 продажби за {days} дни, а има {sq:g} бр. в {nst} маг. ({eur} € замразени)"
         elif kind == "slow":
             reason = (f"{q:g} бр. за {days} дни в {stores} маг. = {per_store_month:.2f} бр./магазин на месец; "
                       f"{share:.1f}% от оборота на подгрупата")
