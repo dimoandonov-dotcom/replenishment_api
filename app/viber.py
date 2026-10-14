@@ -252,9 +252,28 @@ def summary(db: Session, day=None) -> str:
     if info:
         L += ["", "ℹ️ ИНФОРМАТИВНО (не изисква действие)"] + info
 
-    L += ["", "💶 ОБОРОТ ПО МАГАЗИНИ:"]
-    for i, s in enumerate(sorted(d["stores"], key=lambda s: -s["rev"]), 1):
-        L.append(f"{i}. {_store(s['store'])}: {_e(s['rev'])} € ({_p(s['pct'])})")
+    L += ["", "💶 МАГАЗИН ПО МАГАЗИН (от най-големия ръст към най-големия спад)",
+          "оборот вчера (обичайно) · бонове · ср. сметка · кои групи растат ↑ и падат ↓"]
+    for s in sorted(d["stores"], key=lambda s: -(s["pct"] if s["pct"] is not None else 0)):
+        pc = s["pct"] or 0
+        ic = "🟢" if pc >= 3 else ("🔴" if pc <= -8 else ("🟠" if pc <= -3 else "⚪"))
+        L += ["", f"{ic} {_store(s['store'])}: {_e(s['rev'])} € (обикн. {_e(s['base'])}) {_p(s['pct'])} / {'+' if s['diff'] >= 0 else ''}{_e(s['diff'])} €"]
+        bits = []
+        if s.get("receipts") is not None:
+            bits.append(f"бонове {_e(s['receipts'])}" + (f" ({_e(s['receipts_base'])})" if s.get("receipts_base") else ""))
+        if s.get("basket"):
+            bits.append(f"ср. сметка {s['basket']:.2f}".replace(".", ",") + (f" ({s['basket_base']:.2f})".replace(".", ",") if s.get("basket_base") else "") + " €")
+        if s.get("margin_pct") is not None:
+            bits.append(f"марж {s['margin_pct']:.1f}%".replace(".", ","))
+        if bits:
+            L.append("   " + " · ".join(bits))
+        gs = [g for g in s["groups"] if abs(g["diff"]) >= 10]
+        up = sorted((g for g in gs if g["diff"] > 0), key=lambda g: -g["diff"])[:3]
+        dn = sorted((g for g in gs if g["diff"] < 0), key=lambda g: g["diff"])[:3]
+        if up:
+            L.append("   ↑ " + ", ".join(f"{g['grp']} +{_e(g['diff'])} €" for g in up))
+        if dn:
+            L.append("   ↓ " + ", ".join(f"{g['grp']} {_e(g['diff'])} €" for g in dn))
     L += ["", f"Подробно (с вход): {PUBLIC_URL}/#turn"]
     return "\n".join(L)
 
