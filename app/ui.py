@@ -714,6 +714,13 @@ def article_no_order(sku: str, payload: NoOrderIn, request: Request, db: Session
     return {"sku": a.sku, "no_order": a.no_order, "by": who, "in_planogram_stores": plano}
 
 
+@router.get("/ui/article-check")
+def ui_article_check(store_id: int, q: str, db: Session = Depends(get_db)):
+    """Защо артикулът е/не е в заявката: мин/макс, наличност, продажби, причина."""
+    from . import artcheck
+    return artcheck.check(db, store_id, q)
+
+
 @router.get("/ui/orders/{store_id}/explain")
 def ui_order_explain(store_id: int, db: Session = Depends(get_db)):
     """Графика на продажбите + обяснение за всеки ред от заявката на магазина."""

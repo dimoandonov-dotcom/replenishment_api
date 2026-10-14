@@ -364,9 +364,10 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <button class="warm" id="xlsOrder">Свали Excel</button>
     <button id="oxAll">Покажи всички графики</button>
     <button id="coBtn" style="background:#2563EB;color:#fff">👤 Поръчка от клиент</button>
+    <input id="acQ" placeholder="🔍 Провери артикул (код или име) — мин/макс и защо го няма" style="min-width:260px;flex:1">
     <span class="msg" id="ordMsg"></span>
   </div>
-  <div id="coPanel"></div>
+  <div id="coPanel"></div><div id="acPanel"></div>
   <div class="totals" id="ordTotals"></div>
   <div class="scroll"><table>
     <thead><tr>
@@ -810,8 +811,10 @@ async function loadBoard() {
 let ordLines = [], edits = {}, curIdx = 0, ORD_EX = { days: [], items: {} };
 async function initOrders() {
   const list = await stores(); fillStoreSelect($("storeSel"), list);
-  $("storeSel").onchange = () => { loadOrder(); if ($("coList")) coList(); };
+  $("storeSel").onchange = () => { loadOrder(); if ($("coList")) coList(); if (($("acQ").value || "").trim()) acCheck(); };
   $("coBtn").onclick = coOpen;
+  let acT; $("acQ").oninput = () => { clearTimeout(acT); acT = setTimeout(acCheck, 450); };
+  $("acQ").onkeydown = e => { if (e.key === "Enter") { clearTimeout(acT); acCheck(); } };
   $("prevStore").onclick = () => step(-1);
   $("nextStore").onclick = () => step(1);
   $("reloadOrder").onclick = () => loadOrder();
@@ -1774,6 +1777,25 @@ document.addEventListener("click", e => {
   clearTimeout(tip._t); tip._t = setTimeout(() => tip.style.display = "none", 4000);
 });
 document.addEventListener("scroll", () => { const t = document.getElementById("thTip"); if (t) t.style.display = "none"; }, true);
+
+/* ---------- провери артикул ---------- */
+async function acCheck() {
+  const q = ($("acQ").value || "").trim(), p = $("acPanel");
+  if (q.length < 2) { p.innerHTML = ""; return; }
+  p.innerHTML = `<div class="empty loading">Проверявам…</div>`;
+  const d = await api(`/ui/article-check?store_id=${$("storeSel").value}&q=${encodeURIComponent(q)}`).catch(e => ({ rows: [], msg: e.message }));
+  if (($("acQ").value || "").trim() !== q) return;
+  p.innerHTML = `<div class="tile" style="margin:10px 0;padding:14px">
+    <div style="display:flex;justify-content:space-between;gap:8px"><div class="l">🔍 ${esc(d.store || "")} — „${esc(q)}“</div><button class="mini" onclick="$('acPanel').innerHTML='';$('acQ').value=''">✕</button></div>
+    ${d.rows && d.rows.length ? d.rows.map(r => `<div style="border-top:1px solid var(--line);padding:10px 0">
+      <div><b>${esc(r.sku)}</b> · <b>${esc(r.name)}</b>${r.planogram ? "" : ' <span class="tag off">не е в планограмата</span>'}${r.manual ? ' <span class="tag warn">ръчно заключен</span>' : ""}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px 18px;margin:6px 0;font-size:13px">
+        <span>Мин <b>${r.min == null ? "—" : fmtN(r.min)}</b></span><span>Макс <b>${r.max == null ? "—" : fmtN(r.max)}</b></span>
+        <span>Наличност <b class="${r.stock != null && r.min != null && r.stock < r.min ? "low" : ""}">${r.stock == null ? "—" : fmtN(r.stock)}</b></span>
+        <span>Продава <b>${fmtN(r.per_day)}</b>/ден</span><span>Опаковка <b>${r.pack}</b> бр.</span></div>
+      <div style="font-size:13.5px;${r.in_order ? "color:#15803D;font-weight:600" : ""}">${esc(r.why)}</div></div>`).join("")
+      : `<div class="note" style="margin-top:6px">${esc(d.msg || "Няма намерени артикули")}</div>`}</div>`;
+}
 
 /* ---------- поръчки от клиенти ---------- */
 function nextDay() { const d = new Date(Date.now() + 3 * 3600e3); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); }
