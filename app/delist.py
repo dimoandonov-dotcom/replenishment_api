@@ -22,7 +22,8 @@ SEASONAL = {"Сладоледи", "Яйца и боя за яйца"}
 SLOW_PER_STORE_MONTH = 1.0     # под 1 бр. на магазин на месец
 TAIL_SHARE = 95.0              # в последните 5% от оборота на подгрупата
 NEW_DAYS = 21
-KEEP_HIDE_DAYS = 90            # „оставяме“ скрива предложението за 90 дни
+KEEP_HIDE_DAYS = 90
+NSTORES = 52            # „оставяме“ скрива предложението за 90 дни
 
 KINDS = {"dead": "Мъртъв — 0 продажби, има наличност",
          "slow": "Много бавен — под 1 бр./магазин на месец",
@@ -49,22 +50,35 @@ def _word(name: str | None) -> str:
     return w[0] if w else ""
 
 
+def _vol(name: str | None) -> float | None:
+    """Разфасовка в мл/гр: 750МЛ, 0.5Л, 1,5Л, 150ГР, 1КГ."""
+    import re
+    g = re.search(r"(\d+(?:[.,]\d+)?)\s*(МЛ|Л|ГР|КГ|Г)(?![А-Я])", (name or "").upper())
+    if not g:
+        return None
+    v = float(g.group(1).replace(",", "."))
+    return v * (1000 if g.group(2) in ("Л", "КГ") else 1)
+
+
 def _alts(o: dict, good: dict) -> list[dict]:
-    """До 3 заместителя: същата подгрупа и същия вид (първа дума), сходна цена, продават поне 2 бр./магазин/месец."""
-    pool = [g for g in good.get((o["grp"], o["sub"]), []) if g["code"] != o["code"]]
-    same = [g for g in pool if g["word"] and g["word"] == o["_word"]]
-    if same or o["_word"] in _GENERIC:
-        pool = same
+    """До 3 заместителя: същата подгрупа и същия вид (първа дума), сходна цена и разфасовка,
+    продават поне 2 бр./магазин/месец. Първо тези, които още ги няма във всички магазини."""
+    if not o["_word"]:
+        return []
+    pool = [g for g in good.get((o["grp"], o["sub"]), [])
+            if g["code"] != o["code"] and g["word"] == o["_word"]]
     cost = o.get("_cost")
     if cost:
-        pool = [g for g in pool if 0.5 * cost <= g["cost"] <= 2 * cost] or pool[:0]
-    pool.sort(key=lambda g: -g["psm"])
+        pool = [g for g in pool if 0.5 * cost <= g["cost"] <= 2 * cost]
+    v = _vol(o["name"])
+    if v:
+        pool = [g for g in pool if not g["vol"] or 0.5 * v <= g["vol"] <= 2 * v]
+    pool.sort(key=lambda g: (g["stores"] >= NSTORES, -g["psm"]))
     res = []
     for g in pool[:3]:
-        gain = g["psm"] - o["per_store_month"]
         res.append({k: g[k] for k in ("code", "name", "psm", "stores", "price", "margin_pct", "supplier")} |
                    {"x": round(g["psm"] / o["per_store_month"], 1) if o["per_store_month"] > 0 else None,
-                    "gain": round(gain, 1), "missing_stores": max(52 - g["stores"], 0)})
+                    "gain": round(g["psm"] - o["per_store_month"], 1), "missing_stores": max(NSTORES - g["stores"], 0)})
     return res
 
 
@@ -120,6 +134,8 @@ def proposals(db: Session, include_seasonal: bool = False) -> dict:
         LEFT JOIN sa_dates dt ON dt.code = a.code
         WHERE COALESCE(st.sq,0) > 0 OR COALESCE(s.q,0) > 0"""),
         {"f": since, "t": last, "mid": mid}).all()
+    global NSTORES
+    NSTORES = db.execute(text("SELECT COUNT(DISTINCT store_id) FROM sa_stock")).scalar() or 52
     promo = {c for (c,) in db.execute(text("SELECT DISTINCT code FROM sa_promo WHERE end_day >= :d AND start_day <= :d"),
                                       {"d": today}).all()}
     dec = {c: (d, n, b, at) for c, d, n, b, at in db.execute(text(
@@ -145,7 +161,7 @@ def proposals(db: Session, include_seasonal: bool = False) -> dict:
         psm = q / stores_ / days * 30
         if psm < 2:
             continue
-        good[(grp or "", sub or "")].append({"code": code, "name": name or str(code), "word": _word(name),
+        good[(grp or "", sub or "")].append({"code": code, "name": name or str(code), "word": _word(name), "vol": _vol(name),
                                              "psm": round(psm, 1), "stores": stores_, "stores_sold": int(ns or 0),
                                              "price": round(r / q, 2), "cost": c / q,
                                              "margin_pct": round(100 * (r - c) / r, 1) if r else None,
