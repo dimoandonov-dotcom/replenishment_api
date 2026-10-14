@@ -262,7 +262,7 @@ def summary(db: Session, day=None) -> str:
         if s.get("receipts") is not None:
             bits.append(f"бонове {_e(s['receipts'])}" + (f" ({_e(s['receipts_base'])})" if s.get("receipts_base") else ""))
         if s.get("basket"):
-            bits.append(f"ср. сметка {s['basket']:.2f}".replace(".", ",") + (f" ({s['basket_base']:.2f})".replace(".", ",") if s.get("basket_base") else "") + " €")
+            bits.append("ср. сметка " + f"{s['basket']:.2f}".replace(".", ",") + (" (" + f"{s['basket_base']:.2f}".replace(".", ",") + ")" if s.get("basket_base") else "") + " €")
         if s.get("margin_pct") is not None:
             bits.append(f"марж {s['margin_pct']:.1f}%".replace(".", ","))
         if bits:
