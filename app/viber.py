@@ -154,7 +154,7 @@ def summary(db: Session, day=None) -> str:
     L = [f"📊 ОБОРОТИ {d['period']} ({d['weekday']})",
          f"Общо: {_e(t['rev'])} € ({_p(t['pct'])} спрямо обичайното {_e(t['base'])} €)"]
     if t.get("receipts") and t.get("receipts_base"):
-        L.append(f"Бонове: {_e(t['receipts'])} (обикн. {_e(t['receipts_base'])}) · ср. сметка {t['basket']:.2f} €".replace(".", ","))
+        L.append(f"Бонове: {_e(t['receipts'])} (обикн. {_e(t['receipts_base'])}) · ср. сметка {t['basket']:.2f} €".replace(".", ",").replace("обикн,", "обикн.").replace("ср, сметка", "ср. сметка"))
     L.append(f"Магазини в спад: {t['stores_down']} от {t['stores']}")
     down = [s for s in d["stores"] if s.get("flag")]
     if down:
