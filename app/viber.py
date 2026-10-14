@@ -153,7 +153,11 @@ def _n(x) -> str:
 
 
 def _short(name: str, n: int = 38) -> str:
-    name = (name or "").split(" / ")[0].strip()
+    import re
+    name = re.sub(r"\s*/\s*\d.*$", "", name or "")            # „ /462029“, „406 / 408 / 15009“
+    name = re.sub(r"\s{2,}/?\d{3,}\s*$", "", name)               # „БИРА АРИАНА 2Л  463921“
+    name = re.sub(r"\s+(\d{3,}\s*)+$", "", name) if re.search(r"(ГР|МЛ|Л|КГ|БР)\s+\d{3,}(\s+\d+)*\s*$", name) else name
+    name = re.sub(r"\s{2,}", " ", name).strip()
     return name if len(name) <= n else name[:n - 1] + "…"
 
 
@@ -161,13 +165,17 @@ def _store(s: str) -> str:
     return s.replace("м-н ", "").replace("Супермаркет ", "")
 
 
+def _u(a) -> str:
+    return "кг" if " КГ" in (a.get("name") or "").upper() else "бр."
+
+
 ACTION = [
     ("stock", "🔴 СВЪРШИЛА НАЛИЧНОСТ", "провери заявките/доставката",
-     lambda a: f"{_short(a['name'])} — продадени {_n(a['qty'])} (обикн. {_n(a['qty_base'])}), остават {_n(a['stock'])} бр."),
+     lambda a: f"{_short(a['name'])} — продадени {_n(a['qty'])} (обикн. {_n(a['qty_base'])}), остават {_n(a['stock'])} {_u(a)}"),
     ("neg", "🟠 МИНУСОВА НАЛИЧНОСТ", "заведи доставките, иначе заявките са грешни",
-     lambda a: f"{_short(a['name'])} — наличност {_n(a['stock'])} бр. по Мистрал"),
+     lambda a: f"{_short(a['name'])} — наличност {_n(a['stock'])} {_u(a)} по Мистрал"),
     ("shelf", "🟣 НЕ СЕ ПРОДАВА, А ИМА НАЛИЧНОСТ", "провери рафта, цената, срока",
-     lambda a: f"{_short(a['name'])} — 0 продадени (обикн. {_n(a['qty_base'])}/ден), по Мистрал {_n(a['stock'])} бр."),
+     lambda a: f"{_short(a['name'])} — 0 продадени (обикн. {_n(a['qty_base'])}/ден), по Мистрал {_n(a['stock'])} {_u(a)}"),
     ("price", "🔵 ПО-ВИСОКА ЦЕНА", "провери поскъпването",
      lambda a: f"{_short(a['name'])} — {a['cause'].replace('по-висока цена: ', '')}"),
     ("other", "⚪ ПРОДАВАТ СЕ ПО-МАЛКО, А ВСИЧКО Е НАРЕД", "имат наличност, цената и акцията са същите, клиентите не са по-малко — питай управителя дали ги има на рафта и защо не вървят",
