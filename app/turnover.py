@@ -624,3 +624,28 @@ def check(db: Session, day: date) -> dict:
     return {"day": day.isoformat(), "checked_at": datetime.now(SOFIA).strftime("%d.%m %H:%M"),
             "stores": sum(1 for r in rows if r.get("store_id")), "ok": sum(1 for r in rows if r["status"] == "ok"),
             "rows": rows}
+
+
+def probe(db: Session, day: date) -> dict:
+    """Разбивка на оборота за деня (за сверка с ръчни справки)."""
+    from . import mistral
+    from .anomalies import _loc_map
+    out = {}
+    with mistral.connect() as conn:
+        cur = conn.cursor()
+        locs = _loc_map(db, cur)
+        L = ",".join(map(str, locs))
+        base = f"""FROM SALE s WITH (NOLOCK) JOIN SALECONTENT c WITH (NOLOCK) ON c.NUM = s.NUM AND c.LOCATIONID = s.LOCATIONID"""
+        def q(sql, *a):
+            cur.execute(sql, a); return [{k: (float(v) if hasattr(v, "as_integer_ratio") or type(v).__name__ == "Decimal" else (str(v) if v is not None else None)) for k, v in r.items()} for r in cur.fetchall()]
+        out["by_optype"] = q(f"""SELECT s.OPERATIONTYPE AS op, s.DOCUMENTTYPEID AS dt, CASE WHEN s.PARTNERNAMEID <> 0 THEN 1 ELSE 0 END AS partner,
+                 COUNT(DISTINCT s.NUM) AS n, SUM(c.QTY * c.SALEPRICE) AS rev, SUM(CASE WHEN c.QTY < 0 THEN c.QTY * c.SALEPRICE ELSE 0 END) AS neg
+                 {base} WHERE s.REPORTINGDATE = %s AND s.LOCATIONID IN ({L}) GROUP BY s.OPERATIONTYPE, s.DOCUMENTTYPEID, CASE WHEN s.PARTNERNAMEID <> 0 THEN 1 ELSE 0 END""", day.isoformat())
+        out["by_saledate"] = q(f"""SELECT SUM(c.QTY * c.SALEPRICE) AS rev {base} WHERE CAST(s.SALEDATE AS date) = %s AND s.LOCATIONID IN ({L})""", day.isoformat())
+        out["all_locations"] = q(f"""SELECT SUM(c.QTY * c.SALEPRICE) AS rev, SUM(c.QTY * c.DEFAULTSALEPRICE) AS rev_default {base} WHERE s.REPORTINGDATE = %s""", day.isoformat())
+        out["unmapped"] = q(f"""SELECT s.LOCATIONID AS loc, SUM(c.QTY * c.SALEPRICE) AS rev {base} WHERE s.REPORTINGDATE = %s AND s.LOCATIONID NOT IN ({L}) GROUP BY s.LOCATIONID""", day.isoformat())
+        out["by_store"] = q(f"""SELECT s.LOCATIONID AS loc, SUM(c.QTY * c.SALEPRICE) AS rev {base} WHERE s.REPORTINGDATE = %s AND s.LOCATIONID IN ({L}) GROUP BY s.LOCATIONID""", day.isoformat())
+        cur.execute("SELECT ID, NAME FROM LOCATION"); nm = {r["ID"]: r["NAME"] for r in cur.fetchall()}
+        for r in out["unmapped"] + out["by_store"]:
+            r["name"] = nm.get(int(float(r["loc"])))
+    return out
