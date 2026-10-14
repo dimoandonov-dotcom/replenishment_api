@@ -43,6 +43,7 @@ _OPEN_PATHS = {
     "/", "/health", "/docs", "/openapi.json", "/redoc",
     "/dashboard", "/orders-view", "/ui/login", "/ui/logout", "/brand/logo",
     "/viber/webhook",   # Viber бот - проверява се подписът на Viber
+    "/telegram/webhook",  # Telegram бот - проверява се тайната в заглавката
 }
 
 
@@ -652,6 +653,41 @@ from .ui import router as ui_router  # noqa: E402
 app.include_router(ui_router)
 
 
+# ---------------------------------------------------------------- Telegram бот
+@app.post("/telegram/webhook", include_in_schema=False)
+async def telegram_webhook(request: Request):
+    from . import telegram
+    from .db import SessionLocal
+    if not telegram.token() or not _hmac.compare_digest(
+            request.headers.get("X-Telegram-Bot-Api-Secret-Token", ""), telegram.secret()):
+        return JSONResponse(status_code=403, content={"detail": "forbidden"})
+    upd = json.loads((await request.body()).decode() or "{}")
+    with SessionLocal() as db:
+        try:
+            telegram.handle(db, upd)
+        except Exception as e:  # на Telegram винаги 200 - иначе праща същото пак и пак
+            print("telegram:", type(e).__name__, e)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/ui/telegram/status")
+def telegram_status(db: Session = Depends(get_db)):
+    from . import telegram
+    return telegram.status(db)
+
+
+@app.post("/telegram/set-webhook")
+def telegram_set_webhook():
+    from . import telegram
+    return telegram.set_webhook()
+
+
+@app.post("/telegram/send-now")
+def telegram_send_now(db: Session = Depends(get_db)):
+    from . import telegram
+    return telegram.daily(db, force=True)
+
+
 # ---------------------------------------------------------------- Viber бот
 @app.post("/viber/webhook", include_in_schema=False)
 async def viber_webhook(request: Request):
@@ -709,9 +745,11 @@ def _start_refresher():
 
     def _vb():
         try:
-            from . import viber
+            from . import viber, telegram
             if viber.token():
                 print("viber webhook:", viber.set_webhook())
+            if telegram.token():
+                print("telegram webhook:", telegram.set_webhook())
         except Exception as e:
             print("viber webhook:", type(e).__name__, e)
     __th.Timer(20, _vb).start()   # след като сървърът е готов да приеме проверката на Viber
