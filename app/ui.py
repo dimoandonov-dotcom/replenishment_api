@@ -1154,6 +1154,12 @@ def an_delist(seasonal: bool = False, db: Session = Depends(get_db)):
     return delist.proposals(db, seasonal)
 
 
+@router.get("/ui/analytics/delist/store")
+def an_delist_store(store_id: int, db: Session = Depends(get_db)):
+    from . import delist
+    return delist.store_swaps(db, store_id)
+
+
 @router.get("/ui/analytics/delist/article")
 def an_delist_article(code: int, db: Session = Depends(get_db)):
     from . import delist

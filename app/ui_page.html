@@ -600,11 +600,14 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     • <b>Много бавен</b> — под 1 бр. на магазин на месец и е в последните 5% от оборота на своята подгрупа (има заместители, които продават).<br>
     • <b>Изпада</b> — във втората половина на периода продава под 40% от първата и и без това е слаб.<br>
     Не се предлагат: нови артикули (първа продажба в последните 3 седмици), артикули в текуща акция, сезонни групи (сладоледи, яйца) и служебни групи.<br>
+    <b>🔁 Замени с</b> — до 3 по-силни артикула от <b>същата подгрупа и същия вид</b> (напр. цигари с цигари, вино с вино), със сходна доставна цена (от половината до двойната), които продават поне 2 бр. на магазин на месец. „×5“ = продава 5 пъти повече; „липсва в N маг.“ = има място за разширяване.<br>
+    <b>Избран магазин</b> — показва само слабите артикули, които <b>този магазин държи</b>, и заместители, които <b>в този магазин ги няма</b>: махаш единия, слагаш другия.<br>
     <b>Внимание:</b> току-що заредени артикули без продажби още може да излязат като „мъртви“ — проверете датата на зареждане.<br>
     Бутоните: <b>✔ Делистваме</b> — записва решението (остава в списъка, маркиран); <b>✖ Оставяме</b> — скрива предложението за 90 дни.
     </div>
   </details>
   <div class="bar" style="flex-wrap:wrap">
+    <select id="dlStore"><option value="">🏬 Цялата верига</option></select>
     <select id="dlGrp"><option value="">Всички групи</option></select>
     <select id="dlSup"><option value="">Всички доставчици</option></select>
     <input id="dlQ" placeholder="търси артикул / код" style="min-width:180px;flex:1">
@@ -1814,6 +1817,8 @@ document.addEventListener("scroll", () => { const t = document.getElementById("t
 let DL = { data: null, kind: "", lim: 200 };
 const DLC = { dead: "#DC2626", slow: "#D97706", falling: "#7C3AED" };
 function initDelist() {
+  stores().then(ss => { $("dlStore").innerHTML = `<option value="">🏬 Цялата верига</option>` + ss.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join(""); });
+  $("dlStore").onchange = loadDelist;
   ["dlGrp", "dlSup", "dlDec"].forEach(id => $(id).onchange = () => { DL.lim = 200; renderDelist(); });
   $("dlSeas").onchange = loadDelist;
   let t; $("dlQ").oninput = () => { clearTimeout(t); t = setTimeout(() => { DL.lim = 200; renderDelist(); }, 300); };
@@ -1821,10 +1826,11 @@ function initDelist() {
 }
 async function loadDelist() {
   $("dlBody").innerHTML = `<tr><td colspan="8" class="empty loading">Смятам…</td></tr>`;
-  const d = await api(`/ui/analytics/delist?seasonal=${$("dlSeas").checked ? 1 : 0}`);
-  DL.data = d;
+  const sid = $("dlStore").value;
+  const d = await api(sid ? `/ui/analytics/delist/store?store_id=${sid}` : `/ui/analytics/delist?seasonal=${$("dlSeas").checked ? 1 : 0}`);
+  DL.data = d; DL.store = sid ? d.store : "";
   if (!d.ready) { $("dlBody").innerHTML = `<tr><td colspan="8" class="empty">Няма данни</td></tr>`; return; }
-  $("dlInfo").textContent = `продажби ${d.from}–${d.to} (${d.days} дни)`;
+  $("dlInfo").textContent = DL.store ? `${d.store}: ${d.rows.length} слаби артикула, за ${d.with_alts} има заместител` : `продажби ${d.from}–${d.to} (${d.days} дни)`;
   const uniq = k => [...new Set(d.rows.map(r => r[k]).filter(Boolean))].sort((a, b) => a.localeCompare(b, "bg"));
   const keepG = $("dlGrp").value, keepS = $("dlSup").value;
   $("dlGrp").innerHTML = `<option value="">Всички групи</option>` + uniq("grp").map(g => `<option>${esc(g)}</option>`).join(""); $("dlGrp").value = keepG;
@@ -1849,6 +1855,12 @@ async function dlArticle(tr, code) {
       <td class="num">${x.last_sale || "—"}</td><td class="num">${x.last_delivery || "—"}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">Няма данни</td></tr>`}</tbody></table></div></div>`;
 }
 
+function dlAlts(alts) {
+  if (!alts || !alts.length) return "";
+  return `<div style="margin-top:6px;padding:6px 8px;background:#ECFDF5;border-radius:8px;font-size:12px"><b style="color:#047857">🔁 Замени с:</b>
+    ${alts.map(a => `<div style="margin-top:3px">• <b>${esc(a.code)} · ${esc(a.name)}</b> — ${fmtN(a.psm)} бр./маг./мес.${a.x ? ` <b style="color:#047857">×${fmtN(a.x)}</b>` : ""}, цена ${fmtE(a.price)} €${a.margin_pct != null ? ", марж " + fmtN(a.margin_pct) + "%" : ""}${a.missing_stores ? ` · <span class="muted">липсва в ${a.missing_stores} маг.</span>` : ""}</div>`).join("")}</div>`;
+}
+
 function renderDelist() {
   const d = DL.data; if (!d || !d.ready) return;
   const g = $("dlGrp").value, sp = $("dlSup").value, q = ($("dlQ").value || "").trim().toLowerCase(), dec = $("dlDec").checked;
@@ -1867,7 +1879,9 @@ function renderDelist() {
   $("dlBody").innerHTML = rows.slice(0, DL.lim).map(r => `<tr${r.decision === "delist" ? ' style="background:#F5F5F4"' : ""}>
     <td data-dlart="${r.code}" style="white-space:normal;min-width:280px;cursor:pointer"><div class="name" style="font-weight:600">▸ <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${DLC[r.kind]};margin-right:6px"></span>${esc(r.code)} · ${esc(r.name)}</div>
       <div class="muted" style="font-size:11.5px;margin-top:2px">${esc(r.grp)}${r.sub && r.sub !== r.grp ? " / " + esc(r.sub) : ""} · ${esc(r.supplier)}${r.margin_pct != null ? " · марж " + fmtN(r.margin_pct) + "%" : ""}</div>
-      <div style="font-size:12px;margin-top:2px">${esc(r.reason)}</div></td>
+      <div style="font-size:12px;margin-top:2px">${esc(r.reason)}</div>
+      ${DL.store ? `<div style="font-size:12px;margin-top:2px">🏬 В ${esc(DL.store)}: наличност <b>${fmtN(r.store_stock)}</b>, продадени <b>${fmtN(r.store_sold)}</b> за ${DL.data.days} дни</div>` : ""}
+      ${dlAlts(DL.store ? r.store_alts : r.alts)}</td>
     <td class="num">${fmtN(r.units)}</td><td class="num">${fmtN(r.per_store_month)}</td><td class="num">${r.stores_stock}</td>
     <td class="num">${fmtN(r.stock)}</td><td class="num"><b>${fmtE(r.stock_eur)}</b></td><td class="num">${r.last_sale || "—"}${r.last_delivery ? `<div class="muted" style="font-size:11px">дост. ${r.last_delivery}</div>` : ""}</td>
     <td style="white-space:nowrap">${r.decision === "delist" ? `<span class="tag bad">делистваме</span> <button class="mini" data-dl="${r.code}" data-d="clear">отмени</button>`

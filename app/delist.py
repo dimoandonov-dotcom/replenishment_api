@@ -37,6 +37,37 @@ def _ensure(db: Session):
     db.commit()
 
 
+_GENERIC = {"ЦИГАРИ", "ВИНО", "БИРА", "ВОДКА", "УИСКИ", "РАКИЯ", "ДЖИН", "КОНЯК", "БРЕНДИ", "ВОДА", "СОК", "ШОКОЛАД",
+            "БОНБОНИ", "БИСКВИТИ", "ВАФЛА", "ВАФЛИ", "ЧИПС", "СИРЕНЕ", "КАШКАВАЛ", "САЛАМ", "КАФЕ", "ЧАЙ",
+            "БОНБОНИЕРА", "ДЪВКИ", "НАПИТКА", "ЛИКЬОР", "МАСТИКА", "ШАМПОАН", "КРЕМ", "ПРАХ", "ПРЕПАРАТ"}
+
+
+def _word(name: str | None) -> str:
+    """Видът на артикула = първата дума (ЦИГАРИ, ВИНО, БИРА...)."""
+    import re
+    w = re.findall(r"[А-ЯA-Z]{3,}", (name or "").upper())
+    return w[0] if w else ""
+
+
+def _alts(o: dict, good: dict) -> list[dict]:
+    """До 3 заместителя: същата подгрупа и същия вид (първа дума), сходна цена, продават поне 2 бр./магазин/месец."""
+    pool = [g for g in good.get((o["grp"], o["sub"]), []) if g["code"] != o["code"]]
+    same = [g for g in pool if g["word"] and g["word"] == o["_word"]]
+    if same or o["_word"] in _GENERIC:
+        pool = same
+    cost = o.get("_cost")
+    if cost:
+        pool = [g for g in pool if 0.5 * cost <= g["cost"] <= 2 * cost] or pool[:0]
+    pool.sort(key=lambda g: -g["psm"])
+    res = []
+    for g in pool[:3]:
+        gain = g["psm"] - o["per_store_month"]
+        res.append({k: g[k] for k in ("code", "name", "psm", "stores", "price", "margin_pct", "supplier")} |
+                   {"x": round(g["psm"] / o["per_store_month"], 1) if o["per_store_month"] > 0 else None,
+                    "gain": round(gain, 1), "missing_stores": max(52 - g["stores"], 0)})
+    return res
+
+
 def sync_dates(db: Session, force: bool = False) -> int:
     """Последна доставка и последна продажба на всеки артикул (по всички магазини) от Мистрал."""
     _ensure(db)
@@ -104,6 +135,21 @@ def proposals(db: Session, include_seasonal: bool = False) -> dict:
         for rev, code in sorted(lst, key=lambda x: -x[0]):
             acc += rev
             cum[code] = (round(100 * rev / tot, 2), round(100 * acc / tot, 1), len(lst))
+    # силни артикули по подгрупа - кандидати за заместители
+    good = defaultdict(list)
+    for (code, name, grp, sub, sup, q, r, c, ns, f, l, q1, q2, sq, sv, nst, ldel, lsale) in rows:
+        q, r, c = float(q or 0), float(r or 0), float(c or 0)
+        if q <= 0 or (grp or "") in SKIP_GROUPS:
+            continue
+        stores_ = max(int(nst or 0), int(ns or 0), 1)
+        psm = q / stores_ / days * 30
+        if psm < 2:
+            continue
+        good[(grp or "", sub or "")].append({"code": code, "name": name or str(code), "word": _word(name),
+                                             "psm": round(psm, 1), "stores": stores_, "stores_sold": int(ns or 0),
+                                             "price": round(r / q, 2), "cost": c / q,
+                                             "margin_pct": round(100 * (r - c) / r, 1) if r else None,
+                                             "supplier": sup or ""})
     out = []
     stats = defaultdict(lambda: [0, 0.0])
     for (code, name, grp, sub, sup, q, r, c, ns, f, l, q1, q2, sq, sv, nst, ldel, lsale) in rows:
@@ -150,7 +196,9 @@ def proposals(db: Session, include_seasonal: bool = False) -> dict:
             reason = (f"първа половина {q1:g} бр. → втора {q2:g} бр. ({100 * (q2 - q1) / q1:+.0f}%); "
                       f"{per_store_month:.1f} бр./магазин на месец")
         stats[kind][0] += 1; stats[kind][1] += sv
-        out.append({"code": code, "name": name or str(code), "grp": grp, "sub": sub or "", "supplier": sup or "",
+        out.append({"_cost": (c / q) if q > 0 else (sv / sq if sq > 0 else None), "_word": _word(name),
+                    "price": round(r / q, 2) if q > 0 else None,
+                    "code": code, "name": name or str(code), "grp": grp, "sub": sub or "", "supplier": sup or "",
                     "kind": kind, "reason": reason, "units": round(q, 1), "rev": round(r, 2),
                     "margin_pct": round(100 * (r - c) / r, 1) if r else None,
                     "stores_sold": int(ns or 0), "stores_stock": int(nst or 0), "per_store_month": round(per_store_month, 2),
@@ -160,6 +208,9 @@ def proposals(db: Session, include_seasonal: bool = False) -> dict:
                     "last_delivery": ldel.strftime("%d.%m.%y") if ldel else None, "sub_share": share, "sub_items": nsub,
                     "decision": d[0] if d else None, "decision_by": d[2] if d else None,
                     "decision_at": d[3].astimezone(SOFIA).strftime("%d.%m.%Y") if d else None})
+    for o in out:
+        o["alts"] = _alts(o, good)
+        o.pop("_cost", None); o.pop("_word", None)
     order = {"dead": 0, "slow": 1, "falling": 2}
     out.sort(key=lambda x: (order[x["kind"]], -x["stock_eur"]))
     return {"ready": True, "from": since.strftime("%d.%m"), "to": last.strftime("%d.%m.%Y"), "days": days,
@@ -228,3 +279,29 @@ def article(db: Session, code: int) -> dict:
     rows.sort(key=lambda x: (-x["sold"], -x["stock"]))
     nm = db.execute(text("SELECT name FROM sa_articles WHERE code = :c"), {"c": code}).scalar()
     return {"code": code, "name": nm, "weeks": [{**w, "qty": round(w["qty"], 1)} for w in weeks], "stores": rows}
+
+
+def store_swaps(db: Session, store_id: int) -> dict:
+    """За един магазин: слабите артикули, които държи, и с какво да се заменят (силни в същата подгрупа, които го няма)."""
+    p = proposals(db)
+    if not p.get("ready"):
+        return p
+    last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
+    since = last - timedelta(days=p["days"] - 1)
+    st = {c: float(q or 0) for c, q in db.execute(text(
+        "SELECT code, qty FROM sa_stock WHERE store_id = :s"), {"s": store_id}).all()}
+    sold = {c: float(q or 0) for c, q in db.execute(text(
+        "SELECT code, SUM(qty) FROM sa_sales WHERE store_id = :s AND day >= :f GROUP BY code"),
+        {"s": store_id, "f": since}).all()}
+    rows = []
+    for r in p["rows"]:
+        if st.get(r["code"], 0) <= 0:
+            continue
+        alts = [a for a in r["alts"] if st.get(a["code"], 0) <= 0 and sold.get(a["code"], 0) <= 0]
+        rows.append({**r, "store_stock": st.get(r["code"], 0), "store_sold": sold.get(r["code"], 0),
+                     "store_alts": alts})
+    rows.sort(key=lambda x: (not x["store_alts"], -x["stock_eur"]))
+    from . import models as m
+    s = db.get(m.Store, store_id)
+    return {"ready": True, "store": s.name if s else "", "days": p["days"], "rows": rows,
+            "with_alts": sum(1 for x in rows if x["store_alts"])}
