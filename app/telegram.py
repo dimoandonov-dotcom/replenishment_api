@@ -85,6 +85,19 @@ HELP = ("Здравей! Аз съм ботът на MinMaxAI (Магазини 
         "asen 1234\n\nКоманди: „отчет“ – справката сега, „стоп“ – спри сутрешната, „старт“ – пусни я пак.")
 
 
+def _late_send(db: Session, cid: int, user: str):
+    """Свързал се е след 12:30 -> днешните отчети веднага, да не чака до утре."""
+    now = datetime.now(SOFIA)
+    if user in report_users() and (now.hour, now.minute) >= (12, 30):
+        from .viber import reports
+        r = {}
+        for mm in reports(db):
+            r = send(cid, mm)
+        db.execute(text("INSERT INTO tg_log(chat_id, kind, ok, info) VALUES (:i,'daily',:ok,'при свързване')"),
+                   {"i": cid, "ok": bool(r.get("ok"))})
+        db.commit()
+
+
 def handle(db: Session, upd: dict):
     _ensure(db)
     msg = upd.get("message") or {}
@@ -113,6 +126,7 @@ def handle(db: Session, upd: dict):
             db.commit()
             send(cid, f"✅ Готово, {name or user}! Всеки ден в 12:30 ще получаваш отчетите с оборотите на магазините.\n"
                       "Команди: „отчет“ – отчетите сега, „стоп“ – спри ги, „старт“ – пусни ги пак.")
+            _late_send(db, cid, user)
             return
         if not (row and row[0]):
             send(cid, "Този линк вече е използван или е изтекъл. Поискай нов от Димо.")
@@ -134,6 +148,7 @@ def handle(db: Session, upd: dict):
                 extra = ("Всеки ден в 12:30 ще получаваш справката с оборотите." if user in report_users()
                          else "Сутрешната справка в момента се праща само на избраните хора.")
                 send(cid, f"✅ Свързан си като {user}. {extra}\nНапиши „отчет“ за справката сега.")
+                _late_send(db, cid, user)
                 return
             send(cid, "❌ Грешен потребител или ПИН.\n\n" + HELP)
             return
