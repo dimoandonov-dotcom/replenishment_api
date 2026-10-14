@@ -172,14 +172,13 @@ def daily(db: Session, force: bool = False) -> dict:
     _ensure(db)
     if not token():
         return {"sent": 0, "reason": "няма TELEGRAM_TOKEN"}
-    if not force and db.execute(text("""SELECT 1 FROM tg_log WHERE kind = 'daily' AND ok
-            AND (at AT TIME ZONE 'Europe/Sofia')::date = (now() AT TIME ZONE 'Europe/Sofia')::date LIMIT 1""")).first():
-        return {"sent": 0, "reason": "днес вече е пратена"}
+    done = set() if force else {c for (c,) in db.execute(text("""SELECT DISTINCT chat_id FROM tg_log WHERE kind = 'daily' AND ok
+            AND (at AT TIME ZONE 'Europe/Sofia')::date = (now() AT TIME ZONE 'Europe/Sofia')::date""")).all()}
     from .viber import reports
     msgs = reports(db)
     sent, errs = 0, []
     for cid, user in db.execute(text("SELECT chat_id, username FROM tg_users WHERE reports AND username IS NOT NULL")).all():
-        if user.lower() not in report_users():
+        if user.lower() not in report_users() or cid in done:
             continue
         r = {}
         for mm in msgs:
