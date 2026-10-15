@@ -414,6 +414,27 @@ def review_queue(store_id: int | None = None, db: Session = Depends(get_db)):
     ]
 
 
+@app.post("/review-queue/resolve")
+def review_queue_resolve(items: list[dict], db: Session = Depends(get_db)):
+    """Отблокира конкретни позиции [{store_id, sku}] от опашката за преглед."""
+    done, missing = [], []
+    for it in items:
+        a = db.execute(select(m.Article).where(m.Article.sku == str(it.get("sku")))).scalars().first()
+        q = None
+        if a:
+            q = db.execute(select(m.SettingsReviewQueue).where(
+                m.SettingsReviewQueue.store_id == int(it.get("store_id")),
+                m.SettingsReviewQueue.article_id == a.id,
+                m.SettingsReviewQueue.resolved.is_(False))).scalars().first()
+        if q:
+            q.resolved = True
+            done.append(it)
+        else:
+            missing.append(it)
+    db.commit()
+    return {"resolved": len(done), "missing": missing}
+
+
 @app.get("/orders/preview/{store_id}", response_model=PreviewOut)
 def preview_order(
     store_id: int,
