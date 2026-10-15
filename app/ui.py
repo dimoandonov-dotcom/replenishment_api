@@ -561,6 +561,16 @@ async def compare_upload(files: list[UploadFile] = File(...), db: Session = Depe
     return out
 
 
+@router.get("/ui/compare/review")
+def ui_compare_review(day: date | None = None, fmt: str = Query("json", pattern="^(json|text)$"),
+                      db: Session = Depends(get_db)):
+    """Дневен преглед: къде греши MinMaxAI и къде е права Ани."""
+    from . import review
+    if fmt == "text":
+        return Response(content=review.text_report(db, day), media_type="text/plain; charset=utf-8")
+    return review.build(db, day)
+
+
 @router.get("/ui/compare")
 def ui_compare(days: int = Query(14, ge=1, le=120), db: Session = Depends(get_db)):
     from . import compare
