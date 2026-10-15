@@ -328,7 +328,9 @@ def calculate_for_store(
     if delivery_day:
         try:
             from . import custorders as _co
-            _co.apply(db, store_id, order_date, combined, settings, stock, run_id)
+            from .engine import SAME_DAY_DELIVERY as _sd
+            from datetime import timedelta as _td
+            _co.apply(db, store_id, order_date if _sd else order_date + _td(days=1), combined, settings, stock, run_id)
         except Exception:
             db.rollback()
     if _no_promo:
@@ -438,7 +440,9 @@ def run_dispatch(
         pos = persist_orders(db, res, sid, dispatch_run_id=run.id)
         if any("поръчка от клиент" in (ln.notes or "") for ln in res.lines):
             from . import custorders as _co
-            _co.mark_included(db, sid, order_date, run.id)
+            from .engine import SAME_DAY_DELIVERY as _sd
+            from datetime import timedelta as _td
+            _co.mark_included(db, sid, order_date if _sd else order_date + _td(days=1), run.id)
         orders_created += len(pos)
         lines_created += len(res.lines)
 
