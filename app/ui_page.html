@@ -103,6 +103,8 @@ th[title], th.tipped { cursor:help; } th[title]::after, th.tipped::after { conte
 tr.anrow.fixed > td { background:#DCFCE7 !important; } tr.anrow.fixed > td:first-child { box-shadow: inset 4px 0 0 #16A34A; }
 tr.cust > td { background:#E0ECFF; } tr.cust > td:first-child { box-shadow: inset 4px 0 0 #2563EB; }
 .tag.cust { background:#2563EB; color:#fff; }
+tr.nosale > td { background:#FEF9C3; } tr.nosale > td:first-child { box-shadow: inset 4px 0 0 #CA8A04; }
+.tag.nosale { background:#CA8A04; color:#fff; }
 tr.bro > td { background:#FDECEC; } tr.bro > td:first-child { box-shadow: inset 4px 0 0 #DC2626; }
 .empty { padding:34px 12px; text-align:center; color:var(--slate); font-family:var(--mono); font-size:13px; }
 
@@ -889,7 +891,8 @@ async function loadOrder() {
       const nts = (l.notes || "").split(" · ");
       const cust = nts.find(x => x.includes("поръчка от клиент")) || "";
       const bro = nts.find(x => x.includes("брошура")) || "";
-      return `<tr data-sku="${esc(l.sku)}" class="${cust ? "cust" : bro ? "bro" : ""}">
+      const nos = nts.find(x => x.includes("няма продажби")) || "";
+      return `<tr data-sku="${esc(l.sku)}" class="${cust ? "cust" : bro ? "bro" : nos ? "nosale" : ""}">
         <td>${esc(l.sku)}</td>
         <td class="name ox" style="cursor:pointer" title="Графика и обяснение">▸ ${esc(art.name || l.name)}</td>
         <td class="num ${l.current_stock < l.min_stock ? "low" : ""}">${fmtN(l.current_stock)}</td>
@@ -899,7 +902,7 @@ async function loadOrder() {
         <td class="num">${l.pack_size > 1 ? l.pack_size : "бр."}</td>
         <td class="num">${fmtE(price)}</td>
         <td class="num">${fmtE(val)}</td>
-        <td>${cust ? `<span class="tag cust">${esc(cust)}</span> ` : ""}${bro ? `<span class="tag bro">${esc(bro)}</span> ` : ""}${promo}${LOCK[l.sku] ? ' <span class="tag" title="Коригирано ръчно — ученето не го пипа">🔒</span>' : ''}</td></tr>
+        <td>${nos ? `<span class="tag nosale" title="Поръчва се по договорения асортимент — да се реши дали да остане">${esc(nos.replace("⚪ ", ""))}</span> ` : ""}${cust ? `<span class="tag cust">${esc(cust)}</span> ` : ""}${bro ? `<span class="tag bro">${esc(bro)}</span> ` : ""}${promo}${LOCK[l.sku] ? ' <span class="tag" title="Коригирано ръчно — ученето не го пипа">🔒</span>' : ''}</td></tr>
         <tr class="oxrow" data-for="${esc(l.sku)}" style="display:none"><td colspan="10" style="background:var(--paper)"></td></tr>`;
     });
     $("ordBody").innerHTML = rows.join("") || `<tr><td colspan="10" class="empty">В този магазин няма артикул под минимума.</td></tr>`;
@@ -1767,7 +1770,7 @@ function salesChart(series, days, st, mn, mx) {
   }
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;display:block" role="img" aria-label="Продажби по дни">${bars}${avgLine}</svg>${gauge}`;
 }
-const VERD = { "MinMaxAI": ["по-близо: MinMaxAI", ""], "Ани": ["по-близо: Ани", "warn"], "равни": ["равни", "off"], "неясно": ["неясно", "off"], "планограма": ["няма „да“", "bad"] };
+const VERD = { "MinMaxAI": ["по-близо: MinMaxAI", ""], "Ани": ["по-близо: Ани", "warn"], "равни": ["равни", "off"], "неясно": ["неясно", "off"], "планограма": ["няма „да“", "bad"], "без продажби": ["⚪ без продажби", "nosale"] };
 let CMP = null;
 async function showCmp(id) {
   CMP = await api(`/ui/compare/${id}`); const d = CMP;
@@ -1778,7 +1781,7 @@ async function showCmp(id) {
   <div class="bar"><button onclick="download('/ui/compare/${d.id}/xlsx?side=store')">Excel — заявката на магазина</button>
   <button class="warm" onclick="download('/ui/compare/${d.id}/xlsx?side=api')">Excel — заявката на MinMaxAI</button>
   <button id="cAll">Покажи всички графики</button></div>
-  <div class="totals"><span>Разлики <b>${diffs}</b></span><span>По продажбите по-близо: MinMaxAI <b>${v["MinMaxAI"] || 0}</b></span><span>Ани <b>${v["Ани"] || 0}</b></span><span>равни <b>${v["равни"] || 0}</b></span><span>без „да“ в планограмата <b>${v["планограма"] || 0}</b></span></div>
+  <div class="totals"><span>Разлики <b>${diffs}</b></span><span>По продажбите по-близо: MinMaxAI <b>${v["MinMaxAI"] || 0}</b></span><span>Ани <b>${v["Ани"] || 0}</b></span><span>равни <b>${v["равни"] || 0}</b></span><span>без „да“ в планограмата <b>${v["планограма"] || 0}</b></span><span>⚪ без продажби <b>${v["без продажби"] || 0}</b></span></div>
   <p class="note" style="margin:0 0 10px">Цъкни на ред с разлика — графика на продажбите ден по ден за 14 дни и обяснение.</p>
   <div class="scroll"><table><thead><tr><th>Код</th><th>Артикул</th><th class="num">Ани</th><th class="num">MinMaxAI</th><th class="num">Разлика</th>
   <th class="num" title="В момента на заявката на Ани">Нал. при заявката</th><th class="num" title="Последни данни от Мистрал">Нал. сега</th><th class="num">Мин</th><th class="num">Макс</th><th class="num">Прод./ден</th><th>Защо</th><th>По продажбите</th></tr></thead><tbody id="cRows">

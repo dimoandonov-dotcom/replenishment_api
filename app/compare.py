@@ -343,15 +343,17 @@ def explain(l, series: list[float] | None) -> dict:
                 "sold_14d": round(sold, 1), "zero_days": zero_days}
     if abs(sq - aq) >= 0.01 and st is not None:
         if sdp <= 0:
-            verdict = "Ани" if sq < aq else "MinMaxAI"
-            parts.append("Без продажби — по-малката поръчка е по-правилна.")
+            verdict = "без продажби"
+            parts.append("Без продажби 14 дни — поръчва се по договорения асортимент; да се реши дали да остане.")
         else:
             hi = 16 if sdp < 0.3 else 7 if sdp < 1 else 5 if sdp < 3 else 4
+            from .engine import SAME_DAY_DELIVERY
+            lead = 0 if SAME_DAY_DELIVERY else 1     # заявката днес идва утре: до тогава се продава 1 ден
             def dist(q):
-                c = (st + q) / sdp
+                c = (max(st - sdp * lead, 0) + q) / sdp
                 return 0 if 2 <= c <= hi else (2 - c if c < 2 else c - hi)
             ds, da = dist(sq), dist(aq)
-            cs, ca = (st + sq) / sdp, (st + aq) / sdp
+            cs, ca = (max(st - sdp * lead, 0) + sq) / sdp, (max(st - sdp * lead, 0) + aq) / sdp
             parts.append(f"След доставка: по Ани ≈ {_fmt(cs)} дни запас, по MinMaxAI ≈ {_fmt(ca)} дни (разумно: 2–{hi} дни).")
             verdict = "равни" if abs(ds - da) < 0.5 else ("MinMaxAI" if da < ds else "Ани")
     return {"text": " ".join(parts), "verdict": verdict, "sdp": round(sdp, 2),

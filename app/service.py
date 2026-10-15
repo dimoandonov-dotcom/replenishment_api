@@ -359,6 +359,10 @@ def calculate_for_store(
                     ln.ordered_quantity = cap
     except Exception:
         db.rollback()
+    # без продажби за 14 дни: поръчва се (договорен асортимент), но се отбелязва
+    for ln in combined.lines:
+        if avg_sales.get((store_id, ln.article_id), 0.0) <= 0 and "няма продажби" not in (ln.notes or ""):
+            ln.notes = "⚪ няма продажби 14 дни" + (" · " + ln.notes if ln.notes else "")
     try:   # брошура: защо се вдига количеството
         lab = _promo.labels(db, order_date)
         for ln in combined.lines:
