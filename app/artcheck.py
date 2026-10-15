@@ -51,6 +51,9 @@ def check(db: Session, store_id: int, q: str) -> dict:
     except Exception:
         db.rollback()
         lines = {}
+    in_review = set(db.execute(select(m.SettingsReviewQueue.article_id).where(
+        m.SettingsReviewQueue.store_id == store_id, m.SettingsReviewQueue.resolved.is_(False),
+        m.SettingsReviewQueue.article_id.in_(ids))).scalars())
     rows = []
     for a in arts:
         s = sett.get(a.id)
@@ -62,6 +65,12 @@ def check(db: Session, store_id: int, q: str) -> dict:
         ln = lines.get(a.id)
         if a.no_order:
             ok, why = False, f"🚫 Маркиран „Не се поръчва“{(' — ' + a.no_order_reason) if a.no_order_reason else ''}. Махни го от раздел „Не се поръчват“, ако трябва да се зарежда."
+        elif not a.is_active:
+            ok, why = False, "⛔ Артикулът е неактивен в номенклатурата — не се поръчва."
+        elif a.id in in_review:
+            ok, why = False, "⏳ Мин/макс чака преглед (опашка за проверка) — докато не се потвърди, не се поръчва."
+        elif a.id not in plano:
+            ok, why = False, "📋 Няма „да“ в планограмата на този магазин — не се поръчва."
         elif s is None:
             ok, why = False, "❗ Няма мин/макс за този магазин — не е в асортимента му. Задай мин/макс от „Асортимент и цени“."
         elif mx == 0:
