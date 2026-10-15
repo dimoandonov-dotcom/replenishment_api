@@ -288,7 +288,8 @@ def article(db: Session, code: int) -> dict:
         q, r = sold.get(sid, (0.0, 0.0))
         if not p.get("stock") and not q:
             continue
-        rows.append({"store": stores.get(sid, str(sid)), "stock": round(p.get("stock", 0), 2), "sold": round(q, 2),
+        rows.append({"store_id": sid, "cost": round(p.get("price", 0), 4),
+                     "store": stores.get(sid, str(sid)), "stock": round(p.get("stock", 0), 2), "sold": round(q, 2),
                      "rev": round(r, 2),
                      "last_sale": p["last_sale"].strftime("%d.%m.%Y") if p.get("last_sale") else None,
                      "last_delivery": p["last_delivery"].strftime("%d.%m.%Y") if p.get("last_delivery") else None})
