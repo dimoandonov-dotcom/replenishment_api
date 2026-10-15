@@ -223,7 +223,9 @@ def calculate_line(
     if ordered > 0 and avg_daily_sales and avg_daily_sales > 0 and current_stock > 0:
         pk = max(int(setting.pack_size or 1), 1)
         before_cap = ordered
-        while ordered > 0 and (current_stock + ordered) / avg_daily_sales > MAX_STOCK_DAYS:
+        # ако без доставка наличността няма да стигне до следващата - поне една опаковка остава
+        floor_q = pk if current_stock < avg_daily_sales * (extra_days + 1) else 0
+        while ordered > floor_q and (current_stock + ordered) / avg_daily_sales > MAX_STOCK_DAYS:
             ordered -= pk
         if ordered <= 0:
             return None
