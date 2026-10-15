@@ -213,11 +213,12 @@ def calculate_line(
     # (цели опаковки на бавни артикули). Изключение: свършил е -> поне една опаковка, рафтът да не е празен.
     if ordered > 0 and avg_daily_sales and avg_daily_sales > 0 and current_stock > 0:
         pk = max(int(setting.pack_size or 1), 1)
+        before_cap = ordered
         while ordered > 0 and (current_stock + ordered) / avg_daily_sales > MAX_STOCK_DAYS:
             ordered -= pk
         if ordered <= 0:
             return None
-        if ordered < suggested:
+        if ordered < before_cap:
             notes = ((notes + " · ") if notes else "") + f"без запас над {MAX_STOCK_DAYS:g} дни"
 
     if ordered <= 0:
