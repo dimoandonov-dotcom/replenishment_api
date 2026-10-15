@@ -162,6 +162,7 @@ def calculate_line(
     mode: str = "below_min",
     avg_daily_sales: float | None = None,
     extra_days: int = 0,
+    cover_trigger: bool = False,
 ) -> OrderLine | None:
     """
     Изчислява един ред от заявка. Връща None, ако не се налага поръчка.
@@ -174,7 +175,7 @@ def calculate_line(
         setting.max_stock if effective_max is None else effective_max
     )
 
-    if not needs_reorder(
+    if not cover_trigger and not needs_reorder(
         current_stock, setting.min_stock, mode, max_target
     ):
         return None
@@ -185,7 +186,11 @@ def calculate_line(
     if avg_daily_sales and avg_daily_sales > 0:
         # таван: до ORDER_COVER_DAYS (+ дни без доставка) продажби, не до макса
         cap = max(math.ceil(avg_daily_sales * (ORDER_COVER_DAYS + extra_days)), 1)
-        if cap < max_target:
+        if cover_trigger and cap > max_target:
+            # над минимума, но няма да стигне до следващата доставка -> до нужното за дните
+            max_target = float(cap)
+            notes = ((notes + " · ") if notes else "") + f"няма да стигне до следващата доставка — до {ORDER_COVER_DAYS + extra_days:g} дни продажби"
+        elif cap < max_target:
             max_target = float(cap)
             notes = ((notes + " · ") if notes else "") + f"до {ORDER_COVER_DAYS + extra_days:g} дни продажби"
     suggested = max(max_target - current_stock, 0.0)
@@ -194,8 +199,8 @@ def calculate_line(
     # САМО ако стоката ще свърши до следващата доставка - иначе трупаме запас
     # (напр. 6 бр. при продажби 1 бр. на 2 седмици = 3 месеца запас).
     below_min = current_stock < setting.min_stock
-    force = below_min
-    if below_min and avg_daily_sales is not None:
+    force = below_min or cover_trigger
+    if force and avg_daily_sales is not None:
         if avg_daily_sales <= 0:
             force = False                      # не се продава - не трупаме
         elif current_stock <= 0:
@@ -476,7 +481,11 @@ def generate_order_lines(
                         f"дни без заявка"
                     )
 
-        if not needs_reorder(current, s.min_stock, mode, effective_max):
+        adr_ = avg_daily_sales.get((s.store_id, s.article_id), 0.0)
+        # над минимума, но наличността няма да стигне до следващата доставка (напр. уикенд без доставка)
+        cover_trigger = (s.max_stock > 0 and adr_ > 0 and current < adr_ * (SKIP_COVER_DAYS + cover_extra)
+                         and not needs_reorder(current, s.min_stock, mode, effective_max))
+        if not cover_trigger and not needs_reorder(current, s.min_stock, mode, effective_max):
             result.skipped_above_min += 1
             continue
 
@@ -489,6 +498,7 @@ def generate_order_lines(
             mode=mode,
             avg_daily_sales=avg_daily_sales.get((s.store_id, s.article_id), 0.0),
             extra_days=cover_extra,
+            cover_trigger=cover_trigger,
         )
         if line:
             result.lines.append(line)
