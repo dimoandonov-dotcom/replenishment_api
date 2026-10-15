@@ -173,25 +173,45 @@ def load_avg_daily_sales(
     db: Session, store_id: int, days: int = 30
 ) -> dict[tuple[int, int], float]:
     """Средни дневни продажби за последните N дни - за предпразничните добавки."""
-    stmt = (
-        select(
-            m.SalesHistory.article_id,
-            func.sum(m.SalesHistory.quantity_sold).label("total"),
-            func.count(func.distinct(m.SalesHistory.sale_date)).label(
-                "day_count"
-            ),
-        )
-        .where(m.SalesHistory.store_id == store_id)
-        .group_by(m.SalesHistory.article_id)
-    )
     # средно на ден за целия прозорец (14 дни история), а не само за дните с продажби -
-    # иначе 1 бутилка за 2 седмици изглежда като 1 бр./ден
+    # иначе 1 бутилка за 2 седмици изглежда като 1 бр./ден.
+    # + след края на брошура: дните от брошурата не се броят (продажбите преди нея)
+    # + при спад (сезон): ако последните 7 дни са по-ниско - те (най-много -25% от 14-дневната)
     from datetime import date as _d, timedelta as _td
-    since = _d.today() - _td(days=14)
-    stmt = stmt.where(m.SalesHistory.sale_date >= since)
+    from collections import defaultdict as _dd
+    from . import promo as _promo
+    today = _d.today()
+    since = today - _td(days=42)
+    daily = _dd(dict)
+    for aid, day, q in db.execute(
+        select(m.SalesHistory.article_id, m.SalesHistory.sale_date, func.sum(m.SalesHistory.quantity_sold))
+        .where(m.SalesHistory.store_id == store_id, m.SalesHistory.sale_date >= since)
+        .group_by(m.SalesHistory.article_id, m.SalesHistory.sale_date)
+    ).all():
+        daily[aid][day] = float(q or 0)
+    if not daily:
+        return {}
+    last = max(d for v in daily.values() for d in v)
+    first = min(d for v in daily.values() for d in v)
+    pdays = _promo.promo_days(db)
     out = {}
-    for row in db.execute(stmt).all():
-        out[(store_id, row.article_id)] = max(float(row.total or 0), 0.0) / 14.0
+    for aid, dq in daily.items():
+        ended = [(s, e) for s, e in pdays.get(aid, []) if e <= today and e >= since]
+        def _promo_day(d):
+            return any(s <= d <= e for s, e in ended)
+        if ended and any(_promo_day(d) for d in dq if d >= today - _td(days=14)):
+            # брошурата е свършила: 14-те последни дни БЕЗ брошурни дни
+            days = [today - _td(days=k) for k in range(0, 43)
+                    if today - _td(days=k) >= first and not _promo_day(today - _td(days=k))][:14]
+            if len(days) >= 5:
+                out[(store_id, aid)] = max(sum(dq.get(d, 0.0) for d in days), 0.0) / len(days)
+                continue
+        a14 = max(sum(q for d, q in dq.items() if d >= today - _td(days=14)), 0.0) / 14.0
+        if a14 >= 1.0:
+            a7 = max(sum(q for d, q in dq.items() if last - _td(days=6) <= d <= last), 0.0) / 7.0
+            if a7 < a14:
+                a14 = max(a7, a14 * 0.75)
+        out[(store_id, aid)] = a14
     return out
 def calculate_for_store(
     db: Session,
@@ -211,8 +231,12 @@ def calculate_for_store(
     settings = load_settings(db, store_id, supplier_id)
     # промо режим: временно вдигане на мин/макс за артикулите в кампания
     from . import promo as _promo
+    from .engine import SAME_DAY_DELIVERY as _SDD
+    from datetime import timedelta as _tdp
+    # брошурата се гледа за деня на ДОСТАВКАТА (заявката днес идва утре)
+    _pday = order_date if _SDD else order_date + _tdp(days=1)
     if not _no_promo:
-        settings = _promo.apply_store(db, settings, order_date, store_id)
+        settings = _promo.apply_store(db, settings, _pday, store_id)
     # артикули, които НДК приема на брой (спиртни + каквото Ани поръчва на брой) -> без закръгляне до опаковка
     piece = piece_orderable(db)
     for s_ in settings:
@@ -242,7 +266,7 @@ def calculate_for_store(
     # промо артикули: скоростта на продажби по време на промото
     _pf = {}
     try:
-        _pf = {} if _no_promo else _promo.active(db, order_date)
+        _pf = {} if _no_promo else _promo.active(db, _pday)
         for _k in list(avg_sales):
             if _k[1] in _pf and _pf[_k[1]] > 1.0:
                 avg_sales[_k] = avg_sales[_k] * _pf[_k[1]]
@@ -364,7 +388,7 @@ def calculate_for_store(
         if avg_sales.get((store_id, ln.article_id), 0.0) <= 0 and "няма продажби" not in (ln.notes or ""):
             ln.notes = "⚪ няма продажби 14 дни" + (" · " + ln.notes if ln.notes else "")
     try:   # брошура: защо се вдига количеството
-        lab = _promo.labels(db, order_date)
+        lab = _promo.labels(db, _pday)
         for ln in combined.lines:
             if ln.article_id in lab and "брошура" not in (ln.notes or ""):
                 ln.notes = (lab[ln.article_id] + (" · " + ln.notes if ln.notes else ""))
