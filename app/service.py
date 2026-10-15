@@ -201,6 +201,7 @@ def calculate_for_store(
     respect_schedule: bool = True,
     stock_override: dict | None = None,
     run_id: int | None = None,
+    _no_promo: bool = False,
 ):
     """
     Изчислява (без да записва) какво трябва да се поръча за един магазин.
@@ -210,7 +211,8 @@ def calculate_for_store(
     settings = load_settings(db, store_id, supplier_id)
     # промо режим: временно вдигане на мин/макс за артикулите в кампания
     from . import promo as _promo
-    settings = _promo.apply_store(db, settings, order_date, store_id)
+    if not _no_promo:
+        settings = _promo.apply_store(db, settings, order_date, store_id)
     # артикули, които НДК приема на брой (спиртни + каквото Ани поръчва на брой) -> без закръгляне до опаковка
     piece = piece_orderable(db)
     for s_ in settings:
@@ -238,8 +240,9 @@ def calculate_for_store(
     closures = load_closures(db)
     avg_sales = load_avg_daily_sales(db, store_id)
     # промо артикули: скоростта на продажби по време на промото
+    _pf = {}
     try:
-        _pf = _promo.active(db, order_date)
+        _pf = {} if _no_promo else _promo.active(db, order_date)
         for _k in list(avg_sales):
             if _k[1] in _pf and _pf[_k[1]] > 1.0:
                 avg_sales[_k] = avg_sales[_k] * _pf[_k[1]]
@@ -292,8 +295,9 @@ def calculate_for_store(
     if combined is None:
         combined = generate_order_lines([], stock, order_date)
     # последен ден на брошурата: зареждане за STOCKUP_DAYS дни по продажбите в брошурата (докато е отстъпката)
+    su = {}
     try:
-        su = _promo.stockup_targets(db, store_id, order_date)
+        su = {} if _no_promo else _promo.stockup_targets(db, store_id, order_date)
         if su:
             from .engine import OrderLine, round_up_to_pack
             by_aid = {ln.article_id: ln for ln in combined.lines}
@@ -327,6 +331,32 @@ def calculate_for_store(
             _co.apply(db, store_id, order_date, combined, settings, stock, run_id)
         except Exception:
             db.rollback()
+    if _no_promo:
+        return combined
+    # брошура: заявката се вдига най-много с BROCHURE_MAX_UP (20%) спрямо нормалната
+    try:
+        promo_ids = {a for a, f in (_pf or {}).items() if f > 1.0} | set(su or {})
+        if promo_ids and any(ln.article_id in promo_ids for ln in combined.lines):
+            import math as _m
+            import os as _os
+            up = float(_os.getenv("BROCHURE_MAX_UP", "0.20"))
+            base = calculate_for_store(db, store_id, order_date, supplier_id, respect_schedule,
+                                       stock_override, run_id, _no_promo=True)
+            bq = {ln.article_id: ln.ordered_quantity for ln in base.lines}
+            for ln in list(combined.lines):
+                if ln.article_id not in promo_ids:
+                    continue
+                b = int(bq.get(ln.article_id, 0))
+                pk = max(int(ln.pack_size or 1), 1)
+                cap = max(b, (_m.floor(b * (1 + up) / pk)) * pk)
+                if ln.ordered_quantity > cap:
+                    if cap <= 0:
+                        combined.lines.remove(ln)
+                        continue
+                    ln.notes = (ln.notes or "") + f" · брошура: до +{up * 100:.0f}% над нормалната ({ln.ordered_quantity}→{cap})"
+                    ln.ordered_quantity = cap
+    except Exception:
+        db.rollback()
     try:   # брошура: защо се вдига количеството
         lab = _promo.labels(db, order_date)
         for ln in combined.lines:
