@@ -252,7 +252,11 @@ STOCKUP_DAYS = 30   # последен ден на брошурата: запа�
 
 def stockup_targets(db: Session, store_id: int, day: date) -> dict[int, tuple[float, float, str]]:
     """В последния ден на брошурата: article_id -> (цел бройки, продажби/ден в брошурата, етикет).
-    Целта = продажбите на ден в ТОЗИ магазин по време на брошурата × STOCKUP_DAYS."""
+    Целта = продажбите на ден в ТОЗИ магазин по време на брошурата × STOCKUP_DAYS.
+    ИЗКЛЮЧЕНО (15.10.2026, по решение на Димо), докато не се измисли правилно: STOCKUP_ENABLED=1 го пуска."""
+    import os as _os
+    if _os.getenv("STOCKUP_ENABLED", "0") != "1":
+        return {}
     try:
         _ensure(db)
         rows = db.execute(text("""SELECT i.article_id, MIN(p.start_day), MAX(p.end_day) FROM promotion_items i
