@@ -149,6 +149,8 @@ SAME_DAY_DELIVERY = _os_e.getenv("SAME_DAY_DELIVERY", "0") != "0"
 ORDER_COVER_DAYS = 2.0
 # Бавен артикул: цяла опаковка се поръчва автоматично само ако стига за до толкова дни продажби
 MAX_PACK_COVER_DAYS = 21.0
+# Наличност след доставката: най-много за толкова дни продажби (+ дните без доставка)
+MAX_STOCK_DAYS = float(_os_e.getenv("MAX_STOCK_DAYS", "14"))
 
 
 def calculate_line(
@@ -207,6 +209,16 @@ def calculate_line(
     ordered = round_up_to_pack(
         suggested, setting.pack_size, force_min_pack=force
     )
+    # таван на запаса: след доставката наличността да не стига за повече от MAX_STOCK_DAYS дни
+    # (цели опаковки на бавни артикули). Изключение: свършил е -> поне една опаковка, рафтът да не е празен.
+    if ordered > 0 and avg_daily_sales and avg_daily_sales > 0 and current_stock > 0:
+        pk = max(int(setting.pack_size or 1), 1)
+        while ordered > 0 and (current_stock + ordered) / avg_daily_sales > MAX_STOCK_DAYS:
+            ordered -= pk
+        if ordered <= 0:
+            return None
+        if ordered < suggested:
+            notes = ((notes + " · ") if notes else "") + f"без запас над {MAX_STOCK_DAYS:g} дни"
 
     if ordered <= 0:
         return None
