@@ -26,6 +26,7 @@ OVER_DAYS = 10          # над толкова дни запас след до�
 CATS = {
     "our_miss": "🔴 MinMaxAI пропуска — ще свърши преди следващата доставка",
     "our_over": "🟠 MinMaxAI поръчва излишно — наличността стига",
+    "slowpack": "🐢 Бавен артикул на празен рафт — цял кашон е запас за седмици (решение: да се зарежда ли)",
     "ani_miss": "🔵 Ани пропуска — ще свърши преди следващата доставка",
     "ani_over": "🟣 Ани докарва запас за над 10 дни",
     "ani_stop": "⛔ Ани поръчва спрени / извън асортимента",
@@ -110,10 +111,11 @@ def build(db: Session, day: date | None = None) -> dict:
             elif aq > oq and stop and oq == 0:
                 cat = "ani_stop"
             elif oq < aq and max(q, 0) + oq < need:
-                cat = "our_miss"
+                pk = max(int(a.pack_size or 1), 1)
+                cat = "slowpack" if (oq == 0 and pk > 1 and pk / sdp > 14) else "our_miss"
             elif oq > aq and max(q, 0) + aq < need:
                 cat = "ani_miss"
-            elif oq > aq and aq == 0 and q >= need + sdp * 0.5:
+            elif oq > aq and aq == 0 and q >= sdp * (must + 1.5):
                 cat = "our_over"
             elif aq > oq and (max(q, 0) + aq) / sdp > max(OVER_DAYS, must + 3):
                 cat = "ani_over"
