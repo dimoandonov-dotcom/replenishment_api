@@ -444,6 +444,10 @@ def generate_order_lines(
                 lead = (dw - wd) % 7 or 7
                 gap = next((k for k in range(1, 8) if ((dw - 1 + k) % 7) + 1 in deliv), 1)
                 cover_extra = max(gap - 1, 0) + lead
+                if gap > 1:
+                    # след дни без доставка следващата доставка идва рано сутрин -
+                    # без буфер за самия ден на доставката (напр. четвъртък: петък-неделя, не и понеделник)
+                    cover_extra -= 1
             else:
                 gap = next((k for k in range(1, 8) if ((wd - 1 + k) % 7) + 1 in deliv), 1)
                 cover_extra = max(gap - 1, 0)
