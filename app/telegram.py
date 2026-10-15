@@ -160,6 +160,9 @@ def handle(db: Session, upd: dict):
     elif low in ("старт", "start"):
         db.execute(text("UPDATE tg_users SET reports = TRUE WHERE chat_id = :i"), {"i": cid}); db.commit()
         send(cid, "Сутрешната справка е пусната (всеки ден в 12:30). Напиши „отчет“ за справката сега.")
+    elif low in ("преглед", "заявки", "грешки"):
+        from .review import text_report
+        send(cid, text_report(db))
     elif low in ("отчет", "otchet", "справка", "оборот", "обороти"):
         from .viber import reports
         for r in reports(db):
@@ -217,3 +220,28 @@ def invite(db: Session, username: str) -> dict:
     me = _call("getMe", {}) if token() else {}
     bot = (me.get("result") or {}).get("username") or "minmax300_bot"
     return {"user": username.lower(), "link": f"https://t.me/{bot}?start={code}"}
+
+
+def review_users() -> set[str]:
+    return {x.strip().lower() for x in os.getenv("REVIEW_USERS", "dimo").split(",") if x.strip()}
+
+
+def review_daily(db: Session, force: bool = False) -> dict:
+    """13:00 - дневният преглед (къде греши MinMaxAI, къде е права Ани) на REVIEW_USERS."""
+    _ensure(db)
+    if not token():
+        return {"sent": 0, "reason": "няма TELEGRAM_TOKEN"}
+    done = set() if force else {c for (c,) in db.execute(text("""SELECT DISTINCT chat_id FROM tg_log WHERE kind = 'review' AND ok
+            AND (at AT TIME ZONE 'Europe/Sofia')::date = (now() AT TIME ZONE 'Europe/Sofia')::date""")).all()}
+    from .review import text_report
+    msg = text_report(db)
+    sent = 0
+    for cid, user in db.execute(text("SELECT chat_id, username FROM tg_users WHERE username IS NOT NULL")).all():
+        if user.lower() not in review_users() or cid in done:
+            continue
+        r = send(cid, msg); ok = bool(r.get("ok"))
+        sent += ok
+        db.execute(text("INSERT INTO tg_log(chat_id, kind, ok, info) VALUES (:i,'review',:ok,:info)"),
+                   {"i": cid, "ok": ok, "info": json.dumps(r, ensure_ascii=False)[:300]})
+    db.commit()
+    return {"sent": sent}

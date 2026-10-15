@@ -648,6 +648,10 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <button id="cUp">Качи</button>
     <span class="msg" id="cMsg"></span>
   </div>
+  <div class="head"><h2>📋 Дневен преглед: къде грешим ние и къде е права Ани</h2><span class="note">нашата сутрешна заявка ↔ заявките на Ани за деня · цъкни на плочка</span></div>
+  <div class="bar"><input type="date" id="rvDay"><button id="rvGo">↻ Обнови</button><span class="note" id="rvInfo"></span></div>
+  <div class="board" id="rvKpis"></div>
+  <div id="rvList"></div>
   <div class="head"><h2>📦 Доставки от НДК срещу MinMaxAI</h2><span class="note">реално доставеното (Мистрал) ↔ MinMaxAI (06:00 за деня) и Ани (от предния ден)</span></div>
   <div class="board" id="dKpis"></div>
   <div id="dDetail"></div>
@@ -1702,7 +1706,42 @@ async function showDeliv(storeId, day) {
   $("dClose").onclick = () => { $("dDetail").innerHTML = ""; };
 }
 
+/* ---------- дневен преглед ---------- */
+let RV = null, RVK = null;
+const RVC = { our_miss: "#DC2626", our_over: "#EA580C", slowpack: "#92400E", ani_miss: "#2563EB", ani_over: "#7C3AED", ani_stop: "#111827", nosale: "#CA8A04" };
+const RVH = { our_miss: "Наша грешка: стоката ще свърши преди следващата доставка, а Ани е поръчала.",
+  our_over: "Наша грешка: поръчваме, а наличността стига с поне ден и половина резерв.",
+  slowpack: "Не е грешка, а решение: празен рафт, но един кашон е запас за седмици — ние не поръчваме, Ани поръчва.",
+  ani_miss: "Ани не поръчва (или поръчва по-малко), а стоката ще свърши преди следващата доставка — тук сме прави ние.",
+  ani_over: "Ани докарва запас за над 10 дни.", ani_stop: "Ани поръчва артикули без мин/макс, „Не се поръчва“, спрени 0-0 или без „да“ в планограмата.",
+  nosale: "Поръчано без нито една продажба за 14 дни — за решение по асортимента." };
+async function loadReview() {
+  const q = $("rvDay").value ? `?day=${$("rvDay").value}` : "";
+  $("rvKpis").innerHTML = `<div class="empty loading">Смятам…</div>`; $("rvList").innerHTML = "";
+  const d = await api(`/ui/compare/review${q}`).catch(e => ({ ready: false, reason: e.message }));
+  RV = d;
+  if (!d.ready) { $("rvKpis").innerHTML = `<div class="empty">${esc(d.reason || "Няма данни")}</div>`; $("rvInfo").textContent = ""; return; }
+  $("rvInfo").textContent = `${d.day} · ${d.stores} магазина с заявка от Ани · Ани ${fmtN(d.ani_units)} бр. · MinMaxAI ${fmtN(d.our_units)} бр.`;
+  $("rvKpis").innerHTML = Object.entries(d.cats).map(([k, l]) => `<div class="tile" data-rk="${k}" style="cursor:pointer;border-top:4px solid ${RVC[k]}${RVK === k ? ";outline:3px solid " + RVC[k] : ""}">
+    <div class="l">${esc(l.split(" — ")[0])}</div><div class="v" style="color:${RVC[k]}">${fmtN(d.counts[k] || 0)}</div><div class="s">${esc(l.split(" — ")[1] || "")}</div></div>`).join("");
+  document.querySelectorAll("#rvKpis [data-rk]").forEach(el => el.onclick = () => { RVK = RVK === el.dataset.rk ? null : el.dataset.rk; renderReview(); });
+  if (!RVK) RVK = (d.counts.our_miss ? "our_miss" : d.counts.our_over ? "our_over" : null);
+  renderReview();
+}
+function renderReview() {
+  const d = RV; if (!d || !d.ready) return;
+  document.querySelectorAll("#rvKpis [data-rk]").forEach(el => el.style.outline = el.dataset.rk === RVK ? `3px solid ${RVC[RVK]}` : "");
+  if (!RVK) { $("rvList").innerHTML = ""; return; }
+  const rows = d.rows.filter(r => r.cat === RVK);
+  $("rvList").innerHTML = `<div class="note" style="margin:6px 0 8px">${esc(RVH[RVK])}</div>
+    <div class="scroll"><table><thead><tr><th>Магазин</th><th>Артикул</th><th class="num">Ани</th><th class="num">MinMaxAI</th><th class="num">Наличност</th><th class="num">Продава/ден</th><th class="num" title="До следващата доставка">Трябва за дни</th><th class="num">Стига: Ани</th><th class="num">Стига: ние</th><th>Бележка</th></tr></thead><tbody>
+    ${rows.map(r => `<tr><td class="name">${esc(r.store.replace("м-н ", ""))}</td><td class="name">${esc(r.sku)} · ${esc(r.name)}</td><td class="num"><b>${fmtN(r.ani)}</b></td><td class="num"><b>${fmtN(r.ours)}</b></td>
+      <td class="num ${r.stock <= 0 ? "low" : ""}">${fmtN(r.stock)}</td><td class="num">${fmtN(r.per_day)}</td><td class="num">${r.must_days}</td>
+      <td class="num">${r.days_ani == null ? "—" : fmtN(r.days_ani) + " д."}</td><td class="num">${r.days_ours == null ? "—" : fmtN(r.days_ours) + " д."}</td><td style="font-size:12px">${esc(r.why || (r.pack > 1 ? "кашон " + r.pack : ""))}</td></tr>`).join("") || `<tr><td colspan="10" class="empty">Няма</td></tr>`}</tbody></table></div>`;
+}
+
 function initCmp() {
+  $("rvGo").onclick = loadReview; $("rvDay").onchange = loadReview; loadReview();
   $("cDays").onchange = () => { loadCmp(); loadDeliv(); };
   loadDeliv();
   $("cXls").onclick = () => download(`/ui/compare/export?days=${$("cDays").value}`).catch(e => msg("cMsg", e.message, false));

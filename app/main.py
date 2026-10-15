@@ -688,6 +688,12 @@ def telegram_invite(user: str, db: Session = Depends(get_db)):
     return telegram.invite(db, user)
 
 
+@app.post("/telegram/review-now")
+def telegram_review_now(db: Session = Depends(get_db)):
+    from . import telegram
+    return telegram.review_daily(db, force=True)
+
+
 @app.post("/telegram/send-now")
 def telegram_send_now(db: Session = Depends(get_db)):
     from . import telegram

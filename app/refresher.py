@@ -61,6 +61,16 @@ def _tick():
             except Exception as e:
                 db.rollback()
                 _state["viber_result"] = f"{type(e).__name__}: {e}"[:300]
+        # 13:00 - дневният преглед на заявките (MinMaxAI срещу Ани) в Telegram на Димо
+        if (now.hour, now.minute) >= (13, 0) and _state.get("review_day") != now.date():
+            _state["review_day"] = now.date()
+            try:
+                from . import compare, telegram
+                compare.recalc_day(db, now.date())
+                _state["review_result"] = telegram.review_daily(db)
+            except Exception as e:
+                db.rollback()
+                _state["review_result"] = f"{type(e).__name__}: {e}"[:300]
     _state["last_run"] = datetime.now(timezone.utc)
 
 
