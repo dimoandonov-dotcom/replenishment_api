@@ -141,6 +141,9 @@ MIN_PACK_COVER_DAYS = 2.0
 # Ежедневни доставки: ако наличността стига за толкова дни продажби - не се поръчва,
 # дори да е под минимума (утре пак има доставка).
 SKIP_COVER_DAYS = 2.0
+# 1 = заявката в 06:00 е за доставка СЪЩИЯ ден; 0 = заявката днес е за доставка утре (по графика)
+import os as _os_e
+SAME_DAY_DELIVERY = _os_e.getenv("SAME_DAY_DELIVERY", "0") != "0"
 # Ежедневни доставки: след доставката наличността да стига за най-много толкова дни
 # продажби (+ дните без доставка - неделя, празници). Не трупаме запас до макса.
 ORDER_COVER_DAYS = 2.0
@@ -410,8 +413,16 @@ def generate_order_lines(
         deliv = {e.delivery_weekday for e in entries if e.delivery_weekday}
         if deliv:
             wd = order_date.isoweekday()
-            gap = next((k for k in range(1, 8) if ((wd - 1 + k) % 7) + 1 in deliv), 1)
-            cover_extra = max(gap - 1, 0)
+            if not SAME_DAY_DELIVERY and sched_today is not None and sched_today.delivery_weekday:
+                # заявка днес за доставка утре (или по графика): запасът се смята от деня на доставката
+                # до следващата доставка + дните до самата доставка (днес се продава от наличното)
+                dw = sched_today.delivery_weekday
+                lead = (dw - wd) % 7 or 7
+                gap = next((k for k in range(1, 8) if ((dw - 1 + k) % 7) + 1 in deliv), 1)
+                cover_extra = max(gap - 1, 0) + lead
+            else:
+                gap = next((k for k in range(1, 8) if ((wd - 1 + k) % 7) + 1 in deliv), 1)
+                cover_extra = max(gap - 1, 0)
         # 1) явен период на затваряне (Коледа/Великден) - приоритетен
         # буфер
         if sched_today and closures:

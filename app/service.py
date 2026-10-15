@@ -224,7 +224,7 @@ def calculate_for_store(
         # MinMaxAI поръчва в 06:00 ЗА СЪЩИЯ ДЕН: днес се поръчва за магазините,
         # които имат доставка днес (SAME_DAY_DELIVERY=0 -> старият модел „ден за заявка").
         import os as _os
-        same_day = _os.getenv("SAME_DAY_DELIVERY", "1") != "0"
+        same_day = _os.getenv("SAME_DAY_DELIVERY", "0") != "0"
         wd = order_date.isoweekday()
         allowed = {
             sup

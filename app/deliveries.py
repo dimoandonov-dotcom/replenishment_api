@@ -31,7 +31,11 @@ def _for_day(dt) -> date:
 
 def _ours_day(dt) -> date:
     """Заявка на MinMaxAI: в 06:00 ЗА СЪЩИЯ ДЕН; старите следобедни (15:00) - за следващия."""
+    from .engine import SAME_DAY_DELIVERY
     t = dt.astimezone(SOFIA)
+    # от 15.10.2026 заявката днес е за доставка утре (SAME_DAY_DELIVERY=0)
+    if not SAME_DAY_DELIVERY and t.date() >= date(2026, 10, 15):
+        return t.date() + timedelta(days=1)
     return t.date() if t.hour < 12 else t.date() + timedelta(days=1)
 
 
