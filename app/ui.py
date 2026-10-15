@@ -1599,3 +1599,37 @@ def ui_version():
     """Версията на пулта (сменя се при всяко качване) - страницата се презарежда сама."""
     import os as _os
     return {"version": _os.getenv("RAILWAY_DEPLOYMENT_ID") or _os.getenv("RAILWAY_GIT_COMMIT_SHA") or "dev"}
+
+
+@router.get("/ui/analytics/catweeks")
+def an_catweeks(q: str = "БИРА", weeks: int = 8, db: Session = Depends(get_db)):
+    """Продажби по седмици (пон-нед) за артикули по дума в името - цялата верига, с промо седмиците."""
+    from datetime import timedelta as _td
+    from sqlalchemy import text as _t
+    last = db.execute(_t("SELECT MAX(day) FROM sa_sales")).scalar()
+    end = last - _td(days=(last.isoweekday() % 7))          # последната пълна неделя
+    start = end - _td(days=7 * weeks - 1)
+    rows = db.execute(_t("""SELECT s.code, a.name, s.day, SUM(s.qty) FROM sa_sales s JOIN sa_articles a ON a.code = s.code
+                            WHERE a.name ILIKE :q AND s.day BETWEEN :f AND :e GROUP BY s.code, a.name, s.day"""),
+                      {"q": f"%{q}%", "f": start, "e": last}).all()
+    promo = {}
+    for sku, s, e in db.execute(_t("""SELECT a.sku, p.start_day, p.end_day FROM promotion_items i
+                                      JOIN promotions p ON p.id = i.promo_id JOIN articles a ON a.id = i.article_id""")).all():
+        promo.setdefault(str(sku), []).append((s, e))
+    out = {}
+    for code, nm, d, qty in rows:
+        r = out.setdefault(code, {"code": code, "name": nm, "w": [0.0] * weeks, "cur": 0.0, "cur_days": 0})
+        if d <= end:
+            r["w"][(d - start).days // 7] += float(qty or 0)
+        else:
+            r["cur"] += float(qty or 0)
+    cur_days = (last - end).days
+    labels = [(start + _td(days=7 * i)).strftime("%d.%m") for i in range(weeks)]
+    res = []
+    for r in out.values():
+        pw = [any(s <= start + _td(days=7 * i + 6) and e >= start + _td(days=7 * i) for s, e in promo.get(str(r["code"]), []))
+              for i in range(weeks)]
+        res.append({**r, "w": [round(x, 1) for x in r["w"]], "promo_weeks": pw,
+                    "cur_days": cur_days, "cur": round(r["cur"], 1)})
+    res.sort(key=lambda r: -sum(r["w"]))
+    return {"weeks": labels, "last_day": last.strftime("%d.%m"), "rows": res}
