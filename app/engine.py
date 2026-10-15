@@ -205,6 +205,10 @@ def calculate_line(
             force = False                      # не се продава - не трупаме
         elif current_stock <= 0:
             force = True                       # свършил е и се продава - рафтът да не е празен
+        elif cover_trigger and not below_min:
+            # над минимума: цяла опаковка само ако наличността наистина няма да стигне
+            # до следващата доставка (дните до нея + половин ден резерв)
+            force = current_stock < avg_daily_sales * (extra_days + 1 + 0.5)
         else:
             force = current_stock < avg_daily_sales * (MIN_PACK_COVER_DAYS + extra_days)
         # бавен артикул, който се поръчва само на цели опаковки: ако една опаковка стига
