@@ -412,6 +412,19 @@ def export_preview(
 # Мистрал (MS SQL) - проверка на връзката и съдържанието
 # ---------------------------------------------------------------------------
 
+@router.get("/ui/mistral/q")
+def mistral_q(sql: str, region: str = "varna"):
+    """Само четене (SELECT) - за проверки."""
+    from . import mistral
+    import re as _re
+    if not _re.match(r"^\s*(SELECT|WITH)\b", sql, _re.I) or _re.search(r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|EXEC|CREATE|MERGE|TRUNCATE)\b", sql, _re.I):
+        raise HTTPException(400, "Само SELECT")
+    with mistral.connect(region) as conn:
+        cur = conn.cursor()
+        cur.execute(sql)
+        return [{k: (v if isinstance(v, (int, float, str)) or v is None else str(v)) for k, v in r.items()} for r in cur.fetchmany(500)]
+
+
 @router.get("/ui/mistral/freshness")
 def mistral_freshness(region: str = "sofia"):
     from . import mistral
