@@ -21,15 +21,58 @@ TABLES = ["MATERIAL", "LOCATION", "PARTNER", "PRICELIST", "PRICELISTNAME",
           "STORAGEPARTNER", "UOM", "BARCODE"]
 
 
-def connect():
+def connect(region: str = "varna", database: str | None = None):
+    """region="varna" - MSSQL_*; region="sofia" - SOFIA_MSSQL_* (магазините в София)."""
+    p = "SOFIA_MSSQL_" if region == "sofia" else "MSSQL_"
     return pymssql.connect(
-        server=os.getenv("MSSQL_HOST", ""),
-        port=int(os.getenv("MSSQL_PORT", "1433")),
-        user=os.getenv("MSSQL_USER", ""),
-        password=os.getenv("MSSQL_PASSWORD", ""),
-        database=os.getenv("MSSQL_DB", "MistralAnalytics"),
+        server=os.getenv(p + "HOST", ""),
+        port=int(os.getenv(p + "PORT", "1433")),
+        user=os.getenv(p + "USER", ""),
+        password=os.getenv(p + "PASSWORD", ""),
+        database=database or os.getenv(p + "DB", "MistralAnalytics"),
         login_timeout=15, timeout=120, charset="UTF-8", as_dict=True,
     )
+
+
+def freshness(region: str = "sofia") -> dict:
+    """Актуални ли са данните: базите на сървъра, последна продажба/доставка, обекти."""
+    from datetime import date, timedelta
+    out: dict = {"region": region, "db": os.getenv(("SOFIA_MSSQL_" if region == "sofia" else "MSSQL_") + "DB")}
+    s = lambda v: (str(v) if v is not None else None)
+    with connect(region) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sys.databases ORDER BY name")
+        dbs = [r["name"] for r in cur.fetchall()]
+        out["databases"] = []
+        for d in dbs:
+            if d in ("master", "tempdb", "model", "msdb"):
+                continue
+            row = {"name": d}
+            try:
+                cur.execute(f"SELECT MAX(REPORTINGDATE) AS r, MAX(SALEDATE) AS s, COUNT_BIG(*) AS n FROM [{d}].dbo.SALE WITH (NOLOCK)")
+                r = cur.fetchone(); row.update(last_reporting=s(r["r"]), last_sale=s(r["s"]), sales=int(r["n"] or 0))
+            except Exception as e:
+                row["sale"] = "няма SALE"
+            out["databases"].append(row)
+        cur.execute("SELECT ID, NAME FROM LOCATION ORDER BY ID")
+        locs = {r["ID"]: r["NAME"] for r in cur.fetchall()}
+        y = (date.today() - timedelta(days=1)).isoformat()
+        cur.execute("""SELECT LOCATIONID AS loc, MAX(REPORTINGDATE) AS r, MAX(SALEDATE) AS s,
+                              SUM(CASE WHEN REPORTINGDATE = %s THEN 1 ELSE 0 END) AS yday
+                       FROM SALE WITH (NOLOCK) GROUP BY LOCATIONID""", (y,))
+        sale = {r["loc"]: r for r in cur.fetchall()}
+        cur.execute("""SELECT LOCATIONID AS loc, COUNT(*) AS n, SUM(CASE WHEN QTY <> 0 THEN 1 ELSE 0 END) AS nz,
+                              MAX(LASTSALEDATE) AS ls, MAX(LASTDELIVERYDATE) AS ld
+                       FROM MATERIAL WITH (NOLOCK) GROUP BY LOCATIONID""")
+        mat = {r["loc"]: r for r in cur.fetchall()}
+        out["locations"] = []
+        for lid, nm in locs.items():
+            a, b = sale.get(lid, {}), mat.get(lid, {})
+            out["locations"].append({"id": lid, "name": nm, "last_sale": s(a.get("s")), "last_reporting": s(a.get("r")),
+                                     "receipts_yesterday": int(a.get("yday") or 0), "articles": int(b.get("n") or 0),
+                                     "in_stock": int(b.get("nz") or 0), "material_last_sale": s(b.get("ls")),
+                                     "last_delivery": s(b.get("ld"))})
+    return out
 
 
 def configured() -> bool:

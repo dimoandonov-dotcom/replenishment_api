@@ -412,6 +412,15 @@ def export_preview(
 # Мистрал (MS SQL) - проверка на връзката и съдържанието
 # ---------------------------------------------------------------------------
 
+@router.get("/ui/mistral/freshness")
+def mistral_freshness(region: str = "sofia"):
+    from . import mistral
+    try:
+        return mistral.freshness(region)
+    except Exception as e:
+        raise HTTPException(502, f"Мистрал ({region}): {type(e).__name__}: {e}")
+
+
 @router.get("/ui/mistral/probe")
 def mistral_probe():
     from . import mistral
