@@ -64,7 +64,7 @@ def region(db: Session, rg: str):
 _COND = """(CASE COALESCE(NULLIF(current_setting('app.region', true), ''), 'varna')
                  WHEN 'all' THEN true
                  WHEN 'sofia' THEN st.mistral_db_path = 'sofia'
-                 ELSE COALESCE(st.mistral_db_path, '') <> 'sofia' END)"""
+                 ELSE COALESCE(st.mistral_db_path, '') <> 'sofia' END) AND st.is_active"""
 
 
 def region_store_ids(db: Session) -> set[int]:
@@ -75,7 +75,7 @@ def ensure_region_views(db: Session):
     cond = """(CASE COALESCE(NULLIF(current_setting('app.region', true), ''), 'varna')
                  WHEN 'all' THEN true
                  WHEN 'sofia' THEN st.mistral_db_path = 'sofia'
-                 ELSE COALESCE(st.mistral_db_path, '') <> 'sofia' END)"""
+                 ELSE COALESCE(st.mistral_db_path, '') <> 'sofia' END) AND st.is_active"""
     for t in ("sa_sales", "sa_stock", "to_receipts"):
         db.execute(text(f"CREATE OR REPLACE VIEW rg_{t} AS SELECT x.* FROM {t} x JOIN stores st ON st.id = x.store_id WHERE {cond}"))
     db.commit()
