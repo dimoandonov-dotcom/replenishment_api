@@ -26,6 +26,8 @@ class StoreIn(BaseModel):
     name: str
     address: str | None = None
     is_active: bool = True
+    region: str | None = None          # "sofia" - само обороти и анализи, без заявки
+    mistral_loc: int | None = None     # LOCATION.ID в базата на региона
 
 
 class StorePatch(BaseModel):
@@ -35,7 +37,8 @@ class StorePatch(BaseModel):
 
 
 def _store_out(s: m.Store) -> dict:
-    return {"id": s.id, "name": s.name, "address": s.address, "is_active": s.is_active}
+    return {"id": s.id, "name": s.name, "address": s.address, "is_active": s.is_active,
+            "region": s.mistral_db_path or "varna", "mistral_loc": s.mistral_host}
 
 
 @router.post("/stores")
@@ -49,7 +52,9 @@ def create_store(payload: StoreIn, db: Session = Depends(get_db)):
     else:
         next_id = (db.execute(select(func.max(m.Store.id))).scalar() or 0) + 1
     s = m.Store(id=next_id, name=payload.name, address=payload.address,
-                is_active=payload.is_active)
+                is_active=payload.is_active,
+                mistral_db_path=(payload.region if payload.region and payload.region != "varna" else None),
+                mistral_host=(str(payload.mistral_loc) if payload.mistral_loc is not None else None))
     db.add(s)
     db.flush()
     norm = normalize_store_name(payload.name)

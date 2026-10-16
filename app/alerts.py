@@ -133,7 +133,7 @@ def scan_stockouts(db: Session, store_id: int, bump_max: bool = True) -> list[m.
 def scan_all(db: Session, store_ids: list[int] | None = None, bump_max: bool = True) -> dict:
     if store_ids is None:
         store_ids = db.execute(
-            select(m.Store.id).where(m.Store.is_active.is_(True))
+            select(m.Store.id).where(m.Store.is_active.is_(True), m.ORDERING)
         ).scalars().all()
 
     slow, outs = 0, 0

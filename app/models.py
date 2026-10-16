@@ -508,3 +508,8 @@ class AppUser(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+# Магазините, които участват в заявките (софийските са само за обороти и анализи)
+from sqlalchemy import or_ as _or_
+ORDERING = _or_(Store.mistral_db_path.is_(None), Store.mistral_db_path != "sofia")

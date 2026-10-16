@@ -451,7 +451,7 @@ def run_dispatch(
         store_ids = [
             r
             for r in db.execute(
-                select(m.Store.id).where(m.Store.is_active.is_(True))
+                select(m.Store.id).where(m.Store.is_active.is_(True), m.ORDERING)
             )
             .scalars()
             .all()

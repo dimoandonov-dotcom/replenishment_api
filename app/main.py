@@ -117,6 +117,18 @@ def is_authenticated(request: Request) -> bool:
 
 
 @app.middleware("http")
+async def _region(request: Request, call_next):
+    """?region=varna|sofia|all - за обороти, анализи и делистване (по подразбиране Варна)."""
+    from .db import REGION, REGIONS
+    rg = request.query_params.get("region")
+    tok = REGION.set(rg if rg in REGIONS else "varna")
+    try:
+        return await call_next(request)
+    finally:
+        REGION.reset(tok)
+
+
+@app.middleware("http")
 async def _require_auth(request: Request, call_next):
     # логото се ВИЖДА без вход (нужно е на екрана за вход), но се сменя само с вход
     open_path = request.url.path in _OPEN_PATHS and not (
@@ -557,7 +569,7 @@ def dispatch_runs(limit: int = Query(20, le=100), db: Session = Depends(get_db))
 @app.get("/reports/below-minimum")
 def below_minimum(store_id: int | None = None, db: Session = Depends(get_db)):
     store_ids = [store_id] if store_id else db.execute(
-        select(m.Store.id).where(m.Store.is_active.is_(True))
+        select(m.Store.id).where(m.Store.is_active.is_(True), m.ORDERING)
     ).scalars().all()
 
     out = []
@@ -773,6 +785,12 @@ def viber_preview(part: str = Query("all", pattern="^(all|main|stores)$"), db: S
 @app.on_event("startup")
 def _start_refresher():
     import os as __os
+    try:
+        from .db import SessionLocal as __SL, ensure_region_views as __erv
+        with __SL() as __db:
+            __erv(__db)
+    except Exception as __e:
+        print("region views:", type(__e).__name__, __e)
     if __os.getenv("DISABLE_REFRESHER") != "1":
         from . import refresher
         refresher.start()

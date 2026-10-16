@@ -48,7 +48,7 @@ def positions(db: Session, store_id: int | None = None) -> list[dict]:
     sett = defaultdict(dict)
     for x in db.execute(sq).scalars().all():
         sett[x.store_id][x.article_id] = x
-    stores = {s.id: s.name for s in db.execute(select(m.Store).where(m.Store.is_active.is_(True))).scalars().all()}
+    stores = {s.id: s.name for s in db.execute(select(m.Store).where(m.Store.is_active.is_(True), m.ORDERING)).scalars().all()}
     out = []
     for sid, name in stores.items():
         if store_id and sid != store_id:

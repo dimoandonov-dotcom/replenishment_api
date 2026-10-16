@@ -176,7 +176,7 @@ def run(db: Session, apply: bool = True) -> dict:
 
     changes, signals = [], []
     counts = defaultdict(int)
-    stores = db.execute(select(m.Store).where(m.Store.is_active.is_(True))).scalars().all()
+    stores = db.execute(select(m.Store).where(m.Store.is_active.is_(True), m.ORDERING)).scalars().all()
     for store in stores:
         plano = set(db.execute(
             select(m.Planogram.article_id).where(m.Planogram.store_id == store.id)

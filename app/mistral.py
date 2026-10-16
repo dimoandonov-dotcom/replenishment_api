@@ -13,16 +13,50 @@ PARTNER и UOM са по обект - винаги се връзват и по L
 """
 from __future__ import annotations
 
+import contextvars
 import os
+from contextlib import contextmanager
 
 import pymssql
+
+# Регион: varna (MSSQL_*) или sofia (SOFIA_MSSQL_*). Синхронизациите минават по всички региони.
+_REGION = contextvars.ContextVar("mistral_region", default="varna")
+
+
+def regions() -> list[str]:
+    return ["varna"] + (["sofia"] if os.getenv("SOFIA_MSSQL_HOST") and os.getenv("SOFIA_MSSQL_PASSWORD") else [])
+
+
+def current() -> str:
+    return _REGION.get()
+
+
+@contextmanager
+def use(region: str):
+    tok = _REGION.set(region)
+    try:
+        yield
+    finally:
+        _REGION.reset(tok)
+
+
+def store_ids(db, region: str | None = None) -> list[int]:
+    """Магазините от региона (София: stores.mistral_db_path = 'sofia')."""
+    from sqlalchemy import text
+    region = region or current()
+    if region == "sofia":
+        q = "SELECT id FROM stores WHERE mistral_db_path = 'sofia'"
+    else:
+        q = "SELECT id FROM stores WHERE COALESCE(mistral_db_path, '') <> 'sofia'"
+    return [r[0] for r in db.execute(text(q)).all()]
 
 TABLES = ["MATERIAL", "LOCATION", "PARTNER", "PRICELIST", "PRICELISTNAME",
           "STORAGEPARTNER", "UOM", "BARCODE"]
 
 
-def connect(region: str = "varna", database: str | None = None):
-    """region="varna" - MSSQL_*; region="sofia" - SOFIA_MSSQL_* (магазините в София)."""
+def connect(region: str | None = None, database: str | None = None):
+    """region="varna" - MSSQL_*; region="sofia" - SOFIA_MSSQL_* (магазините в София). По подразбиране - текущият."""
+    region = region or current()
     p = "SOFIA_MSSQL_" if region == "sofia" else "MSSQL_"
     return pymssql.connect(
         server=os.getenv(p + "HOST", ""),
@@ -137,7 +171,7 @@ def sync_stock(db, only_store_id: int | None = None) -> dict:
         lk[al.alias_normalized] = al.store_id
     active_ids = {
         s.id for s in db.execute(
-            select(m.Store).where(m.Store.is_active.is_(True))
+            select(m.Store).where(m.Store.is_active.is_(True), m.ORDERING)
         ).scalars().all()
     }
     arts = {

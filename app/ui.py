@@ -192,7 +192,7 @@ def ui_summary(db: Session = Depends(get_db)):
 
     active_stores = count(
         select(func.count()).select_from(m.Store)
-        .where(m.Store.is_active.is_(True))
+        .where(m.Store.is_active.is_(True), m.ORDERING)
     )
     articles = count(
         select(func.count()).select_from(m.Article)
@@ -1098,9 +1098,9 @@ def ui_probe_sales_all(day_offset: int = Query(1, ge=1, le=30), db: Session = De
 # ---------------------------------------------------------------------------
 
 @router.post("/analytics/sync-all")
-def an_sync_all(days: int = Query(30, ge=1, le=60)):
+def an_sync_all(days: int = Query(30, ge=1, le=60), only: str | None = None):
     from . import salesall
-    return salesall.start_background(days)
+    return salesall.start_background(days, only)
 
 
 @router.get("/ui/analytics/all/status")
@@ -1142,9 +1142,9 @@ def an_turnover_store(store_id: int, days: int = Query(56, ge=7, le=60), db: Ses
 
 
 @router.post("/analytics/turnover/backfill")
-def an_turnover_backfill(days: int = Query(56, ge=1, le=60)):
+def an_turnover_backfill(days: int = Query(56, ge=1, le=60), only: str | None = None):
     from . import turnover
-    return turnover.start_backfill(days)
+    return turnover.start_backfill(days, only)
 
 
 @router.post("/analytics/turnover/resync")
@@ -1628,10 +1628,10 @@ def an_catweeks(q: str = "БИРА", weeks: int = 8, db: Session = Depends(get_d
     """Продажби по седмици (пон-нед) за артикули по дума в името - цялата верига, с промо седмиците."""
     from datetime import timedelta as _td
     from sqlalchemy import text as _t
-    last = db.execute(_t("SELECT MAX(day) FROM sa_sales")).scalar()
+    last = db.execute(_t("SELECT MAX(day) FROM rg_sa_sales")).scalar()
     end = last - _td(days=(last.isoweekday() % 7))          # последната пълна неделя
     start = end - _td(days=7 * weeks - 1)
-    rows = db.execute(_t("""SELECT s.code, a.name, s.day, SUM(s.qty) FROM sa_sales s JOIN sa_articles a ON a.code = s.code
+    rows = db.execute(_t("""SELECT s.code, a.name, s.day, SUM(s.qty) FROM rg_sa_sales s JOIN sa_articles a ON a.code = s.code
                             WHERE a.name ILIKE :q AND s.day BETWEEN :f AND :e GROUP BY s.code, a.name, s.day"""),
                       {"q": f"%{q}%", "f": start, "e": last}).all()
     promo = {}

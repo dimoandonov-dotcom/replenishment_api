@@ -297,7 +297,17 @@ def summary(db: Session, day=None, part: str = "all") -> str:
 
 def reports(db: Session, day=None) -> list[str]:
     """Двата отчета: 1) общо, спадове и задачи; 2) магазин по магазин."""
-    return [summary(db, day, "main"), summary(db, day, "stores")]
+    out = [summary(db, day, "main"), summary(db, day, "stores")]
+    # София - отделен отчет (ако базата е вързана и има магазини)
+    from . import mistral
+    from .db import region
+    if "sofia" in mistral.regions() and mistral.store_ids(db, "sofia"):
+        try:
+            with region(db, "sofia"):
+                out.append("🏙 СОФИЯ\n" + summary(db, day, "all"))
+        except Exception:
+            db.rollback()
+    return out
 
 
 def daily(db: Session, force: bool = False) -> dict:

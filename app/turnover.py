@@ -66,10 +66,31 @@ def _ensure(db: Session):
 
 
 # ------------------------------------------------------------------ данни
+def _each_region(fn, db):
+    """Пуска fn() за всеки регион (Варна, София); грешка в София не спира Варна."""
+    from . import mistral
+    res = []
+    for rg in mistral.regions():
+        with mistral.use(rg):
+            try:
+                res.append(fn())
+            except Exception:
+                db.rollback()
+                if rg == "varna":
+                    raise
+    return res
+
+
 def sync_receipts(db: Session, days: int = 3, only: date | None = None) -> dict:
-    """Брой касови бонове и първи/последен бон на ден по магазин (от Мистрал)."""
+    """Брой касови бонове и първи/последен бон на ден по магазин (от Мистрал) - всички региони."""
+    res = _each_region(lambda: _sync_receipts_region(db, days, only), db)
+    return {"days": days, "rows": sum(r["rows"] for r in res)}
+
+
+def _sync_receipts_region(db: Session, days: int = 3, only: date | None = None) -> dict:
     from . import mistral
     from .anomalies import _loc_map
+    rids = mistral.store_ids(db)
     _ensure(db)
     today = datetime.now(SOFIA).date()
     n = 0
@@ -92,7 +113,7 @@ def sync_receipts(db: Session, days: int = 3, only: date | None = None) -> dict:
                 a[0] += int(r["n"] or 0)
                 if f is not None and (a[1] is None or f < a[1]): a[1] = f
                 if l is not None and (a[2] is None or l > a[2]): a[2] = l
-            db.execute(text("DELETE FROM to_receipts WHERE day = :d"), {"d": d})
+            db.execute(text("DELETE FROM to_receipts WHERE day = :d AND store_id = ANY(:ids)"), {"d": d, "ids": rids})
             for sid, (cnt, f, l) in agg.items():
                 db.execute(text("""INSERT INTO to_receipts(store_id, day, receipts, first_at, last_at)
                                    VALUES (:s,:d,:n,:f,:l)"""),
@@ -104,10 +125,15 @@ def sync_receipts(db: Session, days: int = 3, only: date | None = None) -> dict:
 
 
 def resync_sales_day(db: Session, d: date) -> int:
-    """Пак дърпа продажбите за деня (в 02:30 някои магазини още не са качили всички бележки)."""
+    """Пак дърпа продажбите за деня (в 02:30 някои магазини още не са качили всички бележки) - всички региони."""
+    return sum(_each_region(lambda: _resync_sales_day_region(db, d), db))
+
+
+def _resync_sales_day_region(db: Session, d: date) -> int:
     from . import mistral
     from .anomalies import _loc_map
     from .salesall import _bulk
+    rids = mistral.store_ids(db)
     with mistral.connect() as conn:
         cur = conn.cursor()
         locs = _loc_map(db, cur)
@@ -128,7 +154,7 @@ def resync_sales_day(db: Session, d: date) -> int:
             a[0] += float(r["q"] or 0); a[1] += float(r["rev"] or 0); a[2] += float(r["cost"] or 0)
     if not agg:
         return 0
-    db.execute(text("DELETE FROM sa_sales WHERE day = :d"), {"d": d})
+    db.execute(text("DELETE FROM sa_sales WHERE day = :d AND store_id = ANY(:ids)"), {"d": d, "ids": rids})
     _bulk(db, "INSERT INTO sa_sales(store_id, code, day, qty, rev, cost) VALUES %s",
           [(k[0], k[1], d, v[0], v[1], v[2]) for k, v in agg.items()])
     db.commit()
@@ -140,8 +166,8 @@ def resync(db: Session, d: date) -> dict:
     out = {"day": d.isoformat(), "sales_rows": resync_sales_day(db, d), "receipts": sync_receipts(db, only=d)}
     last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
     out["rollup"] = rollup(db, (last - d).days + 1) if last else 0
-    report(db, d, 1, refresh=True)
-    report(db, d, 7, refresh=True)
+    _refresh(db, d, 1)
+    _refresh(db, d, 7)
     return out
 
 
@@ -152,7 +178,7 @@ def morning(db: Session) -> dict:
     out["receipts"] = sync_receipts(db, 1)
     out["rollup"] = rollup(db, 1)
     for n in (1, 7):
-        report(db, y, n, refresh=True)
+        _refresh(db, y, n)
     # последните 7 дни: сверка с Мистрал, непълните дни се дърпат наново
     fixed = []
     for i in range(2, 9):
@@ -196,14 +222,14 @@ def nightly(db: Session) -> dict:
         if last:
             for i in range(3):          # продажбите за 3 дни се дърпат наново -> и отчетите им
                 for n in (1, 7):
-                    report(db, last - timedelta(days=i), n, refresh=True)
+                    _refresh(db, last - timedelta(days=i), n)
             out["report"] = last.isoformat()
     except Exception as e:
         db.rollback(); out["report"] = f"{type(e).__name__}: {e}"[:200]
     return out
 
 
-def start_backfill(days: int = 56) -> dict:
+def start_backfill(days: int = 56, only: str | None = None) -> dict:
     if _job["running"]:
         return {"started": False, "status": dict(_job)}
     from .db import SessionLocal
@@ -212,9 +238,20 @@ def start_backfill(days: int = 56) -> dict:
         _job.update(running=True, error=None, progress="старт")
         try:
             with SessionLocal() as db:
-                r = sync_receipts(db, days)
+                if only:
+                    from . import mistral
+                    with mistral.use(only):
+                        r = _sync_receipts_region(db, days, None)
+                else:
+                    r = sync_receipts(db, days)
                 _job["progress"] = "обороти по групи"
                 r["rollup"] = rollup(db, days)
+                last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
+                if last:
+                    _job["progress"] = "отчети"
+                    for i in range(3):
+                        for n in (1, 7):
+                            _refresh(db, last - timedelta(days=i), n)
                 _job["last"] = r
         except Exception as e:
             _job["error"] = f"{type(e).__name__}: {e}"[:400]
@@ -261,7 +298,7 @@ def build(db: Session, day: date, n: int = 1) -> dict:
     from .salesall import _ensure as _sa_ensure
     _sa_ensure(db)
     oldest = day - timedelta(days=7 * WEEKS + n - 1)
-    have = db.execute(text("SELECT MIN(day), MAX(day) FROM sa_sales")).one()
+    have = db.execute(text("SELECT MIN(day), MAX(day) FROM rg_sa_sales")).one()
     if not have[0] or day > have[1]:
         return {"ready": False, "reason": f"няма продажби за {day.strftime('%d.%m.%Y')}"}
     stores = {s.id: s.name for s in db.execute(select(m.Store)).scalars()}
@@ -272,7 +309,7 @@ def build(db: Session, day: date, n: int = 1) -> dict:
     sg = defaultdict(lambda: [[0.0, 0.0] for _ in range(WEEKS + 1)])   # (sid, grp) -> w -> [rev, cost]
     for sid, g, w, r, c in db.execute(text(f"""
             SELECT s.store_id, COALESCE(a.grp, 'Без група'), {wc} AS w, SUM(s.rev), SUM(s.cost)
-            FROM sa_sales s LEFT JOIN sa_articles a ON a.code = s.code
+            FROM rg_sa_sales s LEFT JOIN sa_articles a ON a.code = s.code
             WHERE s.day BETWEEN :f AND :t GROUP BY 1, 2, 3"""), P).all():
         if w is None or w < 0:
             continue
@@ -298,7 +335,7 @@ def build(db: Session, day: date, n: int = 1) -> dict:
     for sid, w, cnt, f, l in db.execute(text(f"""
             SELECT store_id, {_wcase(day, n, 'day')} AS w, SUM(receipts),
                    MIN(first_at), MAX(last_at)
-            FROM to_receipts WHERE day BETWEEN :f AND :t GROUP BY 1, 2"""), P).all():
+            FROM rg_to_receipts WHERE day BETWEEN :f AND :t GROUP BY 1, 2"""), P).all():
         if w is None or w < 0:
             continue
         rc[sid][w] = [int(cnt or 0), _tmin(f), _tmin(l)]
@@ -445,7 +482,7 @@ def _article_causes(db: Session, day: date, n: int, flagged, base_weeks, chain_p
     meta = {}
     for sid, code, g, nm, w, q, r in db.execute(text(f"""
             SELECT s.store_id, s.code, COALESCE(a.grp, 'Без група'), MAX(a.name), {_wcase(day, n)} AS w, SUM(s.qty), SUM(s.rev)
-            FROM sa_sales s LEFT JOIN sa_articles a ON a.code = s.code
+            FROM rg_sa_sales s LEFT JOIN sa_articles a ON a.code = s.code
             WHERE s.day BETWEEN :f AND :t AND s.store_id = ANY(:s) AND COALESCE(a.grp, 'Без група') = ANY(:g)
             GROUP BY 1, 2, 3, 5"""), P).all():
         if w is None or w < 0 or (sid, g) not in pairs:
@@ -454,7 +491,7 @@ def _article_causes(db: Session, day: date, n: int, flagged, base_weeks, chain_p
         meta[code] = (nm or str(code), g)
     codes = sorted({c for _, c in art})
     stock = {(s, c): float(q or 0) for s, c, q in db.execute(text(
-        "SELECT store_id, code, qty FROM sa_stock WHERE code = ANY(:c) AND store_id = ANY(:s)"), {"c": codes, "s": sids}).all()}
+        "SELECT store_id, code, qty FROM rg_sa_stock WHERE code = ANY(:c) AND store_id = ANY(:s)"), {"c": codes, "s": sids}).all()}
     # акции: имало ли е промо в базовите дни, а в текущите не
     win = _windows(day, n)
     cur_days, base_days = set(win[0]), {d for w in range(1, WEEKS + 1) for d in win[w]}
@@ -532,25 +569,42 @@ def _article_causes(db: Session, day: date, n: int, flagged, base_weeks, chain_p
         gr["_split"] = dict(split)
 
 
+def _refresh(db: Session, day: date, n: int):
+    """Отчетът наново за Варна и (ако е вързана) за София."""
+    from . import mistral
+    from .db import region
+    report(db, day, n, refresh=True)
+    if "sofia" in mistral.regions():
+        try:
+            with region(db, "sofia"):
+                report(db, day, n, refresh=True)
+        except Exception:
+            db.rollback()
+
+
 def report(db: Session, day: date | None = None, n: int = 1, refresh: bool = False) -> dict:
     _ensure(db)
+    from .db import REGION
+    rg = REGION.get()
+    nk = n + {"varna": 0, "sofia": 1000, "all": 2000}.get(rg, 0)     # кешът е отделен по регион
     if day is None:
-        day = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
+        day = db.execute(text("SELECT MAX(day) FROM rg_sa_sales")).scalar()
         if not day:
             return {"ready": False, "reason": "няма продажби"}
     if not refresh:
-        row = db.execute(text("SELECT data, built_at FROM to_report WHERE day = :d AND n = :n"), {"d": day, "n": n}).first()
+        row = db.execute(text("SELECT data, built_at FROM to_report WHERE day = :d AND n = :n"), {"d": day, "n": nk}).first()
         if row:
             data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
             data["built_at"] = row[1].astimezone(SOFIA).strftime("%d.%m %H:%M")
             return data
     t0 = time.time()
     data = build(db, day, n)
+    data["region"] = rg
     data["seconds"] = round(time.time() - t0, 1)
     if data.get("ready"):
         db.execute(text("""INSERT INTO to_report(day, n, data) VALUES (:d, :n, CAST(:j AS JSONB))
                            ON CONFLICT (day, n) DO UPDATE SET data = EXCLUDED.data, built_at = now()"""),
-                   {"d": day, "n": n, "j": json.dumps(data, ensure_ascii=False)})
+                   {"d": day, "n": nk, "j": json.dumps(data, ensure_ascii=False)})
         db.commit()
     data["built_at"] = datetime.now(SOFIA).strftime("%d.%m %H:%M")
     return data
@@ -559,13 +613,13 @@ def report(db: Session, day: date | None = None, n: int = 1, refresh: bool = Fal
 def store_history(db: Session, store_id: int, days: int = 56) -> dict:
     """Дневен оборот и бонове на магазин (за графиката)."""
     _ensure(db)
-    last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
+    last = db.execute(text("SELECT MAX(day) FROM rg_sa_sales")).scalar()
     if not last:
         return {"days": []}
     since = last - timedelta(days=days - 1)
-    rev = {d: float(r or 0) for d, r in db.execute(text("""SELECT day, SUM(rev) FROM sa_sales WHERE store_id = :s
+    rev = {d: float(r or 0) for d, r in db.execute(text("""SELECT day, SUM(rev) FROM rg_sa_sales WHERE store_id = :s
             AND day BETWEEN :f AND :t GROUP BY day"""), {"s": store_id, "f": since, "t": last}).all()}
-    rec = {d: int(n or 0) for d, n in db.execute(text("""SELECT day, receipts FROM to_receipts WHERE store_id = :s
+    rec = {d: int(n or 0) for d, n in db.execute(text("""SELECT day, receipts FROM rg_to_receipts WHERE store_id = :s
             AND day BETWEEN :f AND :t"""), {"s": store_id, "f": since, "t": last}).all()}
     out = []
     for i in range(days):
@@ -581,16 +635,24 @@ def check(db: Session, day: date) -> dict:
     from .anomalies import _loc_map
     _ensure(db)
     stores = {s.id: (s.name, s.is_active) for s in db.execute(select(m.Store)).scalars()}
-    with mistral.connect() as conn:
-        cur = conn.cursor()
-        locs = _loc_map(db, cur)
-        cur.execute("SELECT ID, NAME FROM LOCATION")
-        lname = {r["ID"]: r["NAME"] for r in cur.fetchall()}
-        cur.execute("""SELECT s.LOCATIONID AS loc, COUNT(DISTINCT s.NUM) AS n, MAX(s.SALEDATE) AS l,
-                              SUM(c.QTY * c.SALEPRICE) AS rev
-                       FROM SALE s WITH (NOLOCK) JOIN SALECONTENT c WITH (NOLOCK) ON c.NUM = s.NUM AND c.LOCATIONID = s.LOCATIONID
-                       WHERE s.REPORTINGDATE = %s GROUP BY s.LOCATIONID""", (day.isoformat(),))
-        live = {r["loc"]: (int(r["n"] or 0), r["l"], float(r["rev"] or 0)) for r in cur.fetchall()}
+    locs, lname, live = {}, {}, {}
+
+    def _one():
+        rg = mistral.current()
+        with mistral.connect() as conn:
+            cur = conn.cursor()
+            for k, v in _loc_map(db, cur).items():
+                locs[(rg, k)] = v
+            cur.execute("SELECT ID, NAME FROM LOCATION")
+            for r in cur.fetchall():
+                lname[(rg, r["ID"])] = r["NAME"]
+            cur.execute("""SELECT s.LOCATIONID AS loc, COUNT(DISTINCT s.NUM) AS n, MAX(s.SALEDATE) AS l,
+                                  SUM(c.QTY * c.SALEPRICE) AS rev
+                           FROM SALE s WITH (NOLOCK) JOIN SALECONTENT c WITH (NOLOCK) ON c.NUM = s.NUM AND c.LOCATIONID = s.LOCATIONID
+                           WHERE s.REPORTINGDATE = %s GROUP BY s.LOCATIONID""", (day.isoformat(),))
+            for r in cur.fetchall():
+                live[(rg, r["loc"])] = (int(r["n"] or 0), r["l"], float(r["rev"] or 0))
+    _each_region(_one, db)
     ours = {sid: float(r or 0) for sid, r in db.execute(text(
         "SELECT store_id, SUM(rev) FROM sa_sales WHERE day = :d GROUP BY store_id"), {"d": day}).all()}
     rec = {sid: (n, l) for sid, n, l in db.execute(text(
@@ -599,10 +661,10 @@ def check(db: Session, day: date) -> dict:
     for loc, (n, l, rev) in live.items():
         sid = locs.get(loc)
         if sid is None:
-            rows.append({"loc": loc, "mistral": lname.get(loc, str(loc)), "store": None, "status": "не е вързан към магазин",
+            rows.append({"loc": loc[1], "mistral": lname.get(loc, str(loc[1])), "store": None, "status": "не е вързан към магазин",
                          "live_rev": round(rev, 2), "live_receipts": n, "live_last": l.strftime("%H:%M") if l else None})
             continue
-        a = by_sid[sid]; a[0] += n; a[2] += rev; a[3].append(lname.get(loc, str(loc)))
+        a = by_sid[sid]; a[0] += n; a[2] += rev; a[3].append(lname.get(loc, str(loc[1])))
         if l and (a[1] is None or l > a[1]): a[1] = l
     for sid, (name, active) in stores.items():
         if not active:

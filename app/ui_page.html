@@ -750,13 +750,36 @@ const fmtE = n => (n == null) ? "—" : Number(n).toLocaleString("bg-BG", {minim
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const $ = id => document.getElementById(id);
 
+/* регион за обороти, анализи и делистване: varna | sofia | all */
+let RG = "varna";
+try { RG = localStorage.getItem("mm_region") || "varna"; } catch (e) {}
+function rgPath(path) {
+  if (!/^\/(ui\/analytics\/|ui\/viber\/preview|turnover)/.test(path) || /[?&]region=/.test(path)) return path;
+  return path + (path.includes("?") ? "&" : "?") + "region=" + RG;
+}
+function rgSelect() {
+  const o = [["varna", "Варна"], ["sofia", "София"], ["all", "Варна + София"]];
+  return `<select class="rgSel" title="Регион" onchange="setRegion(this.value)">${o.map(([v, t]) =>
+    `<option value="${v}"${v === RG ? " selected" : ""}>${t}</option>`).join("")}</select>`;
+}
+function setRegion(v) { RG = v; try { localStorage.setItem("mm_region", v); } catch (e) {} location.reload(); }
+document.addEventListener("DOMContentLoaded", () => {
+  ["tab-turn", "tab-anal", "tab-delist"].forEach(id => {
+    const bar = document.querySelector(`#${id} .bar`);
+    if (bar) bar.insertAdjacentHTML("afterbegin", rgSelect());
+    else { const t = $(id); if (t) t.insertAdjacentHTML("afterbegin", `<div class="bar">${rgSelect()}</div>`); }
+  });
+});
+
 async function api(path, opts = {}) {
+  path = rgPath(path);
   const res = await fetch(path, { ...opts, headers: { ...HDR, ...(opts.headers || {}) } });
   if (res.status === 401) { showLogin("Сесията изтече. Влез отново."); throw new Error("Нужен е вход"); }
   if (!res.ok) throw new Error(res.status + " " + (await res.text()).slice(0, 180));
   return res.json();
 }
 async function download(path) {
+  path = rgPath(path);
   const res = await fetch(path, { headers: HDR });
   if (!res.ok) throw new Error(res.status + " " + (await res.text()).slice(0, 180));
   const cd = res.headers.get("Content-Disposition") || "";

@@ -55,12 +55,32 @@ def status() -> dict:
     return dict(_job)
 
 
-def _sync(db: Session, days: int):
+def _sync(db: Session, days: int, only: str | None = None):
+    """По всички региони (Варна, после София). Имената/групите на артикулите - от Варна."""
+    from . import mistral
+    out = {}
+    for rg in mistral.regions():
+        if only and rg != only:
+            continue
+        with mistral.use(rg):
+            try:
+                out[rg] = _sync_region(db, days, rg)
+            except Exception as e:
+                db.rollback()
+                if rg == "varna":
+                    raise
+                out[rg] = {"error": f"{type(e).__name__}: {e}"[:300]}
+    v = out.get("varna", {})
+    return {**v, "regions": out}
+
+
+def _sync_region(db: Session, days: int, region: str):
     from . import mistral
     from .anomalies import _loc_map
     _ensure(db)
     t0 = time.time()
     today = datetime.now(SOFIA).date()
+    rids = mistral.store_ids(db, region)
     with mistral.connect() as conn:
         cur = conn.cursor()
         locs = _loc_map(db, cur)
@@ -78,7 +98,7 @@ def _sync(db: Session, days: int):
                 WHERE s.REPORTINGDATE = %s AND s.LOCATIONID IN ({L})
                 GROUP BY c.LOCATIONID, c.MATERIALCODE""", (d.isoformat(),))
             rows = cur.fetchall()
-            db.execute(text("DELETE FROM sa_sales WHERE day = :d"), {"d": d})
+            db.execute(text("DELETE FROM sa_sales WHERE day = :d AND store_id = ANY(:ids)"), {"d": d, "ids": rids})
             batch = []
             for r in rows:
                 sid = locs.get(r["loc"])
@@ -127,7 +147,10 @@ def _sync(db: Session, days: int):
         for j in range(0, len(arts), 2000):
             db.execute(text("""INSERT INTO sa_articles(code, name, grp, sub, supplier) VALUES (:c,:n,:g,:s,:p)
                                ON CONFLICT (code) DO UPDATE SET name=COALESCE(EXCLUDED.name, sa_articles.name),
-                               grp=EXCLUDED.grp, sub=EXCLUDED.sub, supplier=EXCLUDED.supplier, updated_at=now()"""),
+                               grp=EXCLUDED.grp, sub=EXCLUDED.sub, supplier=EXCLUDED.supplier, updated_at=now()"""
+                            if region == "varna" else
+                            """INSERT INTO sa_articles(code, name, grp, sub, supplier) VALUES (:c,:n,:g,:s,:p)
+                               ON CONFLICT (code) DO NOTHING"""),
                        arts[j:j + 2000])
         db.commit()
         # наличности на всички артикули
@@ -137,7 +160,7 @@ def _sync(db: Session, days: int):
                         GROUP BY LOCATIONID, MATERIALCODE""")
         st = [{"s": locs[r["loc"]], "c": int(r["code"]), "q": float(r["q"] or 0), "p": float(r["p"] or 0)}
               for r in cur.fetchall() if r["loc"] in locs]
-        db.execute(text("TRUNCATE sa_stock"))
+        db.execute(text("DELETE FROM sa_stock WHERE store_id = ANY(:ids)"), {"ids": rids})
         agg = {}
         for x in st:
             k = (x["s"], x["c"]); q, p = agg.get(k, (0.0, 0.0)); agg[k] = (q + x["q"], max(p, x["p"]))
@@ -155,7 +178,8 @@ def _sync(db: Session, days: int):
                         GROUP BY SALEMATERIALCODE, CAST(STARTDATE AS date), CAST(ENDDATE AS date)""")
         pr = [{"c": int(r["code"]), "s": r["s"], "e": r["e"], "n": int(r["n"] or 0), "p": float(r["p"] or 0),
                "d": float(r["d"] or 0), "tp": int(r["tp"] or 0)} for r in cur.fetchall()]
-        db.execute(text("TRUNCATE sa_promo"))
+        if region == "varna":
+            db.execute(text("TRUNCATE sa_promo"))
         for j in range(0, len(pr), 5000):
             db.execute(text("""INSERT INTO sa_promo(code, start_day, end_day, stores, price, discount, tp)
                                VALUES (:c,:s,:e,:n,:p,:d,:tp) ON CONFLICT DO NOTHING"""), pr[j:j + 5000])
@@ -171,7 +195,7 @@ def sync(db: Session, days: int = 3) -> dict:
     return _sync(db, days)
 
 
-def start_background(days: int = 30) -> dict:
+def start_background(days: int = 30, only: str | None = None) -> dict:
     if _job["running"]:
         return {"started": False, "status": status()}
     from .db import SessionLocal
@@ -180,7 +204,7 @@ def start_background(days: int = 30) -> dict:
         _job.update(running=True, error=None, progress="старт")
         try:
             with SessionLocal() as db:
-                _job["last"] = _sync(db, days)
+                _job["last"] = _sync(db, days, only)
         except Exception as e:
             _job["error"] = f"{type(e).__name__}: {e}"[:400]
         finally:
@@ -191,7 +215,7 @@ def start_background(days: int = 30) -> dict:
 
 # ------------------------------------------------------------------ анализи
 def _window(db, days):
-    last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
+    last = db.execute(text("SELECT MAX(day) FROM rg_sa_sales")).scalar()
     if not last:
         return None, None, None
     since = last - timedelta(days=days - 1)
@@ -212,12 +236,12 @@ def overview(db: Session, days: int = 14, by: str = "grp") -> dict:
                SUM(CASE WHEN s.day >= :h THEN s.rev ELSE 0 END) rr,
                SUM(CASE WHEN s.day <  :h THEN s.rev ELSE 0 END) rp,
                COUNT(DISTINCT s.code) n
-        FROM sa_sales s LEFT JOIN sa_articles a ON a.code = s.code
+        FROM rg_sa_sales s LEFT JOIN sa_articles a ON a.code = s.code
         WHERE s.day BETWEEN :f AND :t GROUP BY {key}"""), {"f": since, "t": last, "h": half}).all()
     skey = {"grp": "a.grp", "supplier": "a.supplier", "store": "st.store_id"}[by]
     stock = {k: (float(q or 0), float(v or 0)) for k, q, v in db.execute(text(f"""
         SELECT {skey}, SUM(GREATEST(st.qty,0)), SUM(GREATEST(st.qty,0) * COALESCE(st.cost,0))
-        FROM sa_stock st LEFT JOIN sa_articles a ON a.code = st.code GROUP BY {skey}""")).all()}
+        FROM rg_sa_stock st LEFT JOIN sa_articles a ON a.code = st.code GROUP BY {skey}""")).all()}
     stores = {s.id: s.name for s in db.execute(select(m.Store)).scalars()}
     rdays = (last - half).days + 1
     tot = {"units": 0, "rev": 0, "margin": 0}
@@ -246,11 +270,11 @@ def detail(db: Session, by: str, key: str, days: int = 14) -> dict:
     rows = db.execute(text(f"""
         SELECT s.code, MAX(a.name), MAX(a.sub), MAX(a.supplier), SUM(s.qty), SUM(s.rev), SUM(s.cost),
                SUM(CASE WHEN s.day >= :h THEN s.qty ELSE 0 END), SUM(CASE WHEN s.day < :h THEN s.qty ELSE 0 END)
-        FROM sa_sales s LEFT JOIN sa_articles a ON a.code = s.code
+        FROM rg_sa_sales s LEFT JOIN sa_articles a ON a.code = s.code
         WHERE s.day BETWEEN :f AND :t AND {cond} GROUP BY s.code ORDER BY SUM(s.rev) DESC LIMIT 400"""),
         {"f": since, "t": last, "h": half, "k": key}).all()
     scond = "st.store_id = CAST(:k AS INT)" if by == "store" else ("a.grp = :k" if by == "grp" else "a.supplier = :k")
-    stock = {c: float(q or 0) for c, q in db.execute(text(f"""SELECT st.code, SUM(GREATEST(st.qty,0)) FROM sa_stock st
+    stock = {c: float(q or 0) for c, q in db.execute(text(f"""SELECT st.code, SUM(GREATEST(st.qty,0)) FROM rg_sa_stock st
         LEFT JOIN sa_articles a ON a.code = st.code WHERE {scond} GROUP BY st.code"""), {"k": key}).all()}
     rdays = (last - half).days + 1
     arts = []
@@ -269,7 +293,7 @@ def campaigns(db: Session, kind: str = "brochure", back_days: int = 45) -> dict:
     """Акции от Мистрал по вид: brochure = брошура (TYPEPROMOTION=1), silent = тихи акции (0).
     За всяка кампания (период): продажби преди (14 дни) и по време, ръст, оборот, марж, свършили."""
     _ensure(db)
-    last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
+    last = db.execute(text("SELECT MAX(day) FROM rg_sa_sales")).scalar()
     if not last:
         return {"ready": False, "campaigns": []}
     # периодите на брошурата: с поне 20 артикула с тип „брошура" (1); всичко със същите дати е брошура
@@ -285,14 +309,14 @@ def campaigns(db: Session, kind: str = "brochure", back_days: int = 45) -> dict:
             camps[(s, e)].append((code, n, float(p or 0), float(d or 0)))
     names = {c: (n, g, sup) for c, n, g, sup in db.execute(text(
         "SELECT code, name, grp, supplier FROM sa_articles")).all()}
-    outs_all = {c: n for c, n in db.execute(text("SELECT code, COUNT(*) FROM sa_stock WHERE qty <= 0 GROUP BY code")).all()}
+    outs_all = {c: n for c, n in db.execute(text("SELECT code, COUNT(*) FROM rg_sa_stock WHERE qty <= 0 GROUP BY code")).all()}
     out = []
     for (s, e), items in sorted(camps.items(), key=lambda x: (x[0][0], x[0][1]), reverse=True):
         p_end = min(e, last); pdays = max((p_end - s).days + 1, 0)   # 0 = започва днес/предстои, още без продажби
         codes = [c for c, *_ in items]
         b0 = min(s, last + timedelta(days=1)) - timedelta(days=14)
         agg = {c: [0.0, 0.0, 0.0, 0.0] for c in codes}
-        for c, d, q, r, k in db.execute(text("""SELECT code, day, SUM(qty), SUM(rev), SUM(cost) FROM sa_sales
+        for c, d, q, r, k in db.execute(text("""SELECT code, day, SUM(qty), SUM(rev), SUM(cost) FROM rg_sa_sales
                                                 WHERE code = ANY(:c) AND day BETWEEN :b AND :e GROUP BY code, day"""),
                                         {"c": codes, "b": b0, "e": p_end}).all():
             a = agg[c]
@@ -328,7 +352,7 @@ def campaigns(db: Session, kind: str = "brochure", back_days: int = 45) -> dict:
 def promos(db: Session) -> dict:
     """Промоциите от Мистрал (последните 60 дни и текущите): ефект по артикул."""
     _ensure(db)
-    last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
+    last = db.execute(text("SELECT MAX(day) FROM rg_sa_sales")).scalar()
     if not last:
         return {"ready": False, "campaigns": []}
     camps = defaultdict(list)
@@ -344,7 +368,7 @@ def promos(db: Session) -> dict:
             continue
         b0 = s - timedelta(days=14)
         agg = {c: [0.0, 0.0, 0.0, 0.0] for c in codes}   # q_before, q_during, rev_during, cost_during
-        for c, d, q, r, k in db.execute(text("""SELECT code, day, SUM(qty), SUM(rev), SUM(cost) FROM sa_sales
+        for c, d, q, r, k in db.execute(text("""SELECT code, day, SUM(qty), SUM(rev), SUM(cost) FROM rg_sa_sales
                                                 WHERE code = ANY(:c) AND day BETWEEN :b AND :e GROUP BY code, day"""),
                                         {"c": codes, "b": b0, "e": p_end}).all():
             a = agg[c]
@@ -352,7 +376,7 @@ def promos(db: Session) -> dict:
             else: a[1] += float(q or 0); a[2] += float(r or 0); a[3] += float(k or 0)
         names = {c: (n, g, sup) for c, n, g, sup in db.execute(text(
             "SELECT code, name, grp, supplier FROM sa_articles WHERE code = ANY(:c)"), {"c": codes}).all()}
-        outs = {c: n for c, n in db.execute(text("""SELECT st.code, COUNT(*) FROM sa_stock st
+        outs = {c: n for c, n in db.execute(text("""SELECT st.code, COUNT(*) FROM rg_sa_stock st
             WHERE st.code = ANY(:c) AND st.qty <= 0 GROUP BY st.code"""), {"c": codes}).all()}
         rows = []
         for c, n, price, disc in items:
@@ -388,7 +412,7 @@ def _per_store_article(db, days: int, store_id: int | None = None):
         return None, None, None, {}
     q = """SELECT s.store_id, s.code, SUM(s.qty), SUM(s.rev), SUM(s.cost),
                   SUM(CASE WHEN s.day >= :h THEN s.qty ELSE 0 END), SUM(CASE WHEN s.day < :h THEN s.qty ELSE 0 END)
-           FROM sa_sales s WHERE s.day BETWEEN :f AND :t""" + (" AND s.store_id = :sid" if store_id else "") + \
+           FROM rg_sa_sales s WHERE s.day BETWEEN :f AND :t""" + (" AND s.store_id = :sid" if store_id else "") + \
         " GROUP BY s.store_id, s.code"
     out = {(st, c): [float(a or 0), float(b or 0), float(k or 0), float(r or 0), float(p or 0)]
            for st, c, a, b, k, r, p in db.execute(text(q), {"f": since, "t": last, "h": half, "sid": store_id}).all()}
@@ -401,7 +425,7 @@ def _arts_meta(db):
 
 
 def _stock_map(db, store_id: int | None = None):
-    q = "SELECT store_id, code, qty FROM sa_stock" + (" WHERE store_id = :s" if store_id else "")
+    q = "SELECT store_id, code, qty FROM rg_sa_stock" + (" WHERE store_id = :s" if store_id else "")
     return {(st, c): float(q_ or 0) for st, c, q_ in db.execute(text(q), {"s": store_id}).all()}
 
 
@@ -494,11 +518,11 @@ def low_stock_alerts(db: Session, days: int = 14, n: int = TOP_N, cover: float =
                  (neg[c] >= 0.5 * sold_in[c] or nonpos[c] >= 0.8 * sold_in[c])}
     # проверка с продажбите: продава ли се въпреки „0/минус"? -> стоката е на рафта, грешна е наличността
     recent = {(st, c): float(q or 0) for st, c, q in db.execute(text(
-        "SELECT store_id, code, SUM(qty) FROM sa_sales WHERE day > :d GROUP BY store_id, code"),
+        "SELECT store_id, code, SUM(qty) FROM rg_sa_sales WHERE day > :d GROUP BY store_id, code"),
         {"d": last - timedelta(days=2)}).all()}
     # последна продажба (за колко дни поред няма продажби до последния ден с данни)
     last_sale = {(st, c): d for st, c, d in db.execute(text(
-        "SELECT store_id, code, MAX(day) FROM sa_sales WHERE qty > 0 AND day >= :f GROUP BY store_id, code"),
+        "SELECT store_id, code, MAX(day) FROM rg_sa_sales WHERE qty > 0 AND day >= :f GROUP BY store_id, code"),
         {"f": since}).all()}
     import math
     skipped = 0
@@ -568,7 +592,7 @@ def low_stock_alerts(db: Session, days: int = 14, n: int = TOP_N, cover: float =
 def nomenclature(db: Session, grp: str, days: int = 30) -> dict:
     """Номенклатурата на група: всички артикули с продажби или наличност, с продажби за N дни."""
     _ensure(db)
-    last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
+    last = db.execute(text("SELECT MAX(day) FROM rg_sa_sales")).scalar()
     since = (last - timedelta(days=days - 1)) if last else None
     rows = db.execute(text("""
         SELECT a.code, a.name, a.sub, a.supplier, st.cost,
@@ -577,8 +601,8 @@ def nomenclature(db: Session, grp: str, days: int = 30) -> dict:
         FROM sa_articles a
         LEFT JOIN (SELECT code, SUM(qty) q, COUNT(*) FILTER (WHERE qty > 0) n, SUM(GREATEST(qty,0) * COALESCE(cost,0)) v,
                           MAX(cost) FILTER (WHERE qty > 0) cost
-                   FROM sa_stock GROUP BY code) st ON st.code = a.code
-        LEFT JOIN (SELECT code, SUM(qty) q, SUM(rev) r, MAX(day) last_day FROM sa_sales
+                   FROM rg_sa_stock GROUP BY code) st ON st.code = a.code
+        LEFT JOIN (SELECT code, SUM(qty) q, SUM(rev) r, MAX(day) last_day FROM rg_sa_sales
                    WHERE day >= :f GROUP BY code) sl ON sl.code = a.code
         WHERE a.grp = :g ORDER BY a.sub, a.name"""), {"g": grp, "f": since}).all()
     out = [{"code": c, "name": n, "sub": s or "", "supplier": p or "",

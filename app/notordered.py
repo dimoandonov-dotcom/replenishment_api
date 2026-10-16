@@ -111,7 +111,7 @@ def summary(db: Session) -> dict:
     for s in db.execute(select(m.StoreArticleSetting)).scalars().all():
         settings_all[s.store_id][s.article_id] = s
     out, tot = [], defaultdict(int)
-    for st in db.execute(select(m.Store).where(m.Store.is_active.is_(True)).order_by(m.Store.name)).scalars().all():
+    for st in db.execute(select(m.Store).where(m.Store.is_active.is_(True), m.ORDERING).order_by(m.Store.name)).scalars().all():
         rows = store_rows(db, st.id, arts, sales, plano_all, settings_all)
         c = defaultdict(int)
         selling = 0
@@ -137,7 +137,7 @@ def all_rows(db: Session, reason: str | None = None, selling: bool = False) -> l
     for s in db.execute(select(m.StoreArticleSetting)).scalars().all():
         settings_all[s.store_id][s.article_id] = s
     out = []
-    for st in db.execute(select(m.Store).where(m.Store.is_active.is_(True))).scalars().all():
+    for st in db.execute(select(m.Store).where(m.Store.is_active.is_(True), m.ORDERING)).scalars().all():
         for r in store_rows(db, st.id, arts, sales, plano_all, settings_all):
             if reason and r["reason"] != reason:
                 continue

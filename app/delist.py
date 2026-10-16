@@ -90,13 +90,26 @@ def sync_dates(db: Session, force: bool = False) -> int:
         return 0
     from . import mistral
     from .anomalies import _loc_map
-    with mistral.connect() as conn:
-        cur = conn.cursor()
-        L = ",".join(map(str, _loc_map(db, cur)))
-        cur.execute(f"""SELECT MATERIALCODE AS code, MAX(CAST(LASTDELIVERYDATE AS date)) AS ld,
-                               MAX(CAST(LASTSALEDATE AS date)) AS ls
-                        FROM MATERIAL WITH (NOLOCK) WHERE LOCATIONID IN ({L}) GROUP BY MATERIALCODE""")
-        rows = [{"c": int(r["code"]), "d": r["ld"], "s": r["ls"]} for r in cur.fetchall()]
+    acc = {}
+    for rg in mistral.regions():
+        with mistral.use(rg):
+            try:
+                with mistral.connect() as conn:
+                    cur = conn.cursor()
+                    L = ",".join(map(str, _loc_map(db, cur)))
+                    if not L:
+                        continue
+                    cur.execute(f"""SELECT MATERIALCODE AS code, MAX(CAST(LASTDELIVERYDATE AS date)) AS ld,
+                                           MAX(CAST(LASTSALEDATE AS date)) AS ls
+                                    FROM MATERIAL WITH (NOLOCK) WHERE LOCATIONID IN ({L}) GROUP BY MATERIALCODE""")
+                    for r in cur.fetchall():
+                        c = int(r["code"]); a = acc.setdefault(c, [None, None])
+                        if r["ld"] and (a[0] is None or r["ld"] > a[0]): a[0] = r["ld"]
+                        if r["ls"] and (a[1] is None or r["ls"] > a[1]): a[1] = r["ls"]
+            except Exception:
+                if rg == "varna":
+                    raise
+    rows = [{"c": c, "d": v[0], "s": v[1]} for c, v in acc.items()]
     db.execute(text("TRUNCATE sa_dates"))
     for j in range(0, len(rows), 5000):
         db.execute(text("INSERT INTO sa_dates(code, last_delivery, last_sale) VALUES (:c, :d, :s)"), rows[j:j + 5000])
@@ -111,7 +124,7 @@ def proposals(db: Session, include_seasonal: bool = False) -> dict:
         sync_dates(db)
     except Exception:
         db.rollback()
-    first, last = db.execute(text("SELECT MIN(day), MAX(day) FROM sa_sales")).one()
+    first, last = db.execute(text("SELECT MIN(day), MAX(day) FROM rg_sa_sales")).one()
     if not last:
         return {"ready": False, "rows": []}
     since = max(first, last - timedelta(days=59))
@@ -123,10 +136,10 @@ def proposals(db: Session, include_seasonal: bool = False) -> dict:
                           MIN(day) f, MAX(day) l,
                           SUM(CASE WHEN day < :mid THEN qty ELSE 0 END) q1,
                           SUM(CASE WHEN day >= :mid THEN qty ELSE 0 END) q2
-                   FROM sa_sales WHERE day BETWEEN :f AND :t GROUP BY code),
+                   FROM rg_sa_sales WHERE day BETWEEN :f AND :t GROUP BY code),
              st AS (SELECT code, SUM(GREATEST(qty,0)) sq, SUM(GREATEST(qty,0) * COALESCE(cost,0)) sv,
                            COUNT(*) FILTER (WHERE qty > 0) nst
-                    FROM sa_stock GROUP BY code)
+                    FROM rg_sa_stock GROUP BY code)
         SELECT a.code, a.name, a.grp, a.sub, a.supplier, COALESCE(s.q,0), COALESCE(s.r,0), COALESCE(s.c,0),
                COALESCE(s.ns,0), s.f, s.l, COALESCE(s.q1,0), COALESCE(s.q2,0),
                COALESCE(st.sq,0), COALESCE(st.sv,0), COALESCE(st.nst,0), dt.last_delivery, dt.last_sale
@@ -135,7 +148,7 @@ def proposals(db: Session, include_seasonal: bool = False) -> dict:
         WHERE COALESCE(st.sq,0) > 0 OR COALESCE(s.q,0) > 0"""),
         {"f": since, "t": last, "mid": mid}).all()
     global NSTORES
-    NSTORES = db.execute(text("SELECT COUNT(DISTINCT store_id) FROM sa_stock")).scalar() or 52
+    NSTORES = db.execute(text("SELECT COUNT(DISTINCT store_id) FROM rg_sa_stock")).scalar() or 52
     promo = {c for (c,) in db.execute(text("SELECT DISTINCT code FROM sa_promo WHERE end_day >= :d AND start_day <= :d"),
                                       {"d": today}).all()}
     dec = {c: (d, n, b, at) for c, d, n, b, at in db.execute(text(
@@ -254,36 +267,41 @@ def article(db: Session, code: int) -> dict:
     from . import models as m
     from sqlalchemy import select
     stores = {s.id: s.name for s in db.execute(select(m.Store)).scalars()}
-    last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
+    last = db.execute(text("SELECT MAX(day) FROM rg_sa_sales")).scalar()
     since = last - timedelta(days=59)
     sold = {sid: (float(q or 0), float(r or 0)) for sid, q, r in db.execute(text(
-        "SELECT store_id, SUM(qty), SUM(rev) FROM sa_sales WHERE code = :c AND day >= :f GROUP BY store_id"),
+        "SELECT store_id, SUM(qty), SUM(rev) FROM rg_sa_sales WHERE code = :c AND day >= :f GROUP BY store_id"),
         {"c": code, "f": since}).all()}
     weeks = [{"from": (since + timedelta(days=7 * i)).strftime("%d.%m"), "qty": 0.0} for i in range(9)]
-    for d, q in db.execute(text("SELECT day, SUM(qty) FROM sa_sales WHERE code = :c AND day >= :f GROUP BY day"),
+    for d, q in db.execute(text("SELECT day, SUM(qty) FROM rg_sa_sales WHERE code = :c AND day >= :f GROUP BY day"),
                            {"c": code, "f": since}).all():
         i = min((d - since).days // 7, 8)
         weeks[i]["qty"] += float(q or 0)
     per = {}
-    try:
-        with mistral.connect() as conn:
-            cur = conn.cursor()
-            locs = _loc_map(db, cur)
-            L = ",".join(map(str, locs))
-            cur.execute(f"""SELECT LOCATIONID AS loc, SUM(QTY) AS q, MAX(LASTSALEDATE) AS ls, MAX(LASTDELIVERYDATE) AS ld,
-                                   MAX(AVGDELIVERYPRICE) AS p, MAX(MATERIAL) AS nm
-                            FROM MATERIAL WITH (NOLOCK) WHERE MATERIALCODE = %s AND LOCATIONID IN ({L})
-                            GROUP BY LOCATIONID""", (code,))
-            for r in cur.fetchall():
-                sid = locs.get(r["loc"])
-                if sid is None:
+    for rg in mistral.regions():
+        try:
+            with mistral.use(rg), mistral.connect() as conn:
+                cur = conn.cursor()
+                locs = _loc_map(db, cur)
+                L = ",".join(map(str, locs))
+                if not L:
                     continue
-                per[sid] = {"stock": float(r["q"] or 0), "last_sale": r["ls"], "last_delivery": r["ld"],
-                            "price": float(r["p"] or 0)}
-    except Exception as e:
-        per = {}
+                cur.execute(f"""SELECT LOCATIONID AS loc, SUM(QTY) AS q, MAX(LASTSALEDATE) AS ls, MAX(LASTDELIVERYDATE) AS ld,
+                                       MAX(AVGDELIVERYPRICE) AS p, MAX(MATERIAL) AS nm
+                                FROM MATERIAL WITH (NOLOCK) WHERE MATERIALCODE = %s AND LOCATIONID IN ({L})
+                                GROUP BY LOCATIONID""", (code,))
+                for r in cur.fetchall():
+                    sid = locs.get(r["loc"])
+                    if sid is None:
+                        continue
+                    per[sid] = {"stock": float(r["q"] or 0), "last_sale": r["ls"], "last_delivery": r["ld"],
+                                "price": float(r["p"] or 0)}
+        except Exception:
+            pass
     rows = []
-    for sid in set(per) | set(sold):
+    from .db import region_store_ids
+    rids = region_store_ids(db)
+    for sid in (set(per) | set(sold)) & rids:
         p = per.get(sid, {})
         q, r = sold.get(sid, (0.0, 0.0))
         if not p.get("stock") and not q:
@@ -303,12 +321,12 @@ def store_swaps(db: Session, store_id: int) -> dict:
     p = proposals(db)
     if not p.get("ready"):
         return p
-    last = db.execute(text("SELECT MAX(day) FROM sa_sales")).scalar()
+    last = db.execute(text("SELECT MAX(day) FROM rg_sa_sales")).scalar()
     since = last - timedelta(days=p["days"] - 1)
     st = {c: float(q or 0) for c, q in db.execute(text(
-        "SELECT code, qty FROM sa_stock WHERE store_id = :s"), {"s": store_id}).all()}
+        "SELECT code, qty FROM rg_sa_stock WHERE store_id = :s"), {"s": store_id}).all()}
     sold = {c: float(q or 0) for c, q in db.execute(text(
-        "SELECT code, SUM(qty) FROM sa_sales WHERE store_id = :s AND day >= :f GROUP BY code"),
+        "SELECT code, SUM(qty) FROM rg_sa_sales WHERE store_id = :s AND day >= :f GROUP BY code"),
         {"s": store_id, "f": since}).all()}
     rows = []
     for r in p["rows"]:

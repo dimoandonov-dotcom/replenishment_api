@@ -62,7 +62,14 @@ def _ensure(db: Session):
 
 def _loc_map(db: Session, cur) -> dict:
     from .imports import normalize_store_name
-    lk = {normalize_store_name(s.name): s.id for s in db.execute(select(m.Store)).scalars().all()}
+    from . import mistral
+    if mistral.current() == "sofia":
+        # София: обектът в Мистрал е записан при магазина (stores.mistral_host = LOCATION.ID)
+        return {int(s.mistral_host): s.id for s in db.execute(select(m.Store).where(
+            m.Store.mistral_db_path == "sofia", m.Store.is_active.is_(True))).scalars().all()
+            if (s.mistral_host or "").isdigit()}
+    lk = {normalize_store_name(s.name): s.id for s in db.execute(select(m.Store)).scalars().all()
+          if s.mistral_db_path != "sofia"}
     for al in db.execute(select(m.StoreAlias)).scalars().all():
         lk[al.alias_normalized] = al.store_id
     active = {s.id for s in db.execute(select(m.Store).where(m.Store.is_active.is_(True))).scalars().all()}
@@ -255,7 +262,7 @@ def _items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict
     _ensure(db)
     since = datetime.now(SOFIA).date() - timedelta(days=days)
     arts = {a.id: a for a in db.execute(select(m.Article)).scalars().all()}
-    stores = {s.id: s.name for s in db.execute(select(m.Store).where(m.Store.is_active.is_(True))).scalars().all()}
+    stores = {s.id: s.name for s in db.execute(select(m.Store).where(m.Store.is_active.is_(True), m.ORDERING)).scalars().all()}
     price = lambda aid: float(arts[aid].delivery_price or 0) if aid in arts else 0.0  # noqa: E731
     name = lambda aid: (arts[aid].supplier_name or arts[aid].name) if aid in arts else str(aid)  # noqa: E731
     sku = lambda aid: arts[aid].sku if aid in arts else ""  # noqa: E731
