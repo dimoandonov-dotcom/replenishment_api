@@ -129,6 +129,9 @@ def needs_reorder(
         Минимумът остава като предпазен праг: под него се поръчва поне
         една опаковка, дори нуждата да е малка.
     """
+    # свършил (0 или минус) и е в асортимента (макс > 0) -> винаги се разглежда за поръчка
+    if current_stock <= 0 and (max_stock or 0) > 0:
+        return True
     if mode == "daily_topup":
         target = max_stock if max_stock is not None else min_stock
         return current_stock < target
@@ -199,12 +202,12 @@ def calculate_line(
     # САМО ако стоката ще свърши до следващата доставка - иначе трупаме запас
     # (напр. 6 бр. при продажби 1 бр. на 2 седмици = 3 месеца запас).
     below_min = current_stock < setting.min_stock
-    force = below_min or cover_trigger
+    force = below_min or cover_trigger or current_stock <= 0
     if force and avg_daily_sales is not None:
-        if avg_daily_sales <= 0:
-            force = False                      # не се продава - не трупаме
-        elif current_stock <= 0:
-            force = True                       # свършил е и се продава - рафтът да не е празен
+        if current_stock <= 0:
+            force = True                       # свършил е - поне една опаковка, рафтът да не е празен (и при бавни)
+        elif avg_daily_sales <= 0:
+            force = False                      # не се продава и има наличност - не трупаме
         elif cover_trigger and not below_min:
             # над минимума: цяла опаковка само ако наличността наистина няма да стигне
             # до следващата доставка (дните до нея + половин ден резерв)
@@ -213,7 +216,8 @@ def calculate_line(
             force = current_stock < avg_daily_sales * (MIN_PACK_COVER_DAYS + extra_days)
         # бавен артикул, който се поръчва само на цели опаковки: ако една опаковка стига
         # за повече от MAX_PACK_COVER_DAYS дни - не се поръчва автоматично (решава човек)
-        if force and setting.pack_size > 1 and setting.pack_size / avg_daily_sales > MAX_PACK_COVER_DAYS:
+        if (force and current_stock > 0 and avg_daily_sales > 0 and setting.pack_size > 1
+                and setting.pack_size / avg_daily_sales > MAX_PACK_COVER_DAYS):
             force = False
     ordered = round_up_to_pack(
         suggested, setting.pack_size, force_min_pack=force
