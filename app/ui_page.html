@@ -2322,24 +2322,33 @@ function renderPromo() {
   const weak = rows.filter(r => r.uplift != null && r.uplift < 1.1 && r.before_per_day > 0).length;
   const strong = rows.filter(r => r.uplift != null && r.uplift >= 1.5).length;
   const out = rows.filter(r => (r.stores_out || 0) > 0).length;
+  const nodoc = rows.filter(r => (r.nodoc_stores || []).length).length;
+  const shelf = rows.filter(r => (r.shelf_stores || []).length).length;
   const tiles = [["АРТИКУЛИ", fmtN(rows.length), "t", "в акцията", ""], ["ОБОРОТ", fmtE(sum("rev")), "", `${fmtN(sum("units"))} бр. продадени`, "rev"],
     ["ДОПЪЛНИТЕЛНО", fmtN(sum("extra_units")), "", "бр. над нормалните продажби", "extra"],
     ["СИЛЕН ЕФЕКТ", fmtN(strong), "t", "продажбите × 1,5 и повече", "strong"], ["БЕЗ ЕФЕКТ", fmtN(weak), "a", "ръст под 10%", "weak"],
-    ["СВЪРШИЛИ", fmtN(out), "a", "артикули на 0 в някой магазин — с магазините", "out"]];
+    ["СВЪРШИЛИ", fmtN(out), "a", "на 0 и не се продават — с магазините", "out"],
+    ["НЕЗАВЕДЕНИ ДОСТАВКИ", fmtN(nodoc), "a", "на минус, а още се продават — за стоковеда", "nodoc"],
+    ["ПРОВЕРИ РАФТА", fmtN(shelf), "a", "има бройки, а не се продават от дни", "shelf"]];
   $("pmKpis").innerHTML = tiles.map(([l, v, c, sub, k]) => `<div class="tile" ${k ? `data-pm="${k}" style="cursor:pointer${PM.filter === k ? ";outline:2px solid var(--c, #DB2777)" : ""}"` : ""}><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${sub}${k ? " · <u>виж →</u>" : ""}</div></div>`).join("");
   document.querySelectorAll("#pmKpis .tile[data-pm]").forEach(el => el.onclick = () => { const k = el.dataset.pm; PM.filter = PM.filter === k ? "" : k; renderPromo(); });
   const f = PM.filter;
   if (f === "strong") rows = rows.filter(r => r.uplift != null && r.uplift >= 1.5).sort((a, b) => b.uplift - a.uplift);
   else if (f === "weak") rows = rows.filter(r => r.uplift != null && r.uplift < 1.1 && r.before_per_day > 0).sort((a, b) => a.uplift - b.uplift);
   else if (f === "out") rows = rows.filter(r => (r.stores_out || 0) > 0).sort((a, b) => b.stores_out - a.stores_out);
+  else if (f === "nodoc") rows = rows.filter(r => (r.nodoc_stores || []).length).sort((a, b) => b.nodoc_stores.length - a.nodoc_stores.length);
+  else if (f === "shelf") rows = rows.filter(r => (r.shelf_stores || []).length).sort((a, b) => b.shelf_stores.length - a.shelf_stores.length);
   else if (f === "extra") rows = [...rows].sort((a, b) => b.extra_units - a.extra_units);
   else rows = [...rows].sort((a, b) => b.rev - a.rev);
   const up = u => u == null ? `<span class="muted">ново</span>` : `<b class="${u >= 1.5 ? "t" : u < 1.1 ? "low" : ""}">${String(u).replace(".", ",")}</b>`;
-  const outList = r => (r.out_stores && r.out_stores.length) ? `<div class="pmOut" style="display:${f === "out" ? "block" : "none"};color:#B42318;font-size:12.5px;margin-top:4px">🔴 Свършил в: ${r.out_stores.map(esc).join(", ")}</div>` : "";
+  const ln = (show, ico, t, a, col) => (a && a.length) ? `<div class="pmOut" style="display:${show ? "block" : "none"};color:${col};font-size:12.5px;margin-top:4px">${ico} ${t}: ${a.map(esc).join(", ")}</div>` : "";
+  const outList = r => ln(f === "out", "🔴", "Свършил в", r.out_stores, "#B42318")
+    + ln(f === "nodoc", "🟠", "Незаведена доставка (наличност)", r.nodoc_stores, "#B54708")
+    + ln(f === "shelf", "🟡", "Провери рафта", r.shelf_stores, "#7A5A00");
   $("pmBody").innerHTML = rows.slice(0, 600).map(r => `<tr><td>${r.code}</td><td class="name">${esc(r.name)}<div class="muted" style="font-size:12px">${esc(r.group)}</div>${outList(r)}</td><td class="muted">${esc(r.supplier)}</td>
     <td>${r.start}–${r.end}</td><td class="num">${fmtE(r.promo_price)}</td><td class="num">${fmtN(r.before_per_day)}</td><td class="num">${fmtN(r.during_per_day)}</td><td class="num">${r.new ? `<span class="tag warn">започва</span>` : up(r.uplift)}</td>
     <td class="num">${fmtN(r.units)}</td><td class="num">${r.extra_units > 0 ? "+" : ""}${fmtN(r.extra_units)}</td><td class="num">${fmtE(r.rev)}</td><td class="num">${r.margin_pct == null ? "—" : fmtN(r.margin_pct)}</td>
-    <td class="num ${r.stores_out ? "low" : ""}" ${r.stores_out ? `style="cursor:pointer;text-decoration:underline" title="Покажи магазините" onclick="const d=this.parentNode.querySelector('.pmOut'); if(d) d.style.display = d.style.display === 'none' ? 'block' : 'none'"` : ""}>${r.stores_out == null ? "—" : fmtN(r.stores_out)}</td></tr>`).join("")
+    <td class="num ${r.stores_out ? "low" : ""}" ${(r.stores_out || (r.nodoc_stores || []).length || (r.shelf_stores || []).length) ? `style="cursor:pointer;text-decoration:underline" title="Покажи магазините" onclick="this.parentNode.querySelectorAll('.pmOut').forEach(d => d.style.display = d.style.display === 'none' ? 'block' : 'none')"` : ""}>${r.stores_out == null ? "—" : fmtN(r.stores_out)}</td></tr>`).join("")
     || `<tr><td colspan="13" class="empty">${PM.data && PM.data.ready === false ? "Данните още се дърпат…" : "Няма артикули."}</td></tr>`;
 }
 

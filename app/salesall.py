@@ -309,15 +309,35 @@ def campaigns(db: Session, kind: str = "brochure", back_days: int = 45) -> dict:
             camps[(s, e)].append((code, n, float(p or 0), float(d or 0)))
     names = {c: (n, g, sup) for c, n, g, sup in db.execute(text(
         "SELECT code, name, grp, supplier FROM sa_articles")).all()}
-    # свършили: магазини, които са продавали артикула последните 30 дни, а сега наличността е 0 или минус
+    # наличност по магазини за промо артикулите - по продажбите, не само по наличността в Мистрал:
+    #   out   - 0/минус и НЕ се продава       -> наистина свършил
+    #   nodoc - минус, но още се продава       -> стоката е там, доставката не е заведена
+    #   shelf - има бройки, а не се продава по-дълго от нормалното -> фантомна наличност, провери рафта
+    import math
     all_codes = sorted({c for items in camps.values() for c, *_ in items})
-    snames = {x.id: x.name for x in db.execute(select(m.Store)).scalars()}
-    out_st = defaultdict(list)
-    for c, sid in db.execute(text("""
-            WITH sold AS (SELECT store_id, code FROM rg_sa_sales WHERE day > :d AND qty > 0 AND code = ANY(:c) GROUP BY 1, 2)
-            SELECT s.code, s.store_id FROM sold s LEFT JOIN rg_sa_stock st ON st.store_id = s.store_id AND st.code = s.code
-            WHERE COALESCE(st.qty, 0) <= 0"""), {"d": last - timedelta(days=30), "c": all_codes}).all():
-        out_st[c].append(snames.get(sid, str(sid)).replace("м-н ", ""))
+    snames = {x.id: x.name.replace("м-н ", "") for x in db.execute(select(m.Store)).scalars()}
+    stk = {(sid, c): float(q or 0) for sid, c, q in db.execute(text(
+        "SELECT store_id, code, qty FROM rg_sa_stock WHERE code = ANY(:c)"), {"c": all_codes}).all()}
+    out_st, nodoc_st, shelf_st = defaultdict(list), defaultdict(list), defaultdict(list)
+    for sid, c, q30, q7, q2, ls in db.execute(text("""
+            SELECT store_id, code, SUM(qty),
+                   SUM(CASE WHEN day > :l7 THEN qty ELSE 0 END), SUM(CASE WHEN day > :l2 THEN qty ELSE 0 END),
+                   MAX(CASE WHEN qty > 0 THEN day END)
+            FROM rg_sa_sales WHERE day > :d AND code = ANY(:c) GROUP BY 1, 2 HAVING SUM(qty) > 0"""),
+            {"d": last - timedelta(days=30), "l7": last - timedelta(days=7), "l2": last - timedelta(days=2),
+             "c": all_codes}).all():
+        pdy = max(float(q30 or 0) / 30, float(q7 or 0) / 7)
+        q = stk.get((sid, c), 0.0)
+        sold2 = float(q2 or 0)
+        gap = (last - ls).days if ls else 30
+        nm = snames.get(sid, str(sid))
+        if q <= 0:
+            if q < 0 and sold2 > 0:
+                nodoc_st[c].append(f"{nm} ({q:g})")
+            else:
+                out_st[c].append(nm)
+        elif pdy > 0 and gap >= 2 and math.exp(-pdy * gap) < 0.05:
+            shelf_st[c].append(f"{nm} ({q:g} бр., {gap} дни без продажба)")
     outs_all = {c: len(v) for c, v in out_st.items()}
     out = []
     for (s, e), items in sorted(camps.items(), key=lambda x: (x[0][0], x[0][1]), reverse=True):
@@ -350,7 +370,9 @@ def campaigns(db: Session, kind: str = "brochure", back_days: int = 45) -> dict:
                          "units": round(qd), "extra_units": round(qd - bpd * pdays), "rev": round(rd, 2),
                          "margin_pct": round(100 * (rd - kd) / rd, 1) if rd else None,
                          "stores_out": outs_all.get(c, 0) if s <= last <= e else None,
-                         "out_stores": sorted(out_st.get(c, [])) if s <= last <= e else []})
+                         "out_stores": sorted(out_st.get(c, [])) if s <= last <= e else [],
+                         "nodoc_stores": sorted(nodoc_st.get(c, [])) if s <= last <= e else [],
+                         "shelf_stores": sorted(shelf_st.get(c, [])) if s <= last <= e else []})
         rows.sort(key=lambda r: -(r["rev"] or 0))
         out.append({"start": s.strftime("%d.%m.%Y"), "end": e.strftime("%d.%m.%Y"), "days_with_data": pdays,
                     "active": s <= last + timedelta(days=1) <= e, "items": len(rows), "units": sum(r["units"] for r in rows),
