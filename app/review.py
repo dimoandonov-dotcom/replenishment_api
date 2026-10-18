@@ -54,6 +54,31 @@ def _must_days(db: Session, store_id: int, day: date) -> int:
         return 2
 
 
+def _n(x) -> str:
+    return (f"{x:g}" if float(x) == int(x) else f"{x:.1f}").replace(".", ",")
+
+
+def _explain(cat: str, aq: float, oq: float, q: float, sdp: float, must: int, pack: int, why: str) -> str:
+    """Обяснение с думи: какво продава, колко има, колко трябва и кой е прав."""
+    if sdp <= 0:
+        base = f"Няма нито една продажба за последните 14 дни. Наличност {_n(q)} бр."
+    else:
+        base = (f"Продава {_n(sdp)} бр./ден. Наличност {_n(q)} бр. ≈ {_n(max(q, 0) / sdp)} дни. "
+                f"Трябва да стигне за {must} дни (до утрешната доставка и до следващата след нея) = {_n(sdp * must)} бр.")
+    d = lambda x: _n((max(q, 0) + x) / sdp) if sdp > 0 else "—"  # noqa: E731
+    who = f" Ани поръчва {_n(aq)} → стига {d(aq)} дни; MinMaxAI {_n(oq)} → {d(oq)} дни."
+    tail = {
+        "our_miss": " С нашето количество стоката ще свърши преди следващата доставка — права е Ани, грешката е наша.",
+        "our_over": " Наличността и без поръчка стига с поне ден и половина резерв — нашата поръчка е излишна.",
+        "slowpack": f" Рафтът е празен, но кашонът е {pack} бр. — запас за над 2 седмици. Решение: да се зарежда ли.",
+        "ani_miss": " С количеството на Ани стоката ще свърши преди следващата доставка — тук сме прави ние.",
+        "ani_over": " Ани докарва запас за над 10 дни — излишна стока на склад.",
+        "ani_stop": f" Артикулът е спрян за този магазин ({why}), а Ани го поръчва.",
+        "nosale": " Поръчано без продажби — за решение по асортимента (договорка или махаме).",
+    }.get(cat, "")
+    return base + who + tail
+
+
 def build(db: Session, day: date | None = None) -> dict:
     day = day or datetime.now(SOFIA).date()
     start = datetime.combine(day, datetime.min.time(), SOFIA)
@@ -86,8 +111,16 @@ def build(db: Session, day: date | None = None) -> dict:
             for l in po.lines:
                 ours[po.store_id][l.article_id] = float(l.ordered_quantity or 0)
     rows = []
+    sdays = [day - timedelta(days=14 - i) for i in range(14)]          # 14-те дни преди заявката
+    fmt = lambda t: t.astimezone(SOFIA).strftime("%d.%m %H:%M") if t else None  # noqa: E731
     for sid, amap in ani.items():
         must = _must_days(db, sid, day)
+        series = defaultdict(lambda: [0.0] * 14)
+        for aid, dd, q in db.execute(select(m.SalesHistory.article_id, m.SalesHistory.sale_date,
+                                            m.SalesHistory.quantity_sold).where(
+                m.SalesHistory.store_id == sid, m.SalesHistory.sale_date >= sdays[0],
+                m.SalesHistory.sale_date <= sdays[-1])).all():
+            series[aid][(dd - sdays[0]).days] += float(q or 0)
         st = service.stock_as_of(db, sid, stock_at.get(sid) or start + timedelta(hours=6))
         adr = service.load_avg_daily_sales(db, sid)
         sett = {s.article_id: s for s in db.execute(select(m.StoreArticleSetting)
@@ -124,6 +157,11 @@ def build(db: Session, day: date | None = None) -> dict:
             why_stop = ("„Не се поръчва“" if a.no_order else "няма мин/макс" if s is None
                         else "спрян 0-0" if float(s.max_stock) == 0 else "без „да“ в планограмата")
             rows.append({
+                "series": [round(x, 1) for x in series.get(aid, [0.0] * 14)],
+                "min": float(s.min_stock) if s is not None else None,
+                "max": float(s.max_stock) if s is not None else None,
+                "ani_at": fmt(ani_at.get(sid)), "our_at": fmt(stock_at.get(sid)),
+                "explain": _explain(cat, aq, oq, q, sdp, must, int(a.pack_size or 1), why_stop),
                 "cat": cat, "store_id": sid, "store": stores.get(sid, str(sid)), "sku": a.sku,
                 "name": a.supplier_name or a.name, "ani": aq, "ours": oq, "stock": round(q, 1),
                 "per_day": round(sdp, 2), "must_days": must, "pack": int(a.pack_size or 1),
@@ -140,6 +178,7 @@ def build(db: Session, day: date | None = None) -> dict:
     order = {k: i for i, k in enumerate(CATS)}
     rows.sort(key=lambda r: (order[r["cat"]], r["store"], -abs(r["ani"] - r["ours"])))
     return {"ready": True, "day": day.strftime("%d.%m.%Y"), "stores": len(ani), "run_id": run.id if run else None,
+            "series_days": [x.strftime("%d.%m") for x in sdays],
             "ani_units": tot_ani, "our_units": tot_ours, "cats": CATS, "counts": dict(cnt),
             "our_errors": sum(cnt[k] for k in OURS), "rows": rows}
 
