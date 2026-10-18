@@ -309,7 +309,16 @@ def campaigns(db: Session, kind: str = "brochure", back_days: int = 45) -> dict:
             camps[(s, e)].append((code, n, float(p or 0), float(d or 0)))
     names = {c: (n, g, sup) for c, n, g, sup in db.execute(text(
         "SELECT code, name, grp, supplier FROM sa_articles")).all()}
-    outs_all = {c: n for c, n in db.execute(text("SELECT code, COUNT(*) FROM rg_sa_stock WHERE qty <= 0 GROUP BY code")).all()}
+    # свършили: магазини, които са продавали артикула последните 30 дни, а сега наличността е 0 или минус
+    all_codes = sorted({c for items in camps.values() for c, *_ in items})
+    snames = {x.id: x.name for x in db.execute(select(m.Store)).scalars()}
+    out_st = defaultdict(list)
+    for c, sid in db.execute(text("""
+            WITH sold AS (SELECT store_id, code FROM rg_sa_sales WHERE day > :d AND qty > 0 AND code = ANY(:c) GROUP BY 1, 2)
+            SELECT s.code, s.store_id FROM sold s LEFT JOIN rg_sa_stock st ON st.store_id = s.store_id AND st.code = s.code
+            WHERE COALESCE(st.qty, 0) <= 0"""), {"d": last - timedelta(days=30), "c": all_codes}).all():
+        out_st[c].append(snames.get(sid, str(sid)).replace("м-н ", ""))
+    outs_all = {c: len(v) for c, v in out_st.items()}
     out = []
     for (s, e), items in sorted(camps.items(), key=lambda x: (x[0][0], x[0][1]), reverse=True):
         p_end = min(e, last); pdays = max((p_end - s).days + 1, 0)   # 0 = започва днес/предстои, още без продажби
@@ -340,7 +349,8 @@ def campaigns(db: Session, kind: str = "brochure", back_days: int = 45) -> dict:
                          "during_per_day": round(dpd, 1), "uplift": round(dpd / bpd, 2) if bpd else None,
                          "units": round(qd), "extra_units": round(qd - bpd * pdays), "rev": round(rd, 2),
                          "margin_pct": round(100 * (rd - kd) / rd, 1) if rd else None,
-                         "stores_out": outs_all.get(c, 0) if s <= last <= e else None})
+                         "stores_out": outs_all.get(c, 0) if s <= last <= e else None,
+                         "out_stores": sorted(out_st.get(c, [])) if s <= last <= e else []})
         rows.sort(key=lambda r: -(r["rev"] or 0))
         out.append({"start": s.strftime("%d.%m.%Y"), "end": e.strftime("%d.%m.%Y"), "days_with_data": pdays,
                     "active": s <= last + timedelta(days=1) <= e, "items": len(rows), "units": sum(r["units"] for r in rows),

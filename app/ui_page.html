@@ -764,7 +764,7 @@ function rgSelect() {
 }
 function setRegion(v) { RG = v; try { localStorage.setItem("mm_region", v); } catch (e) {} location.reload(); }
 document.addEventListener("DOMContentLoaded", () => {
-  ["tab-turn", "tab-anal", "tab-delist"].forEach(id => {
+  ["tab-turn", "tab-anal", "tab-delist", "tab-promo"].forEach(id => {
     const bar = document.querySelector(`#${id} .bar`);
     if (bar) bar.insertAdjacentHTML("afterbegin", rgSelect());
     else { const t = $(id); if (t) t.insertAdjacentHTML("afterbegin", `<div class="bar">${rgSelect()}</div>`); }
@@ -2325,7 +2325,7 @@ function renderPromo() {
   const tiles = [["АРТИКУЛИ", fmtN(rows.length), "t", "в акцията", ""], ["ОБОРОТ", fmtE(sum("rev")), "", `${fmtN(sum("units"))} бр. продадени`, "rev"],
     ["ДОПЪЛНИТЕЛНО", fmtN(sum("extra_units")), "", "бр. над нормалните продажби", "extra"],
     ["СИЛЕН ЕФЕКТ", fmtN(strong), "t", "продажбите × 1,5 и повече", "strong"], ["БЕЗ ЕФЕКТ", fmtN(weak), "a", "ръст под 10%", "weak"],
-    ["СВЪРШИЛИ", fmtN(out), "a", "артикули на 0 в някой магазин", "out"]];
+    ["СВЪРШИЛИ", fmtN(out), "a", "артикули на 0 в някой магазин — с магазините", "out"]];
   $("pmKpis").innerHTML = tiles.map(([l, v, c, sub, k]) => `<div class="tile" ${k ? `data-pm="${k}" style="cursor:pointer${PM.filter === k ? ";outline:2px solid var(--c, #DB2777)" : ""}"` : ""}><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${sub}${k ? " · <u>виж →</u>" : ""}</div></div>`).join("");
   document.querySelectorAll("#pmKpis .tile[data-pm]").forEach(el => el.onclick = () => { const k = el.dataset.pm; PM.filter = PM.filter === k ? "" : k; renderPromo(); });
   const f = PM.filter;
@@ -2335,10 +2335,11 @@ function renderPromo() {
   else if (f === "extra") rows = [...rows].sort((a, b) => b.extra_units - a.extra_units);
   else rows = [...rows].sort((a, b) => b.rev - a.rev);
   const up = u => u == null ? `<span class="muted">ново</span>` : `<b class="${u >= 1.5 ? "t" : u < 1.1 ? "low" : ""}">${String(u).replace(".", ",")}</b>`;
-  $("pmBody").innerHTML = rows.slice(0, 600).map(r => `<tr><td>${r.code}</td><td class="name">${esc(r.name)}<div class="muted" style="font-size:12px">${esc(r.group)}</div></td><td class="muted">${esc(r.supplier)}</td>
+  const outList = r => (r.out_stores && r.out_stores.length) ? `<div class="pmOut" style="display:${f === "out" ? "block" : "none"};color:#B42318;font-size:12.5px;margin-top:4px">🔴 Свършил в: ${r.out_stores.map(esc).join(", ")}</div>` : "";
+  $("pmBody").innerHTML = rows.slice(0, 600).map(r => `<tr><td>${r.code}</td><td class="name">${esc(r.name)}<div class="muted" style="font-size:12px">${esc(r.group)}</div>${outList(r)}</td><td class="muted">${esc(r.supplier)}</td>
     <td>${r.start}–${r.end}</td><td class="num">${fmtE(r.promo_price)}</td><td class="num">${fmtN(r.before_per_day)}</td><td class="num">${fmtN(r.during_per_day)}</td><td class="num">${r.new ? `<span class="tag warn">започва</span>` : up(r.uplift)}</td>
     <td class="num">${fmtN(r.units)}</td><td class="num">${r.extra_units > 0 ? "+" : ""}${fmtN(r.extra_units)}</td><td class="num">${fmtE(r.rev)}</td><td class="num">${r.margin_pct == null ? "—" : fmtN(r.margin_pct)}</td>
-    <td class="num ${r.stores_out ? "low" : ""}">${r.stores_out == null ? "—" : fmtN(r.stores_out)}</td></tr>`).join("")
+    <td class="num ${r.stores_out ? "low" : ""}" ${r.stores_out ? `style="cursor:pointer;text-decoration:underline" title="Покажи магазините" onclick="const d=this.parentNode.querySelector('.pmOut'); if(d) d.style.display = d.style.display === 'none' ? 'block' : 'none'"` : ""}>${r.stores_out == null ? "—" : fmtN(r.stores_out)}</td></tr>`).join("")
     || `<tr><td colspan="13" class="empty">${PM.data && PM.data.ready === false ? "Данните още се дърпат…" : "Няма артикули."}</td></tr>`;
 }
 
