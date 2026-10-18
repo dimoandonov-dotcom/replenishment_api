@@ -1751,6 +1751,16 @@ async function loadReview() {
   if (!RVK) RVK = (d.counts.our_miss ? "our_miss" : d.counts.our_over ? "our_over" : null);
   renderReview();
 }
+function rvGroups(rows) {
+  /* по магазини: свит ред с броя, при натискане се разгъва */
+  const by = {};
+  rows.forEach(r => (by[r.store] = by[r.store] || []).push(r));
+  return Object.entries(by).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0])).map(([st, rs], gi) =>
+    `<tr class="rvSt" data-g="${gi}" style="cursor:pointer;background:var(--paper,#fffaf3)"><td class="name" colspan="10"><span class="arr">▸</span> <b>${esc(st.replace("м-н ", ""))}</b> <span class="muted">· ${rs.length} арт. · Ани ${fmtN(rs.reduce((a, r) => a + (r.ani || 0), 0))} бр. / ние ${fmtN(rs.reduce((a, r) => a + (r.ours || 0), 0))} бр.</span></td></tr>`
+    + rs.map(r => `<tr class="rvA" data-g="${gi}" style="display:none"><td class="name muted">${esc(st.replace("м-н ", ""))}</td><td class="name">${esc(r.sku)} · ${esc(r.name)}</td><td class="num"><b>${fmtN(r.ani)}</b></td><td class="num"><b>${fmtN(r.ours)}</b></td>
+      <td class="num ${r.stock <= 0 ? "low" : ""}">${fmtN(r.stock)}</td><td class="num">${fmtN(r.per_day)}</td><td class="num">${r.must_days}</td>
+      <td class="num">${r.days_ani == null ? "—" : fmtN(r.days_ani) + " д."}</td><td class="num">${r.days_ours == null ? "—" : fmtN(r.days_ours) + " д."}</td><td style="font-size:12px">${esc(r.why || (r.pack > 1 ? "кашон " + r.pack : ""))}</td></tr>`).join("")).join("");
+}
 function renderReview() {
   const d = RV; if (!d || !d.ready) return;
   document.querySelectorAll("#rvKpis [data-rk]").forEach(el => el.style.outline = el.dataset.rk === RVK ? `3px solid ${RVC[RVK]}` : "");
@@ -1758,9 +1768,12 @@ function renderReview() {
   const rows = d.rows.filter(r => r.cat === RVK);
   $("rvList").innerHTML = `<div class="note" style="margin:6px 0 8px">${esc(RVH[RVK])}</div>
     <div class="scroll"><table><thead><tr><th>Магазин</th><th>Артикул</th><th class="num">Ани</th><th class="num">MinMaxAI</th><th class="num">Наличност</th><th class="num">Продава/ден</th><th class="num" title="До следващата доставка">Трябва за дни</th><th class="num">Стига: Ани</th><th class="num">Стига: ние</th><th>Бележка</th></tr></thead><tbody>
-    ${rows.map(r => `<tr><td class="name">${esc(r.store.replace("м-н ", ""))}</td><td class="name">${esc(r.sku)} · ${esc(r.name)}</td><td class="num"><b>${fmtN(r.ani)}</b></td><td class="num"><b>${fmtN(r.ours)}</b></td>
-      <td class="num ${r.stock <= 0 ? "low" : ""}">${fmtN(r.stock)}</td><td class="num">${fmtN(r.per_day)}</td><td class="num">${r.must_days}</td>
-      <td class="num">${r.days_ani == null ? "—" : fmtN(r.days_ani) + " д."}</td><td class="num">${r.days_ours == null ? "—" : fmtN(r.days_ours) + " д."}</td><td style="font-size:12px">${esc(r.why || (r.pack > 1 ? "кашон " + r.pack : ""))}</td></tr>`).join("") || `<tr><td colspan="10" class="empty">Няма</td></tr>`}</tbody></table></div>`;
+    ${rvGroups(rows) || `<tr><td colspan="10" class="empty">Няма</td></tr>`}</tbody></table></div>`;
+  document.querySelectorAll("#rvList tr.rvSt").forEach(tr => tr.onclick = () => {
+    const open = tr.dataset.open !== "1"; tr.dataset.open = open ? "1" : "";
+    tr.querySelector(".arr").textContent = open ? "▾" : "▸";
+    document.querySelectorAll(`#rvList tr.rvA[data-g="${tr.dataset.g}"]`).forEach(x => x.style.display = open ? "" : "none");
+  });
 }
 
 function initCmp() {
