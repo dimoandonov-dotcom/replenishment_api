@@ -957,3 +957,49 @@ def planogram_only(db: Session, apply: bool = True) -> dict:
 def planogram_only_endpoint(apply: bool = False, db: Session = Depends(get_db)):
     """Само артикулите от планограмата. apply=false - само преглед."""
     return planogram_only(db, apply)
+
+
+class FromMistralItem(BaseModel):
+    sku: str
+    pack_size: int = Field(1, ge=1)
+    category_like: str | None = None    # SKU на подобен артикул - категорията се копира от него
+
+
+@router.post("/articles/from-mistral")
+def articles_from_mistral(items: list[FromMistralItem], supplier_id: int = 1, db: Session = Depends(get_db)):
+    """Нови артикули в номенклатурата по кода им в Мистрал (име и доставна цена оттам)."""
+    from . import mistral
+    codes = [int(i.sku) for i in items if i.sku.isdigit()]
+    if not codes:
+        raise HTTPException(400, "Няма кодове")
+    with mistral.connect() as conn:
+        cur = conn.cursor()
+        cur.execute(f"""SELECT MATERIALCODE AS c, MAX(MATERIAL) AS n, MAX(LASTDELIVERYPRICE) AS p
+                        FROM MATERIAL WITH (NOLOCK) WHERE MATERIALCODE IN ({','.join(map(str, codes))})
+                        GROUP BY MATERIALCODE""")
+        mi = {str(r["c"]): r for r in cur.fetchall()}
+    out = []
+    for it in items:
+        r = mi.get(it.sku)
+        if r is None:
+            out.append({"sku": it.sku, "status": "няма го в Мистрал"})
+            continue
+        a = db.execute(select(m.Article).where(m.Article.sku == it.sku)).scalar_one_or_none()
+        created = a is None
+        if created:
+            a = m.Article(sku=it.sku, name=(r["n"] or it.sku).strip(), default_supplier_id=supplier_id, pack_size=it.pack_size)
+            db.add(a)
+        a.supplier_name = a.supplier_name or (r["n"] or "").strip()
+        a.pack_size = it.pack_size
+        a.is_active = True
+        if r["p"] is not None and not a.delivery_price:
+            a.delivery_price = float(r["p"])
+        if it.category_like:
+            like = db.execute(select(m.Article).where(m.Article.sku == it.category_like)).scalar_one_or_none()
+            if like is not None:
+                a.category = like.category
+        db.flush()
+        out.append({"sku": it.sku, "name": a.name, "pack": a.pack_size, "price": a.delivery_price,
+                    "category": a.category, "status": "добавен" if created else "обновен"})
+    db.commit()
+    return out
