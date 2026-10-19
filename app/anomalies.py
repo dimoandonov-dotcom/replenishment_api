@@ -533,29 +533,56 @@ def _items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict
             else:
                 v[1] += max(-float(q or 0), 0.0)
         found = []
+        mx4 = {(x.store_id, x.article_id): float(x.max_stock)
+               for x in db.execute(select(m.StoreArticleSetting)).scalars().all()}
+        recent_any = defaultdict(set)          # какво изобщо е поръчвано в магазина (Ани/MinMaxAI) около деня
+        for (s_, d_), v in ani4.items():
+            for dd in range(0, 4):
+                recent_any[(s_, d_ + timedelta(days=dd))] |= set(v)
+        for (s_, d_), v in ours4.items():
+            recent_any[(s_, d_)] |= {a for a, l in v.items() if float(l.ordered_quantity or 0) > 0}
+
+        def qmatch(a, b):
+            return a > 0 and b > 0 and (abs(a - b) < 0.01 or abs(a - 2 * b) < 0.01 or abs(2 * a - b) < 0.01)
+
         for (sid, num, d, dn), lines in docs.items():
             ani_o = ani4.get((sid, d))
+            po = ours4.get((sid, d)) or {}
             if ani_o:
                 need = {a: q for a, q in ani_o.items() if q > 0}
                 src = "Ани"
             else:
-                po = ours4.get((sid, d)) or {}
+                # без заявка от Ани (напр. Надежда): само артикули на 0, които MinMaxAI е предложил
                 need = {a: float(l.ordered_quantity) for a, l in po.items()
                         if float(l.ordered_quantity or 0) > 0 and float(l.current_stock or 0) <= 0}
-                src = "MinMaxAI (наличност 0)"
-                if not need:
-                    continue
-            ordered_any = set(need) | set((ani4.get((sid, d - timedelta(days=1))) or {})) | set(ours4.get((sid, d)) or {})
+                src = "MinMaxAI, наличност 0"
+            if not need:
+                continue
             booked = {a: v[0] for a, v in lines.items() if v[0] > 0}
             net = {a: v[0] - v[1] for a, v in lines.items()}
-            missing = [a for a in need if net.get(a, 0) <= 0.01 and a not in booked]
-            extra = [a for a, q in net.items() if q > 0.01 and a not in ordered_any]
-            fixed_extra = [a for a in booked if a not in ordered_any and net.get(a, 0) <= 0.01]
-            if missing and extra:
-                found.append((sid, d, dn, src, missing, extra, False))
-            elif fixed_extra and any(a in need for a in booked if lines[a][1] <= 0.01):
-                # документът е поправен по-късно (сторниран е непоръчаният) - показваме за сведение
-                found.append((sid, d, dn, src, [a for a in need if a in booked][:3], fixed_extra, True))
+            missing = {a: q for a, q in need.items() if a not in booked}
+            # заведено, но никой не го е поръчвал и магазинът не е имал нужда (наличността над макса)
+            extra = {}
+            for a, q in booked.items():
+                if a in recent_any[(sid, d)] or a in need:
+                    continue
+                pl = po.get(a)
+                st_before = float(pl.current_stock) if pl is not None else None
+                if st_before is not None and st_before < mx4.get((sid, a), 0):
+                    continue
+                extra[a] = q
+            # замяна = липсващ и непоръчан със същото количество (или ×2 - целият документ удвоен)
+            prs = [(y, x) for y, qy in missing.items() for x, qx in extra.items() if qmatch(qx, qy)]
+            if prs and len(prs) <= 3:
+                fx = all(net.get(x, 0) <= 0.01 for _, x in prs)
+                found.append((sid, d, dn, src, [y for y, _ in prs], [x for _, x in prs], fx))
+            # поправен документ: непоръчаният е сторниран изцяло, а нужният е вече заведен
+            elif not prs:
+                st_full = [a for a in booked if a not in need and a not in recent_any[(sid, d)] and net.get(a, 0) <= 0.01]
+                added = [a for a in need if a in booked and lines[a][1] <= 0.01]
+                prs2 = [(y, x) for y in added for x in st_full if qmatch(booked[x], need[y])]
+                if prs2 and len(prs2) <= 2:
+                    found.append((sid, d, dn, src, [y for y, _ in prs2], [x for _, x in prs2], True))
         pairs = defaultdict(set)
         for sid, d, dn, src, mis, ext, fx in found:
             for y in mis:
