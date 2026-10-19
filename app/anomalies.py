@@ -40,6 +40,7 @@ KIND = {
     "suspicious_delivery": "Подозрително голяма доставка (OCR?)",
     "double_delivery": "Двойно заведена доставка",
     "ocr_repeat": "Повтаряща се OCR грешка",
+    "ocr_swap": "OCR замяна: заведен друг артикул",
 }
 PHANTOM_DAYS = 4
 
@@ -509,6 +510,69 @@ def _items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict
                             "day": d.strftime("%d.%m"), "fixed": fx is not None,
                             "info": f"заведено {qin:g} бр. в {len({s_ for s_, _, _ in occ})} магазина (при макс {m_:g}) — "
                                     f"едно и също количество навсякъде" + ((f" · {how}{fx:g} бр." if how.endswith("−") else f" · {how} {fx:g} бр.") if fx is not None else "")})
+    except Exception:
+        db.rollback()
+
+    # OCR замяна: в една доставка на НДК поръчан (и нужен) артикул липсва, а е заведен непоръчан.
+    # Пример: Надежда 14.10 - вместо 22377 Капи Хепи 1,25л е заведен 15906 Фюз Тий 500мл ->
+    # Капи стои на 0 (не се поръчва пак правилно), а Фюз Тий има фантомна наличност.
+    try:
+        from . import deliveries as _dl
+        dsince4 = today - timedelta(days=max(days, 7))
+        ani4 = _dl._ani(db, dsince4)
+        ours4 = _dl._ours(db, dsince4)
+        docs = defaultdict(lambda: defaultdict(lambda: [0.0, 0.0]))     # (sid, num, day, doc) -> aid -> [заведено, сторно]
+        for sid, aid, d, op, num, q, dn in db.execute(text("""
+                SELECT store_id, article_id, day, optype, op_num, qty, doc_num FROM move_docs
+                WHERE optype IN (2, 24) AND day >= :d AND partner ILIKE '%НДК%'"""), {"d": dsince4}).all():
+            if (store_id and sid != store_id) or sid not in stores or aid not in arts or "АМБАЛАЖ" in name(aid).upper():
+                continue
+            v = docs[(sid, num, d, dn)][aid]
+            if op == 2:
+                v[0] += max(float(q or 0), 0.0)
+            else:
+                v[1] += max(-float(q or 0), 0.0)
+        found = []
+        for (sid, num, d, dn), lines in docs.items():
+            ani_o = ani4.get((sid, d))
+            if ani_o:
+                need = {a: q for a, q in ani_o.items() if q > 0}
+                src = "Ани"
+            else:
+                po = ours4.get((sid, d)) or {}
+                need = {a: float(l.ordered_quantity) for a, l in po.items()
+                        if float(l.ordered_quantity or 0) > 0 and float(l.current_stock or 0) <= 0}
+                src = "MinMaxAI (наличност 0)"
+                if not need:
+                    continue
+            ordered_any = set(need) | set((ani4.get((sid, d - timedelta(days=1))) or {})) | set(ours4.get((sid, d)) or {})
+            booked = {a: v[0] for a, v in lines.items() if v[0] > 0}
+            net = {a: v[0] - v[1] for a, v in lines.items()}
+            missing = [a for a in need if net.get(a, 0) <= 0.01 and a not in booked]
+            extra = [a for a, q in net.items() if q > 0.01 and a not in ordered_any]
+            fixed_extra = [a for a in booked if a not in ordered_any and net.get(a, 0) <= 0.01]
+            if missing and extra:
+                found.append((sid, d, dn, src, missing, extra, False))
+            elif fixed_extra and any(a in need for a in booked if lines[a][1] <= 0.01):
+                # документът е поправен по-късно (сторниран е непоръчаният) - показваме за сведение
+                found.append((sid, d, dn, src, [a for a in need if a in booked][:3], fixed_extra, True))
+        pairs = defaultdict(set)
+        for sid, d, dn, src, mis, ext, fx in found:
+            for y in mis:
+                for x in ext:
+                    pairs[(x, y)].add(sid)
+        for sid, d, dn, src, mis, ext, fx in found:
+            rep = max((len(pairs[(x, y)]) for y in mis for x in ext), default=1)
+            nm = lambda a: f"{sku(a)} {name(a)}"  # noqa: E731
+            ext_txt = "; ".join(f"{nm(a)}" for a in ext[:4])
+            info = (f"доставка № {dn or '—'}: поръчано ({src}), а не е заведено: "
+                    + "; ".join(nm(a) for a in mis[:4]) + f" · вместо това е заведено непоръчано: {ext_txt}"
+                    + (f" · ⚠ същата замяна в {rep} магазина" if rep >= 2 else "")
+                    + (" · ✅ документът е поправен" if fx else " · провери документа и коригирай"))
+            out.append({"kind": "ocr_swap", "store_id": sid, "store": stores[sid], "sku": sku(mis[0]) if mis else "",
+                        "name": (name(mis[0]) if mis else "") + (f" ⇄ {name(ext[0])}" if ext else ""),
+                        "qty": len(mis) + len(ext), "eur": 0.0 if fx else round(-sum(price(a) for a in ext), 2),
+                        "day": d.strftime("%d.%m"), "fixed": fx, "info": info})
     except Exception:
         db.rollback()
 
