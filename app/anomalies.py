@@ -596,6 +596,8 @@ def _items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict
                     continue
                 seen_y.add(y); seen_x.add(x)
                 rep_n = len(pairs[(y, x)])
+                if rep_n < 2:
+                    continue          # само повтарящите се замени (в 2+ магазина) - единичните са шум
                 out.append({"kind": "ocr_swap", "store_id": sid, "store": stores[sid], "sku": sku(y),
                             "name": f"{name(y)} → {name(x)}",
                             "qty": qx.get(x, 0.0), "eur": 0.0 if fx else round(-qx.get(x, 0.0) * price(x), 2),
