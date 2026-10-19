@@ -575,31 +575,36 @@ def _items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict
             prs = [(y, x) for y, qy in missing.items() for x, qx in extra.items() if qmatch(qx, qy)]
             if prs and len(prs) <= 3:
                 fx = all(net.get(x, 0) <= 0.01 for _, x in prs)
-                found.append((sid, d, dn, src, [y for y, _ in prs], [x for _, x in prs], fx))
+                found.append((sid, d, dn, src, prs, {x: booked[x] for _, x in prs}, fx))
             # поправен документ: непоръчаният е сторниран изцяло, а нужният е вече заведен
             elif not prs:
                 st_full = [a for a in booked if a not in need and a not in recent_any[(sid, d)] and net.get(a, 0) <= 0.01]
                 added = [a for a in need if a in booked and lines[a][1] <= 0.01]
                 prs2 = [(y, x) for y in added for x in st_full if qmatch(booked[x], need[y])]
                 if prs2 and len(prs2) <= 2:
-                    found.append((sid, d, dn, src, [y for y, _ in prs2], [x for _, x in prs2], True))
+                    found.append((sid, d, dn, src, prs2, {x: booked[x] for _, x in prs2}, True))
         pairs = defaultdict(set)
-        for sid, d, dn, src, mis, ext, fx in found:
-            for y in mis:
-                for x in ext:
-                    pairs[(x, y)].add(sid)
-        for sid, d, dn, src, mis, ext, fx in found:
-            rep = max((len(pairs[(x, y)]) for y in mis for x in ext), default=1)
-            nm = lambda a: f"{sku(a)} {name(a)}"  # noqa: E731
-            ext_txt = "; ".join(f"{nm(a)}" for a in ext[:4])
-            info = (f"доставка № {dn or '—'}: поръчано ({src}), а не е заведено: "
-                    + "; ".join(nm(a) for a in mis[:4]) + f" · вместо това е заведено непоръчано: {ext_txt}"
-                    + (f" · ⚠ същата замяна в {rep} магазина" if rep >= 2 else "")
-                    + (" · ✅ документът е поправен" if fx else " · провери документа и коригирай"))
-            out.append({"kind": "ocr_swap", "store_id": sid, "store": stores[sid], "sku": sku(mis[0]) if mis else "",
-                        "name": (name(mis[0]) if mis else "") + (f" ⇄ {name(ext[0])}" if ext else ""),
-                        "qty": len(mis) + len(ext), "eur": 0.0 if fx else round(-sum(price(a) for a in ext), 2),
-                        "day": d.strftime("%d.%m"), "fixed": fx, "info": info})
+        for sid, d, dn, src, prs, qx, fx in found:
+            for y, x in prs:
+                pairs[(y, x)].add(sid)
+        for sid, d, dn, src, prs, qx, fx in found:
+            # най-повтарящата се замяна в документа първа; по една замяна на ред
+            prs = sorted(set(prs), key=lambda p_: -len(pairs[p_]))
+            seen_y, seen_x = set(), set()
+            for y, x in prs:
+                if y in seen_y or x in seen_x:
+                    continue
+                seen_y.add(y); seen_x.add(x)
+                rep_n = len(pairs[(y, x)])
+                out.append({"kind": "ocr_swap", "store_id": sid, "store": stores[sid], "sku": sku(y),
+                            "name": f"{name(y)} → {name(x)}",
+                            "qty": qx.get(x, 0.0), "eur": 0.0 if fx else round(-qx.get(x, 0.0) * price(x), 2),
+                            "day": d.strftime("%d.%m"), "fixed": fx, "repeat": rep_n,
+                            "info": (f"доставка № {dn or '—'}: поръчано ({src}) {sku(y)} {name(y)}, "
+                                     f"а е заведено {sku(x)} {name(x)} — {qx.get(x, 0):g} бр."
+                                     + (f" · ⚠ същата замяна в {rep_n} магазина" if rep_n >= 2 else "")
+                                     + (" · ✅ документът е поправен" if fx else
+                                        " · сторнирай грешния артикул и заведи поръчания"))})
     except Exception:
         db.rollback()
 
