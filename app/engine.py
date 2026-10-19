@@ -129,6 +129,9 @@ def needs_reorder(
         Минимумът остава като предпазен праг: под него се поръчва поне
         една опаковка, дори нуждата да е малка.
     """
+    # спрян (макс 0, напр. 0-0) -> никога не се поръчва, дори при минусова наличност
+    if max_stock is not None and max_stock <= 0:
+        return False
     # свършил (0 или минус) и е в асортимента (макс > 0) -> винаги се разглежда за поръчка
     if current_stock <= 0 and (max_stock or 0) > 0:
         return True
@@ -177,6 +180,8 @@ def calculate_line(
     max_target = (
         setting.max_stock if effective_max is None else effective_max
     )
+    if float(setting.max_stock or 0) <= 0:
+        return None            # спрян 0-0 - не се поръчва
 
     if not cover_trigger and not needs_reorder(
         current_stock, setting.min_stock, mode, max_target
