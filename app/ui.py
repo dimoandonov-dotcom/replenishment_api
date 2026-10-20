@@ -593,6 +593,13 @@ def ui_compare_review(day: date | None = None, fmt: str = Query("json", pattern=
     return review.build(db, day)
 
 
+@router.post("/orders/apply-ani")
+def orders_apply_ani(day: date | None = None, dry: bool = True, db: Session = Depends(get_db)):
+    """Където е права Ани (наши грешки в дневния преглед) - нашата заявка за деня взема нейното количество."""
+    from . import review
+    return review.apply_ani(db, day, dry)
+
+
 @router.get("/ui/compare")
 def ui_compare(days: int = Query(14, ge=1, le=120), db: Session = Depends(get_db)):
     from . import compare

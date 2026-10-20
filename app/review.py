@@ -214,3 +214,45 @@ def text_report(db: Session, day: date | None = None) -> str:
         L.append("")
     L.append("Подробно: https://minmaxai.up.railway.app/#cmp")
     return "\n".join(L)
+
+
+def apply_ani(db: Session, day: date | None = None, dry: bool = True, cats: tuple = OURS) -> dict:
+    """Където е права Ани (наши грешки) - количеството в нашата заявка става като нейното."""
+    d = build(db, day)
+    if not d.get("ready") or not d.get("run_id"):
+        return {"applied": 0, "reason": d.get("reason") or "няма наше пускане за деня", "changes": []}
+    skus = {a.sku: a for a in db.execute(select(m.Article)).scalars().all()}
+    pos = {po.store_id: po for po in db.execute(select(m.PurchaseOrder).where(
+        m.PurchaseOrder.dispatch_run_id == d["run_id"])).scalars()}
+    changes = []
+    for r in d["rows"]:
+        if r["cat"] not in cats:
+            continue
+        a = skus.get(r["sku"]); po = pos.get(r["store_id"])
+        if a is None or po is None:
+            continue
+        line = next((l for l in po.lines if l.article_id == a.id), None)
+        old = float(line.ordered_quantity) if line is not None else 0.0
+        new = float(r["ani"])
+        if abs(old - new) < 0.01:
+            continue
+        changes.append({"store": r["store"], "sku": r["sku"], "name": r["name"], "cat": r["cat"],
+                        "ours": old, "ani": new, "stock": r["stock"], "per_day": r["per_day"]})
+        if dry:
+            continue
+        note = f"по Ани (преглед: беше {old:g})"
+        if line is None and new > 0:
+            s = db.get(m.StoreArticleSetting, (r["store_id"], a.id))
+            db.add(m.PurchaseOrderLine(purchase_order_id=po.id, article_id=a.id, current_stock=r["stock"],
+                                       min_stock=float(s.min_stock) if s else 0, max_stock=float(s.max_stock) if s else 0,
+                                       effective_max=float(s.max_stock) if s else 0, suggested_quantity=new,
+                                       ordered_quantity=int(round(new)), pack_size=int(a.pack_size or 1), notes=note))
+        elif line is not None and new <= 0:
+            db.delete(line)
+        elif line is not None:
+            line.ordered_quantity = int(round(new))
+            line.notes = ((line.notes or "") + " · " + note).strip(" ·")
+    if not dry:
+        db.commit()
+    return {"day": d["day"], "run_id": d["run_id"], "dry": dry, "applied": 0 if dry else len(changes),
+            "changes": changes}
