@@ -58,7 +58,7 @@ def in_transit(db: Session, now: datetime | None = None) -> dict[tuple[int, int]
             rev[sid].append(loc)
         sids = {sid for sid, _ in pending}
         L = ",".join(str(loc) for sid in sids for loc in rev.get(sid, []))
-        C = ",".join(sorted({str(codes[aid]) for _, aid in pending if aid in codes}))
+        C = ",".join(sorted(str(c) for c in codes.values()))
         if L and C:
             cur.execute(f"""SELECT LOCATIONID AS loc, MATERIALCODE AS code, MAX(CAST(OPERATIONDATE AS date)) AS d
                             FROM MATERIALQTYLOG WITH (NOLOCK)
@@ -72,10 +72,16 @@ def in_transit(db: Session, now: datetime | None = None) -> dict[tuple[int, int]
                 d = r["d"] if not hasattr(r["d"], "date") else r["d"].date()
                 if d and (delivered.get((sid, aid)) is None or d > delivered[(sid, aid)]):
                     delivered[(sid, aid)] = d
+    # По магазин: ако след заявката има КАКВАТО И ДА Е фактура от НДК за магазина, доставката е дошла -
+    # липсващите редове в нея са недоставени (няма ги в НДК / OCR грешка), не са „в път“.
+    last_inv = {}
+    for (sid, aid), d in delivered.items():
+        if last_inv.get(sid) is None or d > last_inv[sid]:
+            last_inv[sid] = d
     out = {}
     for (sid, aid), p in pending.items():
-        dd = delivered.get((sid, aid))
-        if dd is not None and dd >= p["day"] + timedelta(days=1):
-            continue                                                  # фактурата вече е в Мистрал
+        li = last_inv.get(sid)
+        if li is not None and li >= p["day"] + timedelta(days=1):
+            continue                                                  # магазинът е доставен - фактурата е в Мистрал
         out[(sid, aid)] = {"qty": p["qty"], "ordered": p["day"].strftime("%d.%m")}
     return out
