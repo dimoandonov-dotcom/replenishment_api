@@ -46,6 +46,24 @@ def in_transit(db: Session, now: datetime | None = None) -> dict[tuple[int, int]
                 p["qty"] += q
             else:
                 pending[(o.store_id, aid)] = {"qty": q, "day": made}
+    # магазини, за които НАШАТА заявка е истинската (напр. Надежда - заявката ѝ не минава през Ани)
+    import os
+    own = {int(x) for x in os.getenv("OUR_ORDER_STORES", "46").split(",") if x.strip().isdigit()}
+    have_ani = {sid for sid, _ in pending}
+    for po in db.execute(select(m.PurchaseOrder).where(
+            m.PurchaseOrder.store_id.in_(own), m.PurchaseOrder.created_at >= since,
+            m.PurchaseOrder.created_at < until)).scalars().all():
+        if po.store_id in have_ani:
+            continue
+        made = po.created_at.astimezone(SOFIA).date()
+        for ln in po.lines:
+            q = float(ln.ordered_quantity or 0)
+            if q <= 0:
+                continue
+            p = pending.get((po.store_id, ln.article_id))
+            if p and p["day"] > made:
+                continue
+            pending[(po.store_id, ln.article_id)] = {"qty": q, "day": made}
     if not pending:
         return {}
     # доставено ли е: фактура (вид 2) за артикула в магазина с дата от деня на доставката (поръчката + 1) нататък
