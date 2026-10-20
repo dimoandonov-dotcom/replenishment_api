@@ -648,6 +648,11 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <button id="cUp">Качи</button>
     <span class="msg" id="cMsg"></span>
   </div>
+  <details id="pilotBox" style="margin:0 0 14px;background:var(--paper,#fffaf3);border:1px solid var(--line,#e7dccb);border-radius:14px;padding:10px 14px">
+    <summary style="cursor:pointer;font-weight:600">🧪 Пилот: магазини, които поръчват по MinMaxAI <span class="note" id="pilotN"></span></summary>
+    <div class="note" style="margin:8px 0">Отметнатите магазини: заявката на MinMaxAI е истинската (НДК доставя по нея), докато няма фактура тя се брои като стока в път.</div>
+    <div id="pilotList" style="display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px"></div>
+  </details>
   <div class="head"><h2>📋 Дневен преглед: къде грешим ние и къде е права Ани</h2><span class="note">нашата сутрешна заявка ↔ заявките на Ани за деня · цъкни на плочка</span></div>
   <div class="bar"><input type="date" id="rvDay"><button id="rvGo">↻ Обнови</button><span class="note" id="rvInfo"></span></div>
   <div class="board" id="rvKpis"></div>
@@ -1793,7 +1798,16 @@ function renderReview() {
   });
 }
 
+async function loadPilot() {
+  const rows = await api("/ui/pilot").catch(() => []);
+  $("pilotN").textContent = `(${rows.filter(r => r.pilot).length})`;
+  $("pilotList").innerHTML = rows.map(r => `<label style="white-space:nowrap"><input type="checkbox" data-ps="${r.store_id}" ${r.pilot ? "checked" : ""}> ${esc(r.store.replace("м-н ", ""))}${r.since ? ` <span class="muted">от ${r.since}</span>` : ""}</label>`).join("");
+  document.querySelectorAll("#pilotList [data-ps]").forEach(cb => cb.onchange = async () => {
+    await api(`/ui/pilot/${cb.dataset.ps}?on=${cb.checked}`, { method: "POST" }); loadPilot();
+  });
+}
 function initCmp() {
+  loadPilot();
   $("rvGo").onclick = loadReview; $("rvDay").onchange = loadReview; loadReview();
   $("cDays").onchange = () => { loadCmp(); loadDeliv(); };
   loadDeliv();

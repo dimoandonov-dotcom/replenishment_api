@@ -47,14 +47,14 @@ def in_transit(db: Session, now: datetime | None = None) -> dict[tuple[int, int]
             else:
                 pending[(o.store_id, aid)] = {"qty": q, "day": made}
     # магазини, за които НАШАТА заявка е истинската (напр. Надежда - заявката ѝ не минава през Ани)
-    import os
-    own = {int(x) for x in os.getenv("OUR_ORDER_STORES", "46").split(",") if x.strip().isdigit()}
-    have_ani = {sid for sid, _ in pending}
+    from .pilot import ids as _pilot_ids
+    own = _pilot_ids(db)
+    for k in [k for k in pending if k[0] in own]:
+        del pending[k]
     for po in db.execute(select(m.PurchaseOrder).where(
             m.PurchaseOrder.store_id.in_(own), m.PurchaseOrder.created_at >= since,
             m.PurchaseOrder.created_at < until)).scalars().all():
-        if po.store_id in have_ani:
-            continue
+        # пилотен магазин: нашата заявка е истинската (заявката на Ани за него не се брои)
         made = po.created_at.astimezone(SOFIA).date()
         for ln in po.lines:
             q = float(ln.ordered_quantity or 0)

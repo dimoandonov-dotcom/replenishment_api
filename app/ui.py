@@ -593,6 +593,19 @@ def ui_compare_review(day: date | None = None, fmt: str = Query("json", pattern=
     return review.build(db, day)
 
 
+@router.get("/ui/pilot")
+def ui_pilot(db: Session = Depends(get_db)):
+    from . import pilot
+    return pilot.listing(db)
+
+
+@router.post("/ui/pilot/{store_id}")
+def ui_pilot_set(store_id: int, on: bool = True, db: Session = Depends(get_db)):
+    """Магазин в пилота: заявката на MinMaxAI е истинската (НДК доставя по нея)."""
+    from . import pilot
+    return pilot.set_pilot(db, store_id, on)
+
+
 @router.get("/ui/transit")
 def ui_transit(db: Session = Depends(get_db)):
     """Стока в път: заявки на Ани, за които в Мистрал още няма фактура от НДК."""
