@@ -459,10 +459,29 @@ def run_dispatch(
 
     orders_created = 0
     lines_created = 0
+    # стока в път: заявка на Ани, за която НДК още няма фактура в Мистрал - брои се като наличност
+    try:
+        from .transit import in_transit
+        transit = in_transit(db)
+    except Exception as e:  # без връзка с Мистрал - продължаваме без нея
+        db.rollback()
+        print("in_transit:", type(e).__name__, e)
+        transit = {}
     for sid in store_ids:
+        tr = {aid: v for (s_, aid), v in transit.items() if s_ == sid}
+        override = None
+        if tr:
+            override = latest_stock_map(db, sid)
+            for aid, v in tr.items():
+                override[aid] = max(float(override.get(aid, 0.0) or 0.0), 0.0) + v["qty"]
         res = calculate_for_store(
-            db, sid, order_date, supplier_id, respect_schedule
+            db, sid, order_date, supplier_id, respect_schedule, stock_override=override
         )
+        for ln in res.lines:
+            v = tr.get(ln.article_id)
+            if v:
+                ln.notes = (f"🚚 в път {v['qty']:g} бр. (заявка от {v['ordered']}, още без фактура)"
+                            + (" · " + ln.notes if ln.notes else ""))
         if not res.lines:
             continue
         pos = persist_orders(db, res, sid, dispatch_run_id=run.id)

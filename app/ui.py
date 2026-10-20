@@ -593,6 +593,21 @@ def ui_compare_review(day: date | None = None, fmt: str = Query("json", pattern=
     return review.build(db, day)
 
 
+@router.get("/ui/transit")
+def ui_transit(db: Session = Depends(get_db)):
+    """Стока в път: заявки на Ани, за които в Мистрал още няма фактура от НДК."""
+    from .transit import in_transit
+    stores = {x.id: x.name for x in db.execute(select(m.Store)).scalars()}
+    arts = {a.id: a for a in db.execute(select(m.Article)).scalars()}
+    rows = [{"store": stores.get(s_), "sku": arts[a].sku if a in arts else "", "name": (arts[a].supplier_name or arts[a].name) if a in arts else "",
+             "qty": v["qty"], "ordered": v["ordered"]} for (s_, a), v in in_transit(db).items()]
+    rows.sort(key=lambda r: (r["store"] or "", r["name"]))
+    by = {}
+    for r in rows:
+        by[r["store"]] = by.get(r["store"], 0) + 1
+    return {"lines": len(rows), "stores": by, "rows": rows}
+
+
 @router.post("/orders/apply-ani")
 def orders_apply_ani(day: date | None = None, dry: bool = True, db: Session = Depends(get_db)):
     """Където е права Ани (наши грешки в дневния преглед) - нашата заявка за деня взема нейното количество."""
