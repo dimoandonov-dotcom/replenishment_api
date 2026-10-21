@@ -154,6 +154,14 @@ async def _require_auth(request: Request, call_next):
               or (request.method == "POST" and p == "/ui/export-xlsx"))
         if not ok:
             return JSONResponse(status_code=403, content={"detail": "Профилът е само за „Анализи“"})
+    # профили „само четене" (напр. claude - друг Claude проект): само GET на наличности и анализи
+    if user0 is not None and user0.lower() in readonly_users():
+        ro_prefixes = ("/stock/", "/stores", "/articles", "/settings/", "/ui/analytics", "/ui/article-check",
+                       "/ui/stock-compare", "/ui/negative-selling", "/ui/article-deliveries", "/ui/anomalies",
+                       "/ui/not-ordered/", "/ui/deliveries/", "/ui/me", "/ui/version", "/ui/summary", "/ui/transit")
+        if request.method != "GET" or not (p == "/" or p.startswith(ro_prefixes)):
+            return JSONResponse(status_code=403, content={"detail": "Профилът е само за четене на наличности и анализи"})
+        return await call_next(request)
     # профили „само Аномалии" (напр. Надежда - ревизори и доставчици)
     if user0 is not None and user0.lower() in anomalies_only_users():
         ok = ((request.method == "GET" and (p.startswith("/ui/anomalies") or p.startswith("/ui/mistral/")
@@ -171,6 +179,13 @@ async def _require_auth(request: Request, call_next):
 def analytics_users() -> set[str]:
     import os as __os
     raw = __os.getenv("ANALYTICS_USERS", "dimo,asen,tedi")
+    return {x.strip().lower() for x in raw.split(",") if x.strip()}
+
+
+def readonly_users() -> set[str]:
+    """Само четене (GET) на наличности и анализи - напр. „claude“ за друг Claude проект. Спира се с is_active=False."""
+    import os as __os
+    raw = __os.getenv("READONLY_USERS", "claude")
     return {x.strip().lower() for x in raw.split(",") if x.strip()}
 
 
