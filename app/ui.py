@@ -621,7 +621,7 @@ def ui_transit(db: Session = Depends(get_db)):
     return {"lines": len(rows), "stores": by, "rows": rows}
 
 
-@router.get("/ui/compare/ani-stopped")
+@router.get("/ui/ani-stopped")
 def ui_ani_stopped(days: int = Query(14, ge=1, le=60), db: Session = Depends(get_db)):
     """Какво поръчва Ани, а при нас е спряно (Не се поръчва, 0-0, без мин/макс, без планограма)."""
     from . import review
