@@ -256,3 +256,57 @@ def apply_ani(db: Session, day: date | None = None, dry: bool = True, cats: tupl
         db.commit()
     return {"day": d["day"], "run_id": d["run_id"], "dry": dry, "applied": 0 if dry else len(changes),
             "changes": changes}
+
+
+def ani_stopped(db: Session, days: int = 14) -> dict:
+    """Какво поръчва Ани, а при нас е спряно / извън асортимента - по артикул и магазин, за последните N дни."""
+    since = datetime.combine(datetime.now(SOFIA).date() - timedelta(days=days - 1), datetime.min.time(), SOFIA)
+    arts = {a.sku: a for a in db.execute(select(m.Article)).scalars().all()}
+    stores = {s.id: s.name for s in db.execute(select(m.Store)).scalars()}
+    sett = {(s.store_id, s.article_id): s for s in db.execute(select(m.StoreArticleSetting)).scalars().all()}
+    plano = set(db.execute(select(m.Planogram.store_id, m.Planogram.article_id)).all())
+    queue = set(db.execute(select(m.SettingsReviewQueue.store_id, m.SettingsReviewQueue.article_id)
+                           .where(m.SettingsReviewQueue.resolved.is_(False))).all())
+    plano_stores = {s for s, _ in plano}
+    agg = {}
+    for o in db.execute(select(m.ManualOrder).where(m.ManualOrder.received_at >= since,
+                                                    m.ManualOrder.store_id.isnot(None))).scalars():
+        day = o.received_at.astimezone(SOFIA).strftime("%d.%m")
+        for l in db.execute(select(m.ManualOrderLine).where(m.ManualOrderLine.order_id == o.id)).scalars():
+            q = float(l.store_qty or 0)
+            if q <= 0:
+                continue
+            a = arts.get(l.sku)
+            sid = o.store_id
+            if a is None:
+                why = "няма го в НДК номенклатурата"
+            elif a.no_order:
+                why = "„Не се поръчва“" + (f" ({a.no_order_reason})" if a.no_order_reason else "")
+            elif not a.is_active:
+                why = "неактивен артикул"
+            elif (sid, a.id) in queue:
+                why = "чака преглед (без потвърден мин/макс)"
+            elif (sid, a.id) not in sett:
+                why = "няма мин/макс"
+            elif float(sett[(sid, a.id)].max_stock) == 0:
+                why = "спрян 0-0"
+            elif sid in plano_stores and (sid, a.id) not in plano:
+                why = "без „да“ в планограмата"
+            else:
+                continue
+            k = (l.sku, sid)
+            r = agg.setdefault(k, {"sku": l.sku, "name": (a.supplier_name or a.name) if a else (l.name or l.sku),
+                                   "store_id": sid, "store": stores.get(sid, str(sid)), "why": why,
+                                   "times": 0, "qty": 0.0, "days": []})
+            r["times"] += 1; r["qty"] += q
+            if day not in r["days"]:
+                r["days"].append(day)
+    rows = sorted(agg.values(), key=lambda r: (r["name"], r["store"]))
+    by_art = {}
+    for r in rows:
+        b = by_art.setdefault(r["sku"], {"sku": r["sku"], "name": r["name"], "stores": 0, "times": 0, "qty": 0.0,
+                                         "why": {}})
+        b["stores"] += 1; b["times"] += r["times"]; b["qty"] += r["qty"]
+        b["why"][r["why"]] = b["why"].get(r["why"], 0) + 1
+    arts_out = sorted(by_art.values(), key=lambda b: (-b["stores"], -b["times"]))
+    return {"days": days, "articles": arts_out, "rows": rows}
