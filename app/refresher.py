@@ -18,7 +18,8 @@ def status() -> dict:
     f = lambda d: d.astimezone(SOFIA).strftime("%d.%m %H:%M") if d else None  # noqa: E731
     return {"auto_every_min": EVERY_MIN, "auto_hours": f"{HOURS[0]:02d}:00–{HOURS[1]:02d}:00",
             "auto_last_run": f(_state["last_run"]), "auto_last_error": _state["last_error"],
-            "auto_last_inserted": (_state["last_result"] or {}).get("inserted")}
+            "auto_last_inserted": (_state["last_result"] or {}).get("inserted"),
+            "dispatch_0930": _state.get("dispatch_result")}
 
 
 def _tick():
@@ -74,9 +75,46 @@ def _tick():
     _state["last_run"] = datetime.now(timezone.utc)
 
 
+def _dispatch_check():
+    """09:30 българско време: дневната заявка на MinMaxAI (за утре), ако днес още не е пусната.
+    НДК изписва фактурите за днешната доставка към 8-9 ч. -> в 09:30 наличността вече ги включва."""
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Europe/Sofia")
+    loc = datetime.now(tz)
+    if not ((loc.hour, loc.minute) >= (9, 30) and loc.hour < 13) or _state.get("dispatch_day") == loc.date():
+        return
+    from sqlalchemy import select
+    from . import models as m, mistral, service, alerts
+    from .db import SessionLocal
+    start = datetime.combine(loc.date(), datetime.min.time(), tz)
+    with SessionLocal() as db:
+        try:
+            if db.execute(select(m.DispatchRun.id).where(m.DispatchRun.started_at >= start)).first():
+                _state["dispatch_day"] = loc.date()          # днес вече е пусната (ръчно или от cron)
+                return
+            if mistral.configured():
+                mistral.sync_stock(db)                        # свежа наличност - с днешните фактури
+            run = service.run_dispatch(db, loc.date(), None, None, True)
+            _state["dispatch_day"] = loc.date()
+            _state["dispatch_result"] = {"run_id": run.id, "orders": run.orders_created,
+                                         "lines": run.order_lines_created, "at": loc.strftime("%d.%m %H:%M")}
+            try:
+                alerts.scan_all(db, None, False)
+            except Exception:
+                db.rollback()
+        except Exception as e:
+            db.rollback()
+            _state["dispatch_result"] = f"{type(e).__name__}: {e}"[:300]
+            _state["dispatch_day"] = loc.date()               # да не се върти на всяка минута; виж статуса
+
+
 def _loop():
     time.sleep(60)  # нека сървърът тръгне напълно
     while True:
+        try:
+            _dispatch_check()
+        except Exception as e:
+            _state["dispatch_result"] = f"{type(e).__name__}: {e}"[:300]
         now = datetime.now(SOFIA)
         if HOURS[0] <= now.hour < HOURS[1]:
             last = _state["last_run"]
