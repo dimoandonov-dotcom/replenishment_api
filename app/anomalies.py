@@ -583,6 +583,37 @@ def _items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict
                 prs2 = [(y, x) for y in added for x in st_full if qmatch(booked[x], need[y])]
                 if prs2 and len(prs2) <= 2:
                     found.append((sid, d, dn, src, prs2, {x: booked[x] for _, x in prs2}, True))
+        # Доказателство от продажбите (Надя, 22.10): истинска замяна е само ако ПОРЪЧАНИЯТ артикул
+        # се продава в магазина до 7 дни след доставката (значи физически е дошъл, но е заведен като друг).
+        # Ако не се продава - НДК просто не го е доставил (напр. Старопрамен тъмно -> Шуменско тъмно), не е грешка.
+        # Поправено е и когато след това има ревизия/корекция: + на поръчания и − на заведения.
+        mv7 = defaultdict(lambda: defaultdict(float))     # (sid, aid) -> {"sold": .., "up": .., "days": {...}}
+        for s_, a_, d_, op_, qi_, qo_ in db.execute(text("""SELECT store_id, article_id, day, optype, qty_in, qty_out
+                FROM stock_movements WHERE optype IN (1, 38) AND day >= :d"""), {"d": dsince4 - timedelta(days=1)}).all():
+            mv7[(s_, a_, op_)][d_] += float(qo_ or 0) if op_ == 1 else float(qi_ or 0)
+        for s_, a_, at_, q_ in db.execute(text("""SELECT store_id, article_id, inv_at, diff_qty FROM inventory_results
+                                                  WHERE diff_qty > 0 AND inv_at >= :d"""), {"d": dsince4 - timedelta(days=1)}).all():
+            mv7[(s_, a_, 38)][at_.astimezone(SOFIA).date() if at_ else dsince4] += float(q_)
+
+        def sold_after(sid, aid, d):
+            return sum(v for dd, v in mv7[(sid, aid, 1)].items() if d <= dd <= d + timedelta(days=7))
+
+        def up_after(sid, aid, d):
+            return sum(v for dd, v in mv7[(sid, aid, 38)].items() if dd >= d)
+
+        found2 = []
+        for sid, d, dn, src, prs, qx, fx in found:
+            keep = []
+            for y, x in prs:
+                q_ = qx.get(x, 0.0)
+                if not fx and sold_after(sid, y, d) <= 0 and up_after(sid, y, d) <= 0:
+                    continue              # поръчаното не се продава -> не е дошло (не е OCR грешка)
+                keep.append((y, x))
+                if not fx and q_ > 0 and up_after(sid, y, d) >= 0.8 * q_ and down_after(sid, x, d) >= 0.5 * q_:
+                    fx = "rev"            # оправено с ревизия/корекция
+            if keep:
+                found2.append((sid, d, dn, src, keep, qx, fx))
+        found = found2
         pairs = defaultdict(set)
         for sid, d, dn, src, prs, qx, fx in found:
             for y, x in prs:
@@ -601,11 +632,12 @@ def _items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict
                 out.append({"kind": "ocr_swap", "store_id": sid, "store": stores[sid], "sku": sku(y),
                             "name": f"{name(y)} → {name(x)}",
                             "qty": qx.get(x, 0.0), "eur": 0.0 if fx else round(-qx.get(x, 0.0) * price(x), 2),
-                            "day": d.strftime("%d.%m"), "fixed": fx, "repeat": rep_n,
+                            "day": d.strftime("%d.%m"), "fixed": bool(fx), "repeat": rep_n,
                             "info": (f"доставка № {dn or '—'}: поръчано ({src}) {sku(y)} {name(y)}, "
                                      f"а е заведено {sku(x)} {name(x)} — {qx.get(x, 0):g} бр."
                                      + (f" · ⚠ същата замяна в {rep_n} магазина" if rep_n >= 2 else "")
-                                     + (" · ✅ документът е поправен" if fx else
+                                     + (" · ✅ оправено с ревизия/корекция" if fx == "rev" else
+                                        " · ✅ документът е поправен" if fx else
                                         " · сторнирай грешния артикул и заведи поръчания"))})
     except Exception:
         db.rollback()
