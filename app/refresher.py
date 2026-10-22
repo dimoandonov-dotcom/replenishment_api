@@ -19,7 +19,7 @@ def status() -> dict:
     return {"auto_every_min": EVERY_MIN, "auto_hours": f"{HOURS[0]:02d}:00–{HOURS[1]:02d}:00",
             "auto_last_run": f(_state["last_run"]), "auto_last_error": _state["last_error"],
             "auto_last_inserted": (_state["last_result"] or {}).get("inserted"),
-            "dispatch_0930": _state.get("dispatch_result")}
+            "dispatch_0930": _state.get("dispatch_result"), "ocr_alerts": _state.get("ocr_alerts")}
 
 
 def _tick():
@@ -34,12 +34,25 @@ def _tick():
             # на всеки 2 часа: движенията и документите за 16 дни -> поправените аномалии стават зелени още същия ден
             n = _state.get("ticks", 0) + 1
             _state["ticks"] = n
+            from . import anomalies
             if n % 4 == 1:
-                from . import anomalies
                 anomalies.sync(db, 16)
                 anomalies.detect_duplicate_docs(db, 16)
+            elif 8 <= datetime.now(SOFIA).hour < 20:
+                anomalies.sync(db, 3)          # днешните фактури -> сигнал за OCR замяна до 30 мин
         except Exception as e:  # пробваме пак след 30 мин
+            db.rollback()
             _state["last_error"] = f"{type(e).__name__}: {e}"[:300]
+        # грешно заведени фактури на НДК -> съобщение до Наде (и Димо)
+        if 8 <= datetime.now(SOFIA).hour < 20:
+            try:
+                from . import ocralert
+                r = ocralert.scan(db)
+                _state["ocr_alerts"] = {"at": datetime.now(SOFIA).strftime("%d.%m %H:%M"), "found": r["found"],
+                                        "new": r["new"], "sent_to": r["sent_to"], "patterns": len(r["patterns"])}
+            except Exception as e:
+                db.rollback()
+                _state["ocr_alerts"] = f"{type(e).__name__}: {e}"[:300]
         # в 08:00, 12:00 и 16:00: вчерашните продажби пак (закъснели бележки, особено 24-часовите) и отчетът за оборотите
         now = datetime.now(SOFIA)
         slot = max([h for h in (8, 12, 16) if now.hour >= h], default=None)   # 08:00, 12:00, 16:00 - закъснели бонове

@@ -969,6 +969,20 @@ def ui_anomalies(days: int = Query(7, ge=1, le=60), db: Session = Depends(get_db
     return anomalies.summary(db, days)
 
 
+@router.get("/ui/anomalies/ocr-alerts")
+def ui_ocr_alerts(days: int = Query(7, ge=1, le=60), db: Session = Depends(get_db)):
+    """Пратените сигнали за грешно заведени фактури (OCR замяна) и какво би се пратило сега."""
+    from . import ocralert
+    return {"sent": ocralert.recent(db, days), "now": ocralert.scan(db, send=False)}
+
+
+@router.post("/ui/anomalies/ocr-alerts/scan")
+def ui_ocr_alerts_scan(db: Session = Depends(get_db)):
+    from . import anomalies, ocralert
+    anomalies.sync(db, 3)
+    return ocralert.scan(db)
+
+
 @router.get("/ui/anomalies/list")
 def ui_anomalies_list(kind: str | None = None, store_id: int | None = None,
                       days: int = Query(7, ge=1, le=60), db: Session = Depends(get_db)):
