@@ -969,6 +969,30 @@ def ui_anomalies(days: int = Query(7, ge=1, le=60), db: Session = Depends(get_db
     return anomalies.summary(db, days)
 
 
+@router.get("/ui/anomalies/minusi")
+def ui_minusi(fresh: bool = False, db: Session = Depends(get_db)):
+    """Отрицателните наличности като прости задачи (за Наде/магазините)."""
+    from . import minusi
+    return minusi.get(db, fresh)
+
+
+class MinusFixIn(BaseModel):
+    store_id: int
+    article_id: int
+    done: bool = True
+
+
+@router.post("/ui/anomalies/minusi/fix")
+def ui_minusi_fix(payload: MinusFixIn, request: Request, db: Session = Depends(get_db)):
+    from . import minusi
+    u = getattr(request.state, "user", None)
+    name = None
+    if u:
+        au = db.get(m.AppUser, u)
+        name = au.display_name if au and au.display_name else u
+    return minusi.mark(db, payload.store_id, payload.article_id, payload.done, name)
+
+
 @router.get("/ui/anomalies/ocr-alerts")
 def ui_ocr_alerts(days: int = Query(7, ge=1, le=60), db: Session = Depends(get_db)):
     """Пратените сигнали за грешно заведени фактури (OCR замяна) и какво би се пратило сега."""

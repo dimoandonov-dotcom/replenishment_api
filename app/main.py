@@ -166,7 +166,7 @@ async def _require_auth(request: Request, call_next):
     if user0 is not None and user0.lower() in anomalies_only_users():
         ok = ((request.method == "GET" and (p.startswith("/ui/anomalies") or p.startswith("/ui/mistral/")
                                             or p in ("/", "/ui/me", "/stores", "/ui/version")))
-              or (request.method == "POST" and p == "/ui/export-xlsx"))
+              or (request.method == "POST" and p in ("/ui/export-xlsx", "/ui/anomalies/minusi/fix")))
         if not ok:
             return JSONResponse(status_code=403, content={"detail": "Профилът е само за „Аномалии“"})
     if p.startswith("/ui/analytics") or p.startswith("/analytics"):

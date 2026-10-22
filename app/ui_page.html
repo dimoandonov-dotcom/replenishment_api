@@ -142,6 +142,54 @@ tr.bro > td { background:#FDECEC; } tr.bro > td:first-child { box-shadow: inset 
 .imp p { margin:0 0 12px; font-size:12.5px; color:var(--slate); line-height:1.5; }
 .imp .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .imp pre { font-family:var(--mono); font-size:11.5px; white-space:pre-wrap; margin:10px 0 0; color:var(--slate); max-height:160px; overflow:auto; }
+
+/* ---- Минуси за оправяне ---- */
+.mnSwitch{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px}
+.mnSwitch button{font:inherit;font-weight:800;font-size:15px;letter-spacing:.02em;border-radius:14px;padding:12px 18px;cursor:pointer;border:2px solid transparent}
+.mnHot{background:#B91C1C;color:#fff;display:flex;align-items:center;gap:10px;animation:mnPulse 1.6s ease-in-out infinite}
+.mnHot b{background:#fff;color:#B91C1C;border-radius:999px;padding:1px 10px;font-size:16px}
+.mnHot:not(.on){background:#fff;color:#B91C1C;border-color:#B91C1C}
+.mnHot:not(.on) b{background:#B91C1C;color:#fff}
+.mnPlain{background:#fff;color:#444;border-color:#ddd !important}
+.mnPlain.on{background:#9F1239;color:#fff}
+.mnDot{width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 0 0 0 rgba(255,255,255,.8);animation:mnDot 1.2s infinite}
+@keyframes mnPulse{0%,100%{box-shadow:0 0 0 0 rgba(185,28,28,.55)}50%{box-shadow:0 0 0 12px rgba(185,28,28,0)}}
+@keyframes mnDot{0%{box-shadow:0 0 0 0 rgba(255,255,255,.9)}100%{box-shadow:0 0 0 10px rgba(255,255,255,0)}}
+@keyframes mnIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes mnShake{0%,100%{transform:none}20%{transform:rotate(-6deg)}40%{transform:rotate(6deg)}60%{transform:rotate(-3deg)}80%{transform:rotate(3deg)}}
+nav a[data-tab="anom"] .mnBadge{display:inline-block;margin-left:6px;background:#DC2626;color:#fff;border-radius:999px;padding:0 7px;font-size:11px;font-weight:800;animation:mnShake 2.4s ease-in-out infinite}
+.mnHero{background:linear-gradient(135deg,#7F1D1D,#B91C1C 60%,#DC2626);color:#fff;border-radius:18px;padding:20px 22px;display:grid;gap:10px;animation:mnIn .4s ease-out}
+.mnHero h2{margin:0;font-size:24px;line-height:1.25}
+.mnHero p{margin:0;font-size:16px;line-height:1.5;max-width:75ch;opacity:.95}
+.mnBig{font-size:40px;font-weight:900;line-height:1}
+.mnProg{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.mnBar{flex:1 1 220px;height:14px;border-radius:7px;background:rgba(255,255,255,.25);overflow:hidden}
+.mnBar i{display:block;height:100%;background:#4ADE80;transition:width .5s}
+.mnStore{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:16px 0 6px}
+.mnStore select{font:inherit;font-size:16px;padding:10px 12px;border:2px solid #B91C1C;border-radius:10px;min-width:0;flex:1 1 240px;max-width:420px}
+.mnTasks{display:grid;gap:10px;margin-top:12px}
+.mnTask{all:unset;cursor:pointer;display:grid;grid-template-columns:52px 1fr auto;gap:14px;align-items:center;background:#fff;border:1px solid #eadfd6;border-left:6px solid #B91C1C;border-radius:14px;padding:14px 16px;animation:mnIn .4s ease-out both}
+.mnTask:hover{box-shadow:0 6px 18px rgba(0,0,0,.08);transform:translateY(-1px)}
+.mnTask:focus-visible{outline:3px solid #B91C1C}
+.mnTask.all{border-left-color:#16A34A;opacity:.75}
+.mnNum{width:46px;height:46px;border-radius:50%;background:#B91C1C;color:#fff;display:grid;place-items:center;font-weight:900;font-size:20px}
+.mnTask.all .mnNum{background:#16A34A}
+.mnTask .t{font-weight:800;font-size:17px}.mnTask .w{font-size:14px;color:#666;margin-top:2px}
+.mnTask .c{text-align:right;font-size:14px;white-space:nowrap}.mnTask .c b{font-size:22px;color:#B91C1C;display:block}
+.mnBack{all:unset;cursor:pointer;color:#B91C1C;font-weight:800;font-size:15px;margin:14px 0 6px;display:inline-block}
+.mnWhat{background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:14px 16px;font-size:16px;line-height:1.5;margin:10px 0}
+.mnSteps{list-style:none;padding:0;margin:8px 0 14px;display:grid;gap:8px;counter-reset:s}
+.mnSteps li{counter-increment:s;display:grid;grid-template-columns:34px 1fr;gap:10px;align-items:start;font-size:16px;line-height:1.45}
+.mnSteps li::before{content:counter(s);width:28px;height:28px;border-radius:50%;background:#B91C1C;color:#fff;display:grid;place-items:center;font-weight:800;font-size:14px}
+.mnTbl td,.mnTbl th{font-size:14px;vertical-align:top}
+.mnTbl td.mq{font-weight:800;color:#B91C1C;text-align:right;white-space:nowrap}
+.mnTbl td.do{font-weight:700}
+.mnTbl tr.done td{background:#ECFDF3;color:#666}.mnTbl tr.done td.mq{color:#16A34A;text-decoration:line-through}
+.mnOk{font:inherit;font-weight:800;cursor:pointer;border:2px solid #16A34A;background:#fff;color:#16A34A;border-radius:10px;padding:8px 12px;white-space:nowrap}
+.mnOk.on{background:#16A34A;color:#fff}
+.mnWho{display:block;font-size:11px;color:#16A34A;margin-top:3px}
+@media (max-width:640px){.mnTask{grid-template-columns:44px 1fr}.mnTask .c{grid-column:2;text-align:left}.mnBig{font-size:32px}}
+@media (prefers-reduced-motion:reduce){.mnHot,.mnDot,nav a[data-tab="anom"] .mnBadge,.mnHero,.mnTask{animation:none}}
 </style>
 
 <script>
@@ -492,6 +540,12 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
 
 <!-- ============ АНОМАЛИИ ============ -->
 <section class="tab" id="tab-anom">
+  <div class="mnSwitch">
+    <button id="mnBtn" class="mnHot on"><span class="mnDot"></span>МИНУСИ ЗА ОПРАВЯНЕ <b id="mnCnt">…</b></button>
+    <button id="anBtn" class="mnPlain">📋 Всички аномалии</button>
+  </div>
+  <div id="mnView"></div>
+  <div id="anView" hidden>
   <p class="note" style="margin:0 0 14px;line-height:1.6">Всяка нощ се дърпат от Мистрал <b>всички движения</b> на НДК стоката (продажби, доставки, брак, корекции) и <b>резултатите от ревизиите</b>.
   Тук са липсите и излишъците от ревизии, отрицателните наличности (продадено без заведена доставка), „фантомната“ наличност (по Мистрал има, но не се продава от 4+ дни — вероятно я няма на рафта)
   и <b>недоставените заявки</b>: поръчано от Ани, но няма доставка в Мистрал или е доставено по-малко.</p>
@@ -503,6 +557,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <thead><tr><th>Магазин</th><th class="num">Липси €</th><th class="num">Излишъци €</th><th class="num">Нето €</th><th class="num">Липси бр. редове</th><th class="num">На минус</th><th class="num">Фантомни</th><th class="num">Недоставени заявки</th><th class="num">Брак</th></tr></thead>
     <tbody id="anBody"></tbody>
   </table></div>
+  </div>
 </section>
 
 <!-- ============ БРОШУРА И ТИХИ АКЦИИ ============ -->
@@ -803,7 +858,7 @@ const loaded = {};
 function show(tab) {
   document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + tab));
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: loadAnom, promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: () => loadMinusi(), promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -1436,6 +1491,70 @@ const ANH = {
   ocr_swap: ["В доставката на НДК поръчаният артикул го няма, а вместо него е заведен друг, непоръчан — OCR е прочел реда като друг артикул (напр. Капи Хепи 1,25 л → Фюз Тий 500 мл). Поръчаният стои на 0 и не се зарежда, а другият има фантомна наличност.", "Отвори документа, сторнирай грешния артикул и заведи правилния. Ако същата замяна се повтаря в няколко магазина — оправи как OCR чете този ред."],
   suspicious_delivery: ["Заведено е многократно повече от поръчаното или от максимума — типично при грешно въвеждане (OCR).", "Провери документа за доставка. Ако количеството е грешно — коригирай в Мистрал веднага, иначе наличността е завишена и стоката няма да се поръчва."],
 };
+
+// ---------------- Минуси за оправяне ----------------
+let MN = null, mnView = 0, mnStore = "";
+try { mnStore = localStorage.getItem("mnStore") || ""; } catch (e) {}
+function mnSwitch(on) {
+  $("mnBtn").classList.toggle("on", on); $("anBtn").classList.toggle("on", !on);
+  $("mnView").hidden = !on; $("anView").hidden = on;
+  if (!on && !loaded.anomList) { loaded.anomList = true; loadAnom(); }
+}
+function mnBadge(n) {
+  const a = document.querySelector('nav a[data-tab="anom"]'); if (!a) return;
+  let b = a.querySelector(".mnBadge"); if (!n) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement("span"); b.className = "mnBadge"; a.append(b); }
+  b.textContent = n;
+}
+async function loadMinusi(fresh) {
+  $("mnBtn").onclick = () => mnSwitch(true); $("anBtn").onclick = () => mnSwitch(false);
+  if (!MN || fresh) { $("mnView").innerHTML = `<div class="empty loading">Зареждам минусите…</div>`; MN = await api(`/ui/anomalies/minusi${fresh ? "?fresh=1" : ""}`); }
+  mnBadge(MN.left); $("mnCnt").textContent = MN.left;
+  renderMinusi();
+}
+const mnF = n => fmtN(n).replace("-", "−");
+function mnRows() { return MN.tasks.flatMap(t => t.rows.map(r => ({ ...r, t: t.id }))).filter(r => !mnStore || r.store === mnStore); }
+function renderMinusi() {
+  const all = mnRows(), done = all.filter(r => r.done_by).length, qty = all.reduce((a, r) => a + r.qty, 0);
+  const stores = [...new Set(MN.tasks.flatMap(t => t.rows.map(r => r.store)))].sort((a, b) => a.localeCompare(b, "bg"));
+  let h = `<div class="mnHero"><div class="mnBig">${all.length - done} <span style="font-size:18px;font-weight:700">артикула на минус за оправяне</span></div>
+    <h2>${mnStore ? esc(mnStore) + ": " : ""}общо ${mnF(qty)} бр. на минус</h2>
+    <p>Повечето не са липса на стока, а грешки при завеждането (стоката е заведена под друг код). Оправят се с корекция в Мистрал.</p>
+    <p><b>Как:</b> отвори задача 1 → направи корекциите от таблицата → натисни „Готово“ на всеки ред. После задача 2…</p>
+    <div class="mnProg"><b>${done} от ${all.length} готови</b><div class="mnBar"><i style="width:${all.length ? 100 * done / all.length : 0}%"></i></div><span style="opacity:.85">наличност от ${MN.asof || "—"}</span></div></div>
+    <div class="mnStore"><b>Магазин:</b><select id="mnSt"><option value="">Всички магазини</option>${stores.map(s => `<option${s === mnStore ? " selected" : ""}>${esc(s)}</option>`).join("")}</select>
+    <button class="mnPlain" id="mnRe" style="padding:10px 14px;border-radius:10px;font:inherit;font-weight:700;cursor:pointer;border:2px solid #ddd">↻ Обнови</button></div>`;
+  if (!mnView) {
+    h += `<div class="mnTasks">${MN.tasks.map((t, i) => { const rr = t.rows.filter(r => !mnStore || r.store === mnStore); if (!rr.length) return "";
+      const left = rr.filter(r => !r.done_by).length;
+      return `<button class="mnTask${left ? "" : " all"}" data-t="${t.id}" style="animation-delay:${i * 70}ms"><span class="mnNum">${left ? i + 1 : "✓"}</span>
+      <span><span class="t">${esc(t.title)}</span><div class="w">${esc(t.what)}</div></span><span class="c"><b>${left}</b>остават · ${mnF(rr.reduce((a, r) => a + r.qty, 0))} бр.</span></button>`; }).join("")}</div>`;
+    if (!mnStore) h += `<div class="head" style="margin-top:18px"><h2>По магазини</h2><span class="note">цъкни на магазин</span></div><div class="scroll"><table><thead><tr><th>Магазин</th><th class="num">Артикули на минус</th><th class="num">Бройки</th><th class="num">Готови</th></tr></thead><tbody>${MN.stores.map(s => `<tr data-s="${esc(s.store)}" style="cursor:pointer"><td class="name">${esc(s.store)}</td><td class="num">${s.n}</td><td class="num low">${mnF(s.qty)}</td><td class="num">${s.done} от ${s.n}</td></tr>`).join("")}</tbody></table></div>`;
+  } else {
+    const ti = MN.tasks.findIndex(t => t.id === mnView), t = MN.tasks[ti], rr = t.rows.filter(r => !mnStore || r.store === mnStore), pair = ["code", "ocr"].includes(t.id);
+    h += `<button class="mnBack" id="mnBk">← Всички задачи</button><h2 style="margin:4px 0">Задача ${ti + 1}: ${esc(t.title)}</h2>
+    <div class="mnWhat"><b>Какво е станало:</b> ${esc(t.what)}</div><b style="font-size:16px">Какво правиш:</b><ol class="mnSteps">${t.steps.map(s => `<li><span>${esc(s)}</span></li>`).join("")}</ol>
+    <div class="scroll"><table class="mnTbl"><thead><tr><th>Магазин</th><th>Артикул</th><th class="num">Минус</th>${pair ? "<th>Другият код (наличност)</th>" : ""}<th>Направи</th><th></th></tr></thead><tbody>
+    ${rr.map(r => `<tr class="${r.done_by ? "done" : ""}"><td class="name">${esc(r.store)}</td><td>${esc(r.name)} <span class="note">(${r.sku})</span></td><td class="mq">${mnF(r.qty)}</td>
+      ${pair ? `<td>${esc(r.partner || "")}: <b>${r.partner_qty == null ? "—" : fmtN(r.partner_qty)}</b></td>` : ""}<td class="do">${esc(r.todo || "")}</td>
+      <td><button class="mnOk${r.done_by ? " on" : ""}" data-s="${r.store_id}" data-a="${r.article_id}">${r.done_by ? "✓ Готово" : "Готово"}</button>${r.done_by ? `<span class="mnWho">${esc(r.done_at || "")} · ${esc(r.done_by)}</span>` : ""}</td></tr>`).join("")}
+    </tbody></table></div>`;
+  }
+  $("mnView").innerHTML = h;
+  $("mnSt").onchange = e => { mnStore = e.target.value; try { localStorage.setItem("mnStore", mnStore); } catch (_) {} renderMinusi(); };
+  $("mnRe").onclick = () => loadMinusi(true);
+  document.querySelectorAll(".mnTask").forEach(b => b.onclick = () => { mnView = b.dataset.t; renderMinusi(); $("mnView").scrollIntoView({ behavior: "smooth" }); });
+  document.querySelectorAll("#mnView tr[data-s]").forEach(tr => tr.onclick = () => { mnStore = tr.dataset.s; renderMinusi(); });
+  const bk = $("mnBk"); if (bk) bk.onclick = () => { mnView = 0; renderMinusi(); };
+  document.querySelectorAll(".mnOk").forEach(b => b.onclick = async () => {
+    b.disabled = true; const sid = +b.dataset.s, aid = +b.dataset.a, on = !b.classList.contains("on");
+    try {
+      await api("/ui/anomalies/minusi/fix", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ store_id: sid, article_id: aid, done: on }) });
+      MN.tasks.forEach(t => t.rows.forEach(r => { if (r.store_id === sid && r.article_id === aid) { if (on) { r.done_by = "ти"; r.done_at = new Date().toLocaleString("bg-BG", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); } else { delete r.done_by; delete r.done_at; } } }));
+      MN.left = MN.tasks.reduce((a, t) => a + t.rows.filter(r => !r.done_by).length, 0); mnBadge(MN.left); $("mnCnt").textContent = MN.left; renderMinusi();
+    } catch (e) { b.disabled = false; alert("Не успях да запиша: " + (e.message || e)); }
+  });
+}
 async function loadAnom() {
   $("anDays").onchange = loadAnom;
   const d = await api(`/ui/anomalies?days=${$("anDays").value}`), t = d.totals || {};
@@ -2633,6 +2752,7 @@ fetch("/ui/summary").then(r => {
       const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (["#anal", "#promo", "#turn", "#delist"].includes(location.hash)) location.hash = "#board"; } }).catch(() => {});
   show((location.hash || "#board").slice(1));
   updateFresh();
+  setTimeout(() => { if (document.querySelector('nav a[data-tab="anom"]')) api("/ui/anomalies/minusi").then(d => { if (!MN) MN = d; mnBadge(d.left); const c = $("mnCnt"); if (c) c.textContent = d.left; }).catch(() => {}); }, 1500);
 });
 if ((location.hash || "#board") !== "#board") api("/ui/summary").then(d => $("stamp").innerHTML = `Обновено <b>${d.generated}</b>`).catch(() => {});
 </script>
