@@ -604,7 +604,7 @@ def ui_pilot(db: Session = Depends(get_db)):
 # Бандитс - заявки за сандвичи и десерти (само за Димо)
 # ---------------------------------------------------------------------------
 def _bd_day(day: str | None) -> date:
-    return date.fromisoformat(day) if day else datetime.now(_SOFIA).date() + timedelta(days=2)
+    return date.fromisoformat(day) if day else datetime.now(_SOFIA).date() + timedelta(days=1)
 
 
 @router.get("/ui/bandits/orders")

@@ -1518,7 +1518,7 @@ const ANH = {
 // ---------------- Бандитс (само Димо) ----------------
 let BD = null;
 const BDW = ["пон", "вт", "ср", "чет", "пет", "съб", "нед"];
-function bdTomorrow() { const d = new Date(); d.setDate(d.getDate() + 2); return d.toISOString().slice(0, 10); }
+function bdTomorrow() { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); }
 async function initBandits() {
   if (!$("bdDay").value) $("bdDay").value = bdTomorrow();
   $("bdDay").onchange = () => { loadBandits(); if (!$("bdCmp").hidden) loadBdCompare(); };

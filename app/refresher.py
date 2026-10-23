@@ -46,24 +46,24 @@ def _tick():
         except Exception as e:  # пробваме пак след 30 мин
             db.rollback()
             _state["last_error"] = f"{type(e).__name__}: {e}"[:300]
-        # Бандитс: в 07:00 - заявката за доставката ВДРУГИДЕН (Мони я пуска 2 дни преди доставката, към 08-12 ч.);
-        # в 14:00 - дърпа заявката на Мони за същия ден за сравнение
+        # Бандитс: в 07:00 - заявката за УТРЕШНАТА доставка (изписва се в деня преди доставката:
+        # нед->пон, пон->вт, ср->чет, чет->пет), после дърпа заявката на Мони за същата доставка за сравнение
         nb = datetime.now(SOFIA)
         if (nb.hour, nb.minute) >= (7, 0) and _state.get("bandits_day") != nb.date():
             _state["bandits_day"] = nb.date()
             try:
                 from . import bandits_orders as bo
                 info = bo.sync_all(db)
-                r = bo.build(db, nb.date() + timedelta(days=2), save=True)
+                r = bo.build(db, nb.date() + timedelta(days=1), save=True)
                 _state["bandits"] = {"at": nb.strftime("%d.%m %H:%M"), "sync": info, "stores": r.get("stores"), "units": r.get("units")}
             except Exception as e:
                 db.rollback()
                 _state["bandits"] = f"{type(e).__name__}: {e}"[:300]
-        if nb.hour >= 14 and _state.get("bandits_moni_day") != nb.date():
+        if (nb.hour, nb.minute) >= (7, 5) and _state.get("bandits_moni_day") != nb.date():
             _state["bandits_moni_day"] = nb.date()
             try:
                 from . import bandits_orders as bo
-                _state["bandits_moni"] = bo.fetch_moni(db, nb.date() + timedelta(days=2))
+                _state["bandits_moni"] = bo.fetch_moni(db, nb.date() + timedelta(days=1))
             except Exception as e:
                 db.rollback()
                 _state["bandits_moni"] = f"{type(e).__name__}: {e}"[:300]
