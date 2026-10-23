@@ -617,9 +617,18 @@ def ui_bandits_orders(day: str | None = None, db: Session = Depends(get_db)):
 def ui_bandits_build(day: str | None = None, sync: bool = True, db: Session = Depends(get_db)):
     from . import bandits_orders as bo
     info = bo.sync_all(db) if sync else None
-    r = bo.build(db, _bd_day(day), save=True)
+    d = _bd_day(day)
+    r = bo.build(db, d, save=d > datetime.now(_SOFIA).date())   # за минал/днешен ден само преглед - заявката не се пипа
     r["sync"] = info
     return r
+
+
+@router.get("/ui/bandits/compare")
+def ui_bandits_compare(day: str | None = None, fresh: bool = False, db: Session = Depends(get_db)):
+    from . import bandits_orders as bo
+    if fresh:
+        bo.sync_soft(db)
+    return bo.compare(db, _bd_day(day))
 
 
 @router.get("/ui/bandits/schedule")

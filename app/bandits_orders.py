@@ -470,3 +470,48 @@ def xlsx(db: Session, day: date) -> bytes:
         w.column_dimensions["B"].width = 44
     bio = BytesIO(); wb.save(bio)
     return bio.getvalue()
+
+
+# ------------------------------------------------------------------ сравнение с Мони
+def compare(db: Session, day: date) -> dict:
+    """Нашата заявка за доставка на `day` срещу това, което Мони е пуснала (стоковите на Бандитс за деня),
+    и колко реално се е продало до следващата доставка (каса - само за магазините 300)."""
+    ensure(db)
+    stores = {i: n for i, n in db.execute(text("SELECT loc, name FROM bd_stores")).all()}
+    arts = {k: (n, s) for k, n, s in db.execute(text("SELECT code, name, sub FROM bd_articles")).all()}
+    mp = {m: b for m, b in db.execute(text("SELECT mcode, bcode FROM bd_map")).all()}
+    sch = schedule(db)
+    ours = {(l, c): (int(q or 0), int(cv or 1)) for l, c, q, cv in db.execute(text(
+        "SELECT loc, code, qty, cover_days FROM bd_orders WHERE delivery_day = :d"), {"d": day}).all()}
+    moni = {(s_, c): float(i or 0) for s_, c, i in db.execute(text(
+        "SELECT store_id, bcode, delivered FROM bd_soft WHERE day = :d AND delivered > 0"), {"d": day}).all()}
+    last = db.execute(text("SELECT MAX(day) FROM bd_sales")).scalar()
+    sold = defaultdict(float)
+    for l, k, d, q in db.execute(text("SELECT loc, code, day, qty FROM bd_sales WHERE day >= :d AND day < :e"),
+                                 {"d": day, "e": day + timedelta(days=7)}).all():
+        cv = _cover(sch.get(l) or {0, 1, 3, 4}, day)
+        if d < day + timedelta(days=cv):
+            sold[(l, mp.get(k, k))] += max(float(q or 0), 0.0)
+    rows = []
+    for key in set(ours) | set(moni):
+        l, c = key
+        if l not in stores:
+            continue
+        o, cv = ours.get(key, (0, _cover(sch.get(l) or {0, 1, 3, 4}, day)))
+        m_ = moni.get(key, 0.0)
+        has_sales = l < EXT_BASE and last is not None and last >= day + timedelta(days=cv - 1)
+        s_ = sold.get(key) if has_sales else None
+        better = None
+        if s_ is not None and abs(o - m_) >= 1:
+            better = "MinMaxAI" if abs(o - s_) < abs(m_ - s_) else ("Мони" if abs(m_ - s_) < abs(o - s_) else "равно")
+        n, sub = arts.get(c, (str(c), ""))
+        rows.append({"loc": l, "store": stores[l], "code": c, "name": n, "sub": sub or "", "ours": o, "moni": m_,
+                     "diff": o - m_, "sold": s_, "better": better})
+    rows.sort(key=lambda r: (r["store"], r["sub"], r["name"]))
+    tot = {"ours": sum(r["ours"] for r in rows), "moni": sum(r["moni"] for r in rows),
+           "same": sum(1 for r in rows if abs(r["diff"]) < 1), "lines": len(rows),
+           "ours_better": sum(1 for r in rows if r["better"] == "MinMaxAI"),
+           "moni_better": sum(1 for r in rows if r["better"] == "Мони"),
+           "judged": sum(1 for r in rows if r["better"] in ("MinMaxAI", "Мони", "равно"))}
+    return {"day": day.isoformat(), "weekday": WD[day.weekday()], "has_ours": bool(ours), "has_moni": bool(moni),
+            "sales_until": last.strftime("%d.%m.%Y") if last else None, "totals": tot, "rows": rows}

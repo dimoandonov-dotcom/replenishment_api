@@ -570,9 +570,11 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <button id="bdBuild" class="warm">⚙️ Генерирай наново</button>
     <button id="bdXlsx">📥 Excel (цех + магазини)</button>
     <button id="bdSchBtn">📅 График на доставките</button>
+    <button id="bdCmpBtn">📊 Сравнение с Мони</button>
     <span class="note" id="bdInfo"></span>
   </div>
   <div id="bdSch" hidden></div>
+  <div id="bdCmp" hidden></div>
   <div class="board" id="bdKpis"></div>
   <div class="head"><h2>План за цеха</h2><span class="note">общо по артикули</span></div>
   <div class="scroll"><table><thead><tr><th>Код</th><th>Артикул</th><th>Група</th><th class="num">Бройки</th><th class="num">Магазини</th></tr></thead><tbody id="bdPlan"></tbody></table></div>
@@ -1519,13 +1521,14 @@ const BDW = ["пон", "вт", "ср", "чет", "пет", "съб", "нед"];
 function bdTomorrow() { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); }
 async function initBandits() {
   if (!$("bdDay").value) $("bdDay").value = bdTomorrow();
-  $("bdDay").onchange = () => loadBandits();
+  $("bdDay").onchange = () => { loadBandits(); if (!$("bdCmp").hidden) loadBdCompare(); };
   $("bdBuild").onclick = async () => { $("bdInfo").textContent = "Дърпам продажбите от Мистрал и смятам…"; $("bdBuild").disabled = true;
     try { BD = await api(`/ui/bandits/build?day=${$("bdDay").value}`, { method: "POST" }); renderBandits(); }
     catch (e) { $("bdInfo").textContent = "Грешка: " + e.message; } finally { $("bdBuild").disabled = false; } };
   $("bdXlsx").onclick = () => download(`/ui/bandits/xlsx?day=${$("bdDay").value}`).catch(e => alert(e.message));
   $("bdSchBtn").onclick = () => { $("bdSch").hidden = !$("bdSch").hidden; if (!$("bdSch").hidden) loadBdSchedule(); };
   $("bdQ").oninput = renderBandits;
+  $("bdCmpBtn").onclick = () => { $("bdCmp").hidden = !$("bdCmp").hidden; if (!$("bdCmp").hidden) loadBdCompare(); };
   loadBandits();
 }
 async function loadBandits() {
@@ -1552,6 +1555,29 @@ function renderBandits() {
     <div class="scroll"><table><thead><tr><th>Артикул</th><th class="num">Продадени 14 дни</th><th class="num">На ден</th><th class="num">Нужно</th><th class="num">Наличност</th><th class="num">Таван (срок)</th><th class="num">Заявка</th><th>Бележка</th></tr></thead><tbody>
     ${L.map(o => `<tr><td class="name">${esc(o.name)} <span class="muted">${o.code}</span></td><td class="num">${o.sold14 ?? fmtN(o.per_day * 14)}</td><td class="num">${o.per_day}</td><td class="num">${o.need}</td>
       <td class="num ${o.stock < 0 ? "low" : ""}">${o.stock}</td><td class="num">${o.cap}</td><td class="num"><b>${o.qty}</b></td><td class="note">${esc(o.note || "")}</td></tr>`).join("")}</tbody></table></div></details>`; }).join("");
+}
+
+async function loadBdCompare() {
+  $("bdCmp").innerHTML = `<div class="empty loading">Сравнявам с Мони…</div>`;
+  let d;
+  try { d = await api(`/ui/bandits/compare?day=${$("bdDay").value}&fresh=1`); } catch (e) { $("bdCmp").innerHTML = `<div class="empty">Грешка: ${esc(e.message)}</div>`; return; }
+  const t = d.totals;
+  let h = `<div class="head"><h2>Сравнение с Мони · доставка ${d.day.slice(8, 10)}.${d.day.slice(5, 7)} (${d.weekday})</h2>
+    <span class="note">Мони = стоковите на Бандитс за деня · продадено = касата до следващата доставка (само магазини 300, продажби до ${d.sales_until || "—"})</span></div>`;
+  if (!d.has_moni) h += `<p class="note">Мони още не е пуснала заявката за този ден (няма стокови в Бандитс софтуеър).</p>`;
+  if (!d.has_ours) h += `<p class="note">MinMaxAI няма записана заявка за този ден (започва да пази от днес нататък).</p>`;
+  h += `<div class="board">${[["MINMAXAI", fmtN(t.ours) + " бр.", "", "нашата заявка"], ["МОНИ", fmtN(t.moni) + " бр.", "", "пуснато от Мони"],
+    ["ЕДНАКВИ РЕДОВЕ", `${t.same} от ${t.lines}`, "", "същото количество"],
+    ["ПО-ТОЧЕН", t.judged ? `MinMaxAI ${t.ours_better} : ${t.moni_better} Мони` : "—", t.ours_better > t.moni_better ? "t" : (t.moni_better > t.ours_better ? "a" : ""), t.judged ? "по реалните продажби" : "чака продажбите"]]
+    .map(([l, v, c, s]) => `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("")}</div>`;
+  const by = {}; d.rows.forEach(r => (by[r.store] = by[r.store] || []).push(r));
+  h += Object.keys(by).sort((a, b) => a.localeCompare(b, "bg")).map(st => { const L = by[st], dif = L.filter(r => Math.abs(r.diff) >= 1).length;
+    return `<details style="margin:0 0 6px;border:1px solid var(--line,#e7dccb);border-radius:12px;padding:6px 12px"><summary style="cursor:pointer"><b>${esc(st)}</b> · MinMaxAI ${fmtN(L.reduce((a, r) => a + r.ours, 0))} / Мони ${fmtN(L.reduce((a, r) => a + r.moni, 0))} · ${dif ? dif + " различни реда" : "еднакво"}</summary>
+    <div class="scroll"><table><thead><tr><th>Артикул</th><th class="num">MinMaxAI</th><th class="num">Мони</th><th class="num">Разлика</th><th class="num">Продадено</th><th>По-точен</th></tr></thead><tbody>
+    ${L.map(r => `<tr><td class="name">${esc(r.name)} <span class="muted">${r.code}</span></td><td class="num">${r.ours}</td><td class="num">${r.moni}</td>
+      <td class="num ${Math.abs(r.diff) >= 1 ? "low" : ""}">${r.diff > 0 ? "+" : ""}${r.diff}</td><td class="num">${r.sold == null ? "—" : r.sold}</td>
+      <td>${r.better === "MinMaxAI" ? "🟢 MinMaxAI" : r.better === "Мони" ? "🟠 Мони" : r.better === "равно" ? "равно" : ""}</td></tr>`).join("")}</tbody></table></div></details>`; }).join("");
+  $("bdCmp").innerHTML = h;
 }
 async function loadBdSchedule() {
   const rows = await api("/ui/bandits/schedule");
