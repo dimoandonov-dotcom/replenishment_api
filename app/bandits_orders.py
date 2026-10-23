@@ -33,6 +33,7 @@ MAP_FIX = {26359: 669, 25833: 550}                                      # тор
 OBHOD_API = "https://script.google.com/macros/s/AKfycbzxTtMoij_A6yORV2-OE2RBEF1U5ZkEo1vAQZOMaYW4U_32KPbrKQ-7wnuLbTmMjmJrmQ/exec"
 LEFT_EXTRA = {"Закуски|Рогче": 537, "Закуски|Кренвиршка": 539, "Закуски|Баница": 538, "Закуски|Милинка": 542}
 LEFT_DAYS = 3                                                 # остатък от обхода важи до 3 дни
+STOPPED = {538, 542}                                          # баница и милинка - вече не се произвеждат (Димо, 23.10)
 EXT_BASE = 100000                                             # обектите извън Мистрал: id от 100001
 ALIAS = {"ДЕТЛАВРЕНТИЙ": "ЛАВРЕНТИЙ", "ДЕТЕЛИНАТРОШЕВО": "ТРОШЕВО", "ПР21РОЗА": "РОЗА"}
 SHELF_CAT = {"Салати": 4, "Десерти": 7, "Принцеса": 7, "ВЕГА": 4}
@@ -331,7 +332,7 @@ def build(db: Session, day: date, save: bool = True) -> dict:
     out = []
     for key in set(S) | set(D):
         st, k = key
-        if st not in stores or k not in arts:
+        if st not in stores or k not in arts or k in STOPPED:
             continue
         dd = sch.get(st) or {0, 1, 3, 4}
         if day.weekday() not in dd:
