@@ -511,16 +511,24 @@ def compare(db: Session, day: date) -> dict:
     moni = {(s_, c): float(q or 0) for s_, c, q in db.execute(text(
         "SELECT store_id, code, qty FROM bd_moni WHERE delivery_day = :d AND qty > 0"), {"d": day}).all()}
     moni_src = "заявката на Мони"
+    pmark = set()
     sent = db.execute(text("SELECT MAX(sent_at) FROM bd_moni WHERE delivery_day = :d"), {"d": day}).scalar()
+    # заявки, попълнени от партньорите през линка (Бургас, Мария) - те са истинските за техните обекти/артикули
+    try:
+        for s_, c, q, pn in db.execute(text("SELECT store_id, code, qty, partner FROM bd_porders WHERE delivery_day = :d"), {"d": day}).all():
+            moni[(s_, c)] = float(q or 0)
+            pmark.add((s_, c))
+    except Exception:
+        db.rollback()
     # обекти, които Мони не поръчва в „Бандитс заявки“ (напр. ДИВ 97 Бургас - по Viber) -> стоковите за деня
     if moni:
         have = {s_ for s_, _ in moni}
         for s_, c, i in db.execute(text("SELECT store_id, bcode, delivered FROM bd_soft WHERE day = :d AND delivered > 0"),
                                    {"d": day}).all():
-            if s_ not in have and c not in VEGA:
+            if s_ not in have and c not in VEGA and (s_, c) not in pmark:
                 moni[(s_, c)] = float(i or 0)
     # Хляб и кифли (рогче, кренвиршка) ги поръчва Мария (ВЕГА) по имейл -> нейните са стоковите за деня
-    for s_, c, i in db.execute(text("SELECT store_id, bcode, delivered FROM bd_soft WHERE day = :d AND delivered > 0 AND bcode = ANY(:v)"),
+    for s_, c, i in [] if any(c_ in VEGA for _, c_ in pmark) else db.execute(text("SELECT store_id, bcode, delivered FROM bd_soft WHERE day = :d AND delivered > 0 AND bcode = ANY(:v)"),
                                {"d": day, "v": list(VEGA)}).all():
         moni[(s_, c)] = float(i or 0)
     if not moni:                                     # няма я в „Бандитс заявки“ -> какво е издадено (стоковите)

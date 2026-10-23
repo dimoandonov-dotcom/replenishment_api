@@ -643,6 +643,24 @@ def ui_bandits_moni_log(days: int = 30, db: Session = Depends(get_db)):
     return bo.moni_log(db, days)
 
 
+@router.get("/ui/bandits/partners")
+def ui_bandits_partners(db: Session = Depends(get_db)):
+    from . import partner_orders as po
+    return po.listing(db)
+
+
+class PartnerIn(BaseModel):
+    name: str
+    stores: list[int] | None = None
+    codes: list[int] | None = None
+
+
+@router.post("/ui/bandits/partners")
+def ui_bandits_partner_new(p: PartnerIn, db: Session = Depends(get_db)):
+    from . import partner_orders as po
+    return po.create(db, p.name, p.stores, p.codes)
+
+
 @router.get("/ui/bandits/schedule")
 def ui_bandits_schedule(db: Session = Depends(get_db)):
     from . import bandits_orders as bo

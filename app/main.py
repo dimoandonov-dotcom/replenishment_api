@@ -131,6 +131,9 @@ async def _region(request: Request, call_next):
 @app.middleware("http")
 async def _require_auth(request: Request, call_next):
     # логото се ВИЖДА без вход (нужно е на екрана за вход), но се сменя само с вход
+    # страниците за заявки на партньорите (Бургас, Мария): достъп с таен линк /z/<код>
+    if request.url.path.startswith("/z/"):
+        return await call_next(request)
     open_path = request.url.path in _OPEN_PATHS and not (
         request.url.path == "/brand/logo" and request.method != "GET")
     if open_path:
@@ -705,6 +708,8 @@ app.include_router(admin_router)
 from .ui import router as ui_router  # noqa: E402
 
 app.include_router(ui_router)
+from .partner_orders import router as _partner_router  # noqa: E402
+app.include_router(_partner_router)
 
 
 # ---------------------------------------------------------------- Telegram бот
