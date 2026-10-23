@@ -33,6 +33,7 @@ MAP_FIX = {26359: 669, 25833: 550}                                      # тор
 OBHOD_API = "https://script.google.com/macros/s/AKfycbzxTtMoij_A6yORV2-OE2RBEF1U5ZkEo1vAQZOMaYW4U_32KPbrKQ-7wnuLbTmMjmJrmQ/exec"
 LEFT_EXTRA = {"Закуски|Рогче": 537, "Закуски|Кренвиршка": 539, "Закуски|Баница": 538, "Закуски|Милинка": 542}
 LEFT_DAYS = 3                                                 # остатък от обхода важи до 3 дни
+VEGA = {537, 539, 538, 542}                                    # Хляб и кифли - поръчва ги Мария (ВЕГА) по имейл
 STOPPED = {538, 542}                                          # баница и милинка - вече не се произвеждат (Димо, 23.10)
 EXT_BASE = 100000                                             # обектите извън Мистрал: id от 100001
 ALIAS = {"ДЕТЛАВРЕНТИЙ": "ЛАВРЕНТИЙ", "ДЕТЕЛИНАТРОШЕВО": "ТРОШЕВО", "ПР21РОЗА": "РОЗА"}
@@ -511,6 +512,10 @@ def compare(db: Session, day: date) -> dict:
         "SELECT store_id, code, qty FROM bd_moni WHERE delivery_day = :d AND qty > 0"), {"d": day}).all()}
     moni_src = "заявката на Мони"
     sent = db.execute(text("SELECT MAX(sent_at) FROM bd_moni WHERE delivery_day = :d"), {"d": day}).scalar()
+    # Хляб и кифли (рогче, кренвиршка) ги поръчва Мария (ВЕГА) по имейл -> нейните са стоковите за деня
+    for s_, c, i in db.execute(text("SELECT store_id, bcode, delivered FROM bd_soft WHERE day = :d AND delivered > 0 AND bcode = ANY(:v)"),
+                               {"d": day, "v": list(VEGA)}).all():
+        moni[(s_, c)] = float(i or 0)
     if not moni:                                     # няма я в „Бандитс заявки“ -> какво е издадено (стоковите)
         moni = {(s_, c): float(i or 0) for s_, c, i in db.execute(text(
             "SELECT store_id, bcode, delivered FROM bd_soft WHERE day = :d AND delivered > 0"), {"d": day}).all()}
@@ -545,7 +550,7 @@ def compare(db: Session, day: date) -> dict:
            "judged": sum(1 for r in rows if r["better"] in ("MinMaxAI", "Мони", "равно"))}
     ours_at = db.execute(text("SELECT MIN(created_at) FROM bd_orders WHERE delivery_day = :d"), {"d": day}).scalar()
     return {"day": day.isoformat(), "weekday": WD[day.weekday()], "has_ours": bool(ours), "has_moni": bool(moni),
-            "moni_src": moni_src, "moni_sent": sent, "ours_at": ours_at.astimezone(SOFIA).strftime("%d.%m %H:%M") if ours_at else None,
+            "moni_src": moni_src + " · Хляб и кифли - Мария (стоковите)", "moni_sent": sent, "ours_at": ours_at.astimezone(SOFIA).strftime("%d.%m %H:%M") if ours_at else None,
             "sales_until": last.strftime("%d.%m.%Y") if last else None, "totals": tot, "rows": rows}
 
 
