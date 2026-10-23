@@ -294,7 +294,7 @@ nav a:hover { transform:translateY(-2px); }
 nav a.on { background:var(--c,var(--amber)); color:#fff; box-shadow:0 8px 20px color-mix(in srgb,var(--c,var(--amber)) 40%,transparent); }
 nav a.on::before { background:#fff; box-shadow:0 0 0 3px rgba(255,255,255,.35); }
 nav a[data-tab="board"]{--c:#D9621C} nav a[data-tab="orders"]{--c:#2F7DD1} nav a[data-tab="assort"]{--c:#E9A23B}
-nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A} nav a[data-tab="qual"]{--c:#0EA5A4} nav a[data-tab="anal"]{--c:#C026D3} nav a[data-tab="anom"]{--c:#9F1239} nav a[data-tab="bandits"]{--c:#B45309} nav a[data-tab="bdcmp"]{--c:#92400E} nav a[data-tab="promo"]{--c:#DB2777} nav a[data-tab="turn"]{--c:#0F766E} nav a[data-tab="delist"]{--c:#57534E}
+nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A} nav a[data-tab="qual"]{--c:#0EA5A4} nav a[data-tab="anal"]{--c:#C026D3} nav a[data-tab="anom"]{--c:#9F1239} nav a[data-tab="bandits"]{--c:#B45309} nav a[data-tab="promo"]{--c:#DB2777} nav a[data-tab="turn"]{--c:#0F766E} nav a[data-tab="delist"]{--c:#57534E}
 
 /* ---------- бутони ---------- */
 button { border-radius:10px; border:1px solid var(--line-strong); background:var(--raised); font-family:var(--head); font-weight:700;
@@ -387,7 +387,6 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <a href="#qual" data-tab="qual">Качество</a>
   <a href="#anom" data-tab="anom">Аномалии</a>
   <a href="#bandits" data-tab="bandits">🥪 Бандитс</a>
-  <a href="#bdcmp" data-tab="bdcmp">🥪 Бандитс vs Мони</a>
   <a href="#nord" data-tab="nord">Не се поръчват</a>
   <a href="#cmp" data-tab="cmp">Сравнение</a>
   <a href="#learn" data-tab="learn">Обучение</a>
@@ -562,20 +561,23 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   </div>
 </section>
 
-<!-- ============ БАНДИТС: СРАВНЕНИЕ С МОНИ (само Димо) ============ -->
-<section class="tab" id="tab-bdcmp">
-  <p class="note" style="margin:0 0 14px;line-height:1.6">Заявката на <b>MinMaxAI</b> (в 07:00 в деня на изписването) срещу заявката на <b>Мони</b> от „Бандитс заявки“, ред по ред,
-  и колко реално се е продало на касата до следващата доставка (магазините 300). Нова заявка от Мони се хваща до 30 минути и идва съобщение в Telegram.</p>
-  <div class="bar">
-    <label>Доставка на <input type="date" id="bdcDay"></label>
-    <button id="bdcPrev">◀</button><button id="bdcNext">▶</button>
-    <button id="bdcRe">↻ Обнови</button>
-  </div>
-  <div id="bdCmp2"></div>
-</section>
-
 <!-- ============ БАНДИТС (само Димо) ============ -->
 <section class="tab" id="tab-bandits">
+  <div class="mnSwitch">
+    <button id="bdSwOrd" class="mnPlain on" style="border-color:#B45309 !important">🥪 Заявка</button>
+    <button id="bdSwCmp" class="mnPlain">📊 Сравнение с Мони</button>
+  </div>
+  <div id="bdCmpView" hidden>
+    <p class="note" style="margin:0 0 14px;line-height:1.6">Заявката на <b>MinMaxAI</b> (в 07:00 в деня на изписването) срещу заявката на <b>Мони</b> от „Бандитс заявки“, ред по ред,
+    и колко реално се е продало на касата до следващата доставка (магазините 300). Нова заявка от Мони се хваща до 30 минути и идва съобщение в Telegram.</p>
+    <div class="bar">
+      <label>Доставка на <input type="date" id="bdcDay"></label>
+      <button id="bdcPrev">◀</button><button id="bdcNext">▶</button>
+      <button id="bdcRe">↻ Обнови</button>
+    </div>
+    <div id="bdCmp2"></div>
+  </div>
+  <div id="bdOrdView">
   <p class="note" style="margin:0 0 14px;line-height:1.6">Автоматична заявка за <b>сандвичите и десертите на Бандитс</b> по продажбите от Мистрал за последните 14 дни (по ден от седмицата),
   покритие до следващата доставка по графика на магазина и таван по срока на годност. Никога 0 за артикул, който се продава и е свършил. Вижда се само от теб.</p>
   <div class="bar">
@@ -591,6 +593,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <div class="scroll"><table><thead><tr><th>Код</th><th>Артикул</th><th>Група</th><th class="num">Бройки</th><th class="num">Магазини</th></tr></thead><tbody id="bdPlan"></tbody></table></div>
   <div class="head"><h2>По магазини</h2><input id="bdQ" placeholder="търси магазин / артикул" style="min-width:200px"></div>
   <div id="bdStores"></div>
+  </div>
 </section>
 
 <!-- ============ БРОШУРА И ТИХИ АКЦИИ ============ -->
@@ -891,7 +894,7 @@ const loaded = {};
 function show(tab) {
   document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + tab));
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: () => loadMinusi(), bandits: initBandits, bdcmp: initBdCmp, promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: () => loadMinusi(), bandits: initBandits, promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -1539,6 +1542,11 @@ async function initBandits() {
   $("bdXlsx").onclick = () => download(`/ui/bandits/xlsx?day=${$("bdDay").value}`).catch(e => alert(e.message));
   $("bdSchBtn").onclick = () => { $("bdSch").hidden = !$("bdSch").hidden; if (!$("bdSch").hidden) loadBdSchedule(); };
   $("bdQ").oninput = renderBandits;
+  const sw = cmp => { $("bdSwOrd").classList.toggle("on", !cmp); $("bdSwCmp").classList.toggle("on", cmp);
+    $("bdSwOrd").style.background = cmp ? "" : "#B45309"; $("bdSwOrd").style.color = cmp ? "" : "#fff";
+    $("bdSwCmp").style.background = cmp ? "#B45309" : ""; $("bdSwCmp").style.color = cmp ? "#fff" : "";
+    $("bdOrdView").hidden = cmp; $("bdCmpView").hidden = !cmp; if (cmp && !loaded.bdcmp) { loaded.bdcmp = true; initBdCmp(); } };
+  $("bdSwOrd").onclick = () => sw(false); $("bdSwCmp").onclick = () => sw(true); sw(false);
   loadBandits();
 }
 async function loadBandits() {
@@ -2872,7 +2880,7 @@ fetch("/ui/summary").then(r => {
       ["kpis", "freshInfo"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
       if (location.hash !== "#anom") location.hash = "#anom";
     }
-    if (!m.owner) { ["bandits", "bdcmp"].forEach(k => { const a = document.querySelector(`nav a[data-tab="${k}"]`); if (a) a.remove(); const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (["#bandits", "#bdcmp"].includes(location.hash)) location.hash = "#board"; }
+    if (!m.owner) { ["bandits"].forEach(k => { const a = document.querySelector(`nav a[data-tab="${k}"]`); if (a) a.remove(); const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (location.hash === "#bandits") location.hash = "#board"; }
     if (!m.analytics) { ["anal", "promo", "turn", "delist"].forEach(k => { const a = document.querySelector(`nav a[data-tab="${k}"]`); if (a) a.remove();
       const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (["#anal", "#promo", "#turn", "#delist"].includes(location.hash)) location.hash = "#board"; } }).catch(() => {});
   show((location.hash || "#board").slice(1));
