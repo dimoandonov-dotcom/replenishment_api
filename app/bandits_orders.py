@@ -30,6 +30,9 @@ WD = ["пон", "вт", "ср", "чет", "пет", "съб", "нед"]
 SOFT_API = "https://api-production-eda9.up.railway.app"       # Бандитс софтуеър (документите: стокови, КИ)
 MASTER = "https://bandits-import.netlify.app/master.json"     # обекти и артикули на Бандитс
 MAP_FIX = {26359: 669, 25833: 550}                                      # тортия чипотле - без код в името
+OBHOD_API = "https://script.google.com/macros/s/AKfycbzxTtMoij_A6yORV2-OE2RBEF1U5ZkEo1vAQZOMaYW4U_32KPbrKQ-7wnuLbTmMjmJrmQ/exec"
+LEFT_EXTRA = {"Закуски|Рогче": 537, "Закуски|Кренвиршка": 539, "Закуски|Баница": 538, "Закуски|Милинка": 542}
+LEFT_DAYS = 3                                                 # остатък от обхода важи до 3 дни
 EXT_BASE = 100000                                             # обектите извън Мистрал: id от 100001
 ALIAS = {"ДЕТЛАВРЕНТИЙ": "ЛАВРЕНТИЙ", "ДЕТЕЛИНАТРОШЕВО": "ТРОШЕВО", "ПР21РОЗА": "РОЗА"}
 SHELF_CAT = {"Салати": 4, "Десерти": 7, "Принцеса": 7, "ВЕГА": 4}
@@ -61,6 +64,7 @@ CREATE TABLE IF NOT EXISTS bd_ext (obekt TEXT PRIMARY KEY, id SERIAL, razdel TEX
 CREATE TABLE IF NOT EXISTS bd_soft (day DATE, store_id INT, bcode INT, delivered NUMERIC(12,3), returned NUMERIC(12,3),
   PRIMARY KEY (day, store_id, bcode));
 CREATE TABLE IF NOT EXISTS bd_meta (k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS bd_left (store_id INT, bcode INT, day DATE, qty NUMERIC(10,2), src TEXT, PRIMARY KEY (store_id, bcode));
 CREATE TABLE IF NOT EXISTS bd_orders (delivery_day DATE, loc INT, code INT, qty INT, per_day NUMERIC(10,2),
   need NUMERIC(10,2), stock NUMERIC(10,2), cap NUMERIC(10,2), waste_pct NUMERIC(6,1), cover_days INT, note TEXT,
   created_at TIMESTAMPTZ DEFAULT now(), PRIMARY KEY (delivery_day, loc, code));
@@ -211,12 +215,34 @@ def sync_soft(db: Session, days: int = 35) -> dict:
         except Exception:
             continue
         agg[(d, sid, c)][0 if kind == "Стокова" else 1] += abs(qn)
+    # остатъците от обхода на Бела (какво е в хладилника при посещението)
+    nleft = 0
+    try:
+        om = {k: int(v) for k, v in (master.get("orderMap") or {}).items() if str(v).isdigit()}
+        om.update(LEFT_EXTRA)
+        lr = _json.loads(urllib.request.urlopen(f"{OBHOD_API}?action=getLeftovers&days=7", timeout=120).read().decode()).get("rows", {})
+        db.execute(text("DELETE FROM bd_left"))
+        for key, v in lr.items():
+            ob, rest = key.split("|", 1) if "|" in key else (key, "")
+            e = ext.get(ob.strip()); c = om.get(rest)
+            if not e or not c:
+                continue
+            try:
+                d = datetime.strptime(v.get("date", ""), "%d.%m.%Y").date(); qn = float(v.get("qty") or 0)
+            except Exception:
+                continue
+            db.execute(text("""INSERT INTO bd_left VALUES (:s,:c,:d,:q,:src) ON CONFLICT (store_id, bcode)
+                               DO UPDATE SET day = EXCLUDED.day, qty = EXCLUDED.qty, src = EXCLUDED.src WHERE bd_left.day <= EXCLUDED.day"""),
+                       {"s": e[1] if e[1] is not None else e[0], "c": c, "d": d, "q": qn, "src": v.get("source")})
+            nleft += 1
+    except Exception:
+        db.rollback()
     db.execute(text("DELETE FROM bd_soft WHERE day >= :d"), {"d": since})
     if agg:
         db.execute(text("INSERT INTO bd_soft VALUES (:d,:s,:c,:i,:o)"),
                    [{"d": d, "s": s_, "c": c, "i": v[0], "o": v[1]} for (d, s_, c), v in agg.items()])
     db.commit()
-    return {"objects": len(ext), "lines": len(rows), "rows": len(agg)}
+    return {"objects": len(ext), "lines": len(rows), "rows": len(agg), "leftovers": nleft}
 
 
 def sync_all(db: Session) -> dict:
@@ -277,6 +303,8 @@ def build(db: Session, day: date, save: bool = True) -> dict:
     for d, st, c, i, o in db.execute(text("SELECT day, store_id, bcode, delivered, returned FROM bd_soft WHERE day >= :d"),
                                      {"d": today - timedelta(days=35)}).all():
         D[(st, c)][d][0] += float(i or 0); D[(st, c)][d][1] += float(o or 0)
+    LEFT = {(s_, c): (d, float(q)) for s_, c, d, q in db.execute(text("SELECT store_id, bcode, day, qty FROM bd_left WHERE day >= :d"),
+                                                                {"d": today - timedelta(days=LEFT_DAYS)}).all()}
     out = []
     for key in set(S) | set(D):
         st, k = key
@@ -312,7 +340,19 @@ def build(db: Session, day: date, save: bool = True) -> dict:
         k_ = max(1, shelf - 1)
         got = sum(v[0] - v[1] for d, v in dl.items() if d > today - timedelta(days=k_))
         note = []
-        if dl:
+        lf = LEFT.get(key)
+        if lf:
+            # Бела е видяла X бр. сутринта на ден L: + доставеното след това − продаденото от L до доставката
+            L_, lq = lf
+            after = sum(v[0] for d, v in dl.items() if d > L_)
+            if st < EXT_BASE and ser:
+                sold_since = sum(q for d, q in ser.items() if L_ <= d <= last)
+            else:
+                sold_since = per_day * max(0, (last - L_).days + 1)
+            sold_since += per_day * max(0, (day - last).days - 1)
+            est = max(0.0, lq + after - sold_since)
+            src_st = f"по обхода на Бела ({L_.strftime('%d.%m')}: {lq:g} бр.)"
+        elif dl:
             gone = sum(ser.get(today - timedelta(days=i), 0.0) for i in range(1, k_ + 1)) if (st < EXT_BASE and ser) else per_day * k_
             gone += per_day * max(0, (day - last).days - 1)          # от последния ден с данни до доставката
             est = max(0.0, got - gone)
