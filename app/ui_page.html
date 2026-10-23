@@ -583,11 +583,9 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <button id="bdBuild" class="warm">⚙️ Генерирай наново</button>
     <button id="bdXlsx">📥 Excel (цех + магазини)</button>
     <button id="bdSchBtn">📅 График на доставките</button>
-    <button id="bdCmpBtn">📊 Сравнение с Мони</button>
     <span class="note" id="bdInfo"></span>
   </div>
   <div id="bdSch" hidden></div>
-  <div id="bdCmp" hidden></div>
   <div class="board" id="bdKpis"></div>
   <div class="head"><h2>План за цеха</h2><span class="note">общо по артикули</span></div>
   <div class="scroll"><table><thead><tr><th>Код</th><th>Артикул</th><th>Група</th><th class="num">Бройки</th><th class="num">Магазини</th></tr></thead><tbody id="bdPlan"></tbody></table></div>
@@ -1541,7 +1539,6 @@ async function initBandits() {
   $("bdXlsx").onclick = () => download(`/ui/bandits/xlsx?day=${$("bdDay").value}`).catch(e => alert(e.message));
   $("bdSchBtn").onclick = () => { $("bdSch").hidden = !$("bdSch").hidden; if (!$("bdSch").hidden) loadBdSchedule(); };
   $("bdQ").oninput = renderBandits;
-  $("bdCmpBtn").onclick = () => { location.hash = "#bdcmp"; };
   loadBandits();
 }
 async function loadBandits() {
