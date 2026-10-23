@@ -512,6 +512,13 @@ def compare(db: Session, day: date) -> dict:
         "SELECT store_id, code, qty FROM bd_moni WHERE delivery_day = :d AND qty > 0"), {"d": day}).all()}
     moni_src = "заявката на Мони"
     sent = db.execute(text("SELECT MAX(sent_at) FROM bd_moni WHERE delivery_day = :d"), {"d": day}).scalar()
+    # обекти, които Мони не поръчва в „Бандитс заявки“ (напр. ДИВ 97 Бургас - по Viber) -> стоковите за деня
+    if moni:
+        have = {s_ for s_, _ in moni}
+        for s_, c, i in db.execute(text("SELECT store_id, bcode, delivered FROM bd_soft WHERE day = :d AND delivered > 0"),
+                                   {"d": day}).all():
+            if s_ not in have and c not in VEGA:
+                moni[(s_, c)] = float(i or 0)
     # Хляб и кифли (рогче, кренвиршка) ги поръчва Мария (ВЕГА) по имейл -> нейните са стоковите за деня
     for s_, c, i in db.execute(text("SELECT store_id, bcode, delivered FROM bd_soft WHERE day = :d AND delivered > 0 AND bcode = ANY(:v)"),
                                {"d": day, "v": list(VEGA)}).all():
@@ -550,7 +557,7 @@ def compare(db: Session, day: date) -> dict:
            "judged": sum(1 for r in rows if r["better"] in ("MinMaxAI", "Мони", "равно"))}
     ours_at = db.execute(text("SELECT MIN(created_at) FROM bd_orders WHERE delivery_day = :d"), {"d": day}).scalar()
     return {"day": day.isoformat(), "weekday": WD[day.weekday()], "has_ours": bool(ours), "has_moni": bool(moni),
-            "moni_src": moni_src + " · Хляб и кифли - Мария (стоковите)", "moni_sent": sent, "ours_at": ours_at.astimezone(SOFIA).strftime("%d.%m %H:%M") if ours_at else None,
+            "moni_src": moni_src + " · Хляб и кифли - Мария, Бургас - Viber (по стоковите)", "moni_sent": sent, "ours_at": ours_at.astimezone(SOFIA).strftime("%d.%m %H:%M") if ours_at else None,
             "sales_until": last.strftime("%d.%m.%Y") if last else None, "totals": tot, "rows": rows}
 
 
