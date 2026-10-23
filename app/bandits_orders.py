@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS bd_ext (obekt TEXT PRIMARY KEY, id SERIAL, razdel TEX
 CREATE TABLE IF NOT EXISTS bd_soft (day DATE, store_id INT, bcode INT, delivered NUMERIC(12,3), returned NUMERIC(12,3),
   PRIMARY KEY (day, store_id, bcode));
 CREATE TABLE IF NOT EXISTS bd_meta (k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS bd_moni (delivery_day DATE, store_id INT, code INT, qty NUMERIC(10,2), sent_at TEXT,
+  PRIMARY KEY (delivery_day, store_id, code));
 CREATE TABLE IF NOT EXISTS bd_left (store_id INT, bcode INT, day DATE, qty NUMERIC(10,2), src TEXT, PRIMARY KEY (store_id, bcode));
 CREATE TABLE IF NOT EXISTS bd_orders (delivery_day DATE, loc INT, code INT, qty INT, per_day NUMERIC(10,2),
   need NUMERIC(10,2), stock NUMERIC(10,2), cap NUMERIC(10,2), waste_pct NUMERIC(6,1), cover_days INT, note TEXT,
@@ -483,8 +485,14 @@ def compare(db: Session, day: date) -> dict:
     sch = schedule(db)
     ours = {(l, c): (int(q or 0), int(cv or 1)) for l, c, q, cv in db.execute(text(
         "SELECT loc, code, qty, cover_days FROM bd_orders WHERE delivery_day = :d"), {"d": day}).all()}
-    moni = {(s_, c): float(i or 0) for s_, c, i in db.execute(text(
-        "SELECT store_id, bcode, delivered FROM bd_soft WHERE day = :d AND delivered > 0"), {"d": day}).all()}
+    moni = {(s_, c): float(q or 0) for s_, c, q in db.execute(text(
+        "SELECT store_id, code, qty FROM bd_moni WHERE delivery_day = :d AND qty > 0"), {"d": day}).all()}
+    moni_src = "заявката на Мони"
+    sent = db.execute(text("SELECT MAX(sent_at) FROM bd_moni WHERE delivery_day = :d"), {"d": day}).scalar()
+    if not moni:                                     # няма я в „Бандитс заявки“ -> какво е издадено (стоковите)
+        moni = {(s_, c): float(i or 0) for s_, c, i in db.execute(text(
+            "SELECT store_id, bcode, delivered FROM bd_soft WHERE day = :d AND delivered > 0"), {"d": day}).all()}
+        moni_src = "стоковите за деня"
     last = db.execute(text("SELECT MAX(day) FROM bd_sales")).scalar()
     sold = defaultdict(float)
     for l, k, d, q in db.execute(text("SELECT loc, code, day, qty FROM bd_sales WHERE day >= :d AND day < :e"),
@@ -513,5 +521,45 @@ def compare(db: Session, day: date) -> dict:
            "ours_better": sum(1 for r in rows if r["better"] == "MinMaxAI"),
            "moni_better": sum(1 for r in rows if r["better"] == "Мони"),
            "judged": sum(1 for r in rows if r["better"] in ("MinMaxAI", "Мони", "равно"))}
+    ours_at = db.execute(text("SELECT MIN(created_at) FROM bd_orders WHERE delivery_day = :d"), {"d": day}).scalar()
     return {"day": day.isoformat(), "weekday": WD[day.weekday()], "has_ours": bool(ours), "has_moni": bool(moni),
+            "moni_src": moni_src, "moni_sent": sent, "ours_at": ours_at.astimezone(SOFIA).strftime("%d.%m %H:%M") if ours_at else None,
             "sales_until": last.strftime("%d.%m.%Y") if last else None, "totals": tot, "rows": rows}
+
+
+# ------------------------------------------------------------------ заявката на Мони (Бандитс заявки)
+def fetch_moni(db: Session, day: date) -> dict:
+    """Заявката на Мони за доставка на `day` от приложението „Бандитс заявки“.
+    Апито връща заявката за същия ден от седмицата ПРЕДИ подадената дата -> питаме с day+7."""
+    import json as _json
+    import urllib.request
+    ensure(db)
+    r = _json.loads(urllib.request.urlopen(f"{OBHOD_API}?action=getPreviousOrder&date={(day + timedelta(days=7)).strftime('%d.%m.%Y')}",
+                                           timeout=120).read().decode())
+    if not r.get("found") or r.get("dateDelivery") != day.strftime("%d.%m.%Y"):
+        return {"found": False}
+    master = _json.loads(urllib.request.urlopen(MASTER, timeout=60).read().decode())
+    om = {k: int(v) for k, v in (master.get("orderMap") or {}).items() if str(v).isdigit()}
+    om.update(LEFT_EXTRA)
+    ext = {o: (EXT_BASE + i if l is None else l) for o, i, l in db.execute(text("SELECT obekt, id, loc FROM bd_ext")).all()}
+    up = {o.upper(): sid for o, sid in ext.items()}
+    pref = {"Сити": ["СИТИ "], "Стар": ["СТАР "], "Други": [""]}
+    agg, miss = defaultdict(float), set()
+    for row in r.get("rows", []):
+        ob = (row.get("obekt") or "").strip().upper()
+        sh = row.get("sheet") or ""
+        cands = (["300 "] if sh.startswith("300") else pref.get(sh, ["300 ", "СИТИ ", "СТАР ", ""]))
+        sid = next((up[p_ + ob] for p_ in cands if p_ + ob in up), None)
+        if sid is None:                                  # „Царевец“ -> „300 ЦАРЕВЕЦ+“, „ПР-21 Роза“ и т.н.
+            sid = next((v for k, v in up.items() if _norm(k) == _norm(ob) and (not sh.startswith("300") or k.startswith("300"))), None)
+        c = om.get(f"{row.get('cat')}|{row.get('art')}")
+        if sid is None or c is None:
+            miss.add(f"{row.get('obekt')} / {row.get('cat')}|{row.get('art')}")
+            continue
+        agg[(sid, c)] += float(row.get("qty") or 0)
+    db.execute(text("DELETE FROM bd_moni WHERE delivery_day = :d"), {"d": day})
+    if agg:
+        db.execute(text("INSERT INTO bd_moni VALUES (:d,:s,:c,:q,:t)"),
+                   [{"d": day, "s": s_, "c": c, "q": q, "t": r.get("sentAt")} for (s_, c), q in agg.items()])
+    db.commit()
+    return {"found": True, "sent_at": r.get("sentAt"), "version": r.get("version"), "lines": len(agg), "unmatched": sorted(miss)[:20]}

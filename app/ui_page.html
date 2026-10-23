@@ -1518,7 +1518,7 @@ const ANH = {
 // ---------------- Бандитс (само Димо) ----------------
 let BD = null;
 const BDW = ["пон", "вт", "ср", "чет", "пет", "съб", "нед"];
-function bdTomorrow() { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); }
+function bdTomorrow() { const d = new Date(); d.setDate(d.getDate() + 2); return d.toISOString().slice(0, 10); }
 async function initBandits() {
   if (!$("bdDay").value) $("bdDay").value = bdTomorrow();
   $("bdDay").onchange = () => { loadBandits(); if (!$("bdCmp").hidden) loadBdCompare(); };
@@ -1563,7 +1563,7 @@ async function loadBdCompare() {
   try { d = await api(`/ui/bandits/compare?day=${$("bdDay").value}&fresh=1`); } catch (e) { $("bdCmp").innerHTML = `<div class="empty">Грешка: ${esc(e.message)}</div>`; return; }
   const t = d.totals;
   let h = `<div class="head"><h2>Сравнение с Мони · доставка ${d.day.slice(8, 10)}.${d.day.slice(5, 7)} (${d.weekday})</h2>
-    <span class="note">Мони = стоковите на Бандитс за деня · продадено = касата до следващата доставка (само магазини 300, продажби до ${d.sales_until || "—"})</span></div>`;
+    <span class="note">Мони = ${esc(d.moni_src)}${d.moni_sent ? " (пусната " + esc(d.moni_sent) + ")" : ""} · MinMaxAI ${d.ours_at ? "от " + d.ours_at : "—"} · продадено = касата до следващата доставка (само магазини 300, продажби до ${d.sales_until || "—"})</span></div>`;
   if (!d.has_moni) h += `<p class="note">Мони още не е пуснала заявката за този ден (няма стокови в Бандитс софтуеър).</p>`;
   if (!d.has_ours) h += `<p class="note">MinMaxAI няма записана заявка за този ден (започва да пази от днес нататък).</p>`;
   h += `<div class="board">${[["MINMAXAI", fmtN(t.ours) + " бр.", "", "нашата заявка"], ["МОНИ", fmtN(t.moni) + " бр.", "", "пуснато от Мони"],

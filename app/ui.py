@@ -604,7 +604,7 @@ def ui_pilot(db: Session = Depends(get_db)):
 # Бандитс - заявки за сандвичи и десерти (само за Димо)
 # ---------------------------------------------------------------------------
 def _bd_day(day: str | None) -> date:
-    return date.fromisoformat(day) if day else datetime.now(_SOFIA).date() + timedelta(days=1)
+    return date.fromisoformat(day) if day else datetime.now(_SOFIA).date() + timedelta(days=2)
 
 
 @router.get("/ui/bandits/orders")
@@ -626,9 +626,14 @@ def ui_bandits_build(day: str | None = None, sync: bool = True, db: Session = De
 @router.get("/ui/bandits/compare")
 def ui_bandits_compare(day: str | None = None, fresh: bool = False, db: Session = Depends(get_db)):
     from . import bandits_orders as bo
+    d = _bd_day(day)
     if fresh:
+        try:
+            bo.fetch_moni(db, d)
+        except Exception:
+            db.rollback()
         bo.sync_soft(db)
-    return bo.compare(db, _bd_day(day))
+    return bo.compare(db, d)
 
 
 @router.get("/ui/bandits/schedule")
