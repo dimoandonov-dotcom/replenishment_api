@@ -46,6 +46,18 @@ def _tick():
         except Exception as e:  # пробваме пак след 30 мин
             db.rollback()
             _state["last_error"] = f"{type(e).__name__}: {e}"[:300]
+        # Бандитс: в 10:00 - продажбите от Мистрал и заявката за утрешната доставка
+        nb = datetime.now(SOFIA)
+        if (nb.hour, nb.minute) >= (10, 0) and _state.get("bandits_day") != nb.date():
+            _state["bandits_day"] = nb.date()
+            try:
+                from . import bandits_orders as bo
+                info = bo.sync(db)
+                r = bo.build(db, nb.date() + timedelta(days=1), save=True)
+                _state["bandits"] = {"at": nb.strftime("%d.%m %H:%M"), "sync": info, "stores": r.get("stores"), "units": r.get("units")}
+            except Exception as e:
+                db.rollback()
+                _state["bandits"] = f"{type(e).__name__}: {e}"[:300]
         # пилотните магазини под лупа: справка в 10:00 и 18:00
         now_ = datetime.now(SOFIA)
         pslot = max([h for h in (10, 18) if now_.hour >= h], default=None)

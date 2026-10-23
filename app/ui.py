@@ -128,12 +128,13 @@ def ui_me(request: Request, db: Session = Depends(get_db)):
     from . import main as _main
     user = getattr(request.state, "user", None)
     if not user:
-        return {"user": None, "name": "система", "analytics": True}
+        return {"user": None, "name": "система", "analytics": True, "owner": True}
     u = db.get(m.AppUser, user)
     return {"user": user, "name": u.display_name if u else "Димо",
             "analytics": user.lower() in _main.analytics_users(),
             "analytics_only": user.lower() in _main.analytics_only_users(),
-            "anomalies_only": user.lower() in _main.anomalies_only_users()}
+            "anomalies_only": user.lower() in _main.anomalies_only_users(),
+            "owner": bool(_main.APP_USER) and user.lower() == _main.APP_USER.lower()}
 
 
 class UserIn(BaseModel):
@@ -597,6 +598,56 @@ def ui_compare_review(day: date | None = None, fmt: str = Query("json", pattern=
 def ui_pilot(db: Session = Depends(get_db)):
     from . import pilot
     return pilot.listing(db)
+
+
+# ---------------------------------------------------------------------------
+# Бандитс - заявки за сандвичи и десерти (само за Димо)
+# ---------------------------------------------------------------------------
+def _bd_day(day: str | None) -> date:
+    return date.fromisoformat(day) if day else datetime.now(_SOFIA).date() + timedelta(days=1)
+
+
+@router.get("/ui/bandits/orders")
+def ui_bandits_orders(day: str | None = None, db: Session = Depends(get_db)):
+    from . import bandits_orders as bo
+    return bo.saved(db, _bd_day(day))
+
+
+@router.post("/ui/bandits/build")
+def ui_bandits_build(day: str | None = None, sync: bool = True, db: Session = Depends(get_db)):
+    from . import bandits_orders as bo
+    info = bo.sync(db) if sync else None
+    r = bo.build(db, _bd_day(day), save=True)
+    r["sync"] = info
+    return r
+
+
+@router.get("/ui/bandits/schedule")
+def ui_bandits_schedule(db: Session = Depends(get_db)):
+    from . import bandits_orders as bo
+    return bo.schedule_list(db)
+
+
+class BdScheduleIn(BaseModel):
+    loc: int
+    days: list[int]
+    note: str | None = None
+
+
+@router.post("/ui/bandits/schedule")
+def ui_bandits_schedule_set(payload: BdScheduleIn, db: Session = Depends(get_db)):
+    from . import bandits_orders as bo
+    return bo.set_schedule(db, payload.loc, payload.days, payload.note)
+
+
+@router.get("/ui/bandits/xlsx")
+def ui_bandits_xlsx(day: str | None = None, db: Session = Depends(get_db)):
+    from urllib.parse import quote
+    from . import bandits_orders as bo
+    d = _bd_day(day)
+    fn = f"Бандитс_заявка_{d.strftime('%d.%m.%Y')}.xlsx"
+    return Response(bo.xlsx(db, d), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fn)}"})
 
 
 @router.get("/ui/pilot/report")

@@ -169,6 +169,9 @@ async def _require_auth(request: Request, call_next):
               or (request.method == "POST" and p in ("/ui/export-xlsx", "/ui/anomalies/minusi/fix")))
         if not ok:
             return JSONResponse(status_code=403, content={"detail": "Профилът е само за „Аномалии“"})
+    # Бандитс - само главният потребител (Димо) или API ключ
+    if p.startswith("/ui/bandits") and user0 is not None and (not APP_USER or user0.lower() != APP_USER.lower()):
+        return JSONResponse(status_code=403, content={"detail": "Нямате достъп"})
     if p.startswith("/ui/analytics") or p.startswith("/analytics"):
         user = getattr(request.state, "user", None)
         if user is not None and user.lower() not in analytics_users():

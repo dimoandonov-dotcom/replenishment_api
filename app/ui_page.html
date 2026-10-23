@@ -294,7 +294,7 @@ nav a:hover { transform:translateY(-2px); }
 nav a.on { background:var(--c,var(--amber)); color:#fff; box-shadow:0 8px 20px color-mix(in srgb,var(--c,var(--amber)) 40%,transparent); }
 nav a.on::before { background:#fff; box-shadow:0 0 0 3px rgba(255,255,255,.35); }
 nav a[data-tab="board"]{--c:#D9621C} nav a[data-tab="orders"]{--c:#2F7DD1} nav a[data-tab="assort"]{--c:#E9A23B}
-nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A} nav a[data-tab="qual"]{--c:#0EA5A4} nav a[data-tab="anal"]{--c:#C026D3} nav a[data-tab="anom"]{--c:#9F1239} nav a[data-tab="promo"]{--c:#DB2777} nav a[data-tab="turn"]{--c:#0F766E} nav a[data-tab="delist"]{--c:#57534E}
+nav a[data-tab="plano"]{--c:#1F8A5B} nav a[data-tab="cmp"]{--c:#7A5AF8} nav a[data-tab="learn"]{--c:#D2493A} nav a[data-tab="run"]{--c:#4B5563} nav a[data-tab="nord"]{--c:#B8451A} nav a[data-tab="qual"]{--c:#0EA5A4} nav a[data-tab="anal"]{--c:#C026D3} nav a[data-tab="anom"]{--c:#9F1239} nav a[data-tab="bandits"]{--c:#B45309} nav a[data-tab="promo"]{--c:#DB2777} nav a[data-tab="turn"]{--c:#0F766E} nav a[data-tab="delist"]{--c:#57534E}
 
 /* ---------- бутони ---------- */
 button { border-radius:10px; border:1px solid var(--line-strong); background:var(--raised); font-family:var(--head); font-weight:700;
@@ -386,6 +386,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <a href="#delist" data-tab="delist">Делистване</a>
   <a href="#qual" data-tab="qual">Качество</a>
   <a href="#anom" data-tab="anom">Аномалии</a>
+  <a href="#bandits" data-tab="bandits">🥪 Бандитс</a>
   <a href="#nord" data-tab="nord">Не се поръчват</a>
   <a href="#cmp" data-tab="cmp">Сравнение</a>
   <a href="#learn" data-tab="learn">Обучение</a>
@@ -558,6 +559,25 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <tbody id="anBody"></tbody>
   </table></div>
   </div>
+</section>
+
+<!-- ============ БАНДИТС (само Димо) ============ -->
+<section class="tab" id="tab-bandits">
+  <p class="note" style="margin:0 0 14px;line-height:1.6">Автоматична заявка за <b>сандвичите и десертите на Бандитс</b> по продажбите от Мистрал за последните 14 дни (по ден от седмицата),
+  покритие до следващата доставка по графика на магазина и таван по срока на годност. Никога 0 за артикул, който се продава и е свършил. Вижда се само от теб.</p>
+  <div class="bar">
+    <label>Доставка на <input type="date" id="bdDay"></label>
+    <button id="bdBuild" class="warm">⚙️ Генерирай наново</button>
+    <button id="bdXlsx">📥 Excel (цех + магазини)</button>
+    <button id="bdSchBtn">📅 График на доставките</button>
+    <span class="note" id="bdInfo"></span>
+  </div>
+  <div id="bdSch" hidden></div>
+  <div class="board" id="bdKpis"></div>
+  <div class="head"><h2>План за цеха</h2><span class="note">общо по артикули</span></div>
+  <div class="scroll"><table><thead><tr><th>Код</th><th>Артикул</th><th>Група</th><th class="num">Бройки</th><th class="num">Магазини</th></tr></thead><tbody id="bdPlan"></tbody></table></div>
+  <div class="head"><h2>По магазини</h2><input id="bdQ" placeholder="търси магазин / артикул" style="min-width:200px"></div>
+  <div id="bdStores"></div>
 </section>
 
 <!-- ============ БРОШУРА И ТИХИ АКЦИИ ============ -->
@@ -858,7 +878,7 @@ const loaded = {};
 function show(tab) {
   document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + tab));
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: () => loadMinusi(), promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: () => loadMinusi(), bandits: initBandits, promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -1492,6 +1512,57 @@ const ANH = {
   suspicious_delivery: ["Заведено е многократно повече от поръчаното или от максимума — типично при грешно въвеждане (OCR).", "Провери документа за доставка. Ако количеството е грешно — коригирай в Мистрал веднага, иначе наличността е завишена и стоката няма да се поръчва."],
 };
 
+
+// ---------------- Бандитс (само Димо) ----------------
+let BD = null;
+const BDW = ["пон", "вт", "ср", "чет", "пет", "съб", "нед"];
+function bdTomorrow() { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); }
+async function initBandits() {
+  if (!$("bdDay").value) $("bdDay").value = bdTomorrow();
+  $("bdDay").onchange = () => loadBandits();
+  $("bdBuild").onclick = async () => { $("bdInfo").textContent = "Дърпам продажбите от Мистрал и смятам…"; $("bdBuild").disabled = true;
+    try { BD = await api(`/ui/bandits/build?day=${$("bdDay").value}`, { method: "POST" }); renderBandits(); }
+    catch (e) { $("bdInfo").textContent = "Грешка: " + e.message; } finally { $("bdBuild").disabled = false; } };
+  $("bdXlsx").onclick = () => download(`/ui/bandits/xlsx?day=${$("bdDay").value}`).catch(e => alert(e.message));
+  $("bdSchBtn").onclick = () => { $("bdSch").hidden = !$("bdSch").hidden; if (!$("bdSch").hidden) loadBdSchedule(); };
+  $("bdQ").oninput = renderBandits;
+  loadBandits();
+}
+async function loadBandits() {
+  $("bdInfo").textContent = "Зареждам…";
+  try { BD = await api(`/ui/bandits/orders?day=${$("bdDay").value}`); renderBandits(); }
+  catch (e) { $("bdInfo").textContent = "Грешка: " + e.message; }
+}
+function renderBandits() {
+  const d = BD; if (!d) return;
+  if (!d.ready) { $("bdInfo").textContent = "Няма данни още - натисни „Генерирай наново“."; return; }
+  $("bdInfo").textContent = `продажби до ${d.data_until || "—"}${d.created ? " · заявката е от " + d.created : ""}`;
+  const lines = d.lines.filter(o => o.qty > 0);
+  $("bdKpis").innerHTML = [["ДОСТАВКА", `${d.day.slice(8, 10)}.${d.day.slice(5, 7)}`, "", d.weekday],
+    ["МАГАЗИНИ", fmtN(d.stores), "", "с доставка в този ден"], ["БРОЙКИ", fmtN(d.units), "t", "общо за производство"],
+    ["РЕДОВЕ", fmtN(lines.length), "", "магазин × артикул"],
+    ["НА МИНУС В МИСТРАЛ", fmtN(d.lines.filter(o => o.stock < 0).length), d.lines.some(o => o.stock < 0) ? "a" : "", "незаведени доставки → наличността не е вярна"]]
+    .map(([l, v, c, s]) => `<div class="tile"><div class="l">${l}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`).join("");
+  $("bdPlan").innerHTML = d.plan.map(p => `<tr><td>${p.code}</td><td class="name">${esc(p.name)}</td><td>${esc(p.sub || "")}</td><td class="num"><b>${fmtN(p.qty)}</b></td><td class="num">${p.stores}</td></tr>`).join("")
+    || `<tr><td colspan="5" class="empty">Няма заявка за този ден (неделя или магазините нямат доставка по график).</td></tr>`;
+  const q = ($("bdQ").value || "").trim().toLowerCase(), by = {};
+  d.lines.forEach(o => { if (!q || (o.store + " " + o.name + " " + o.code).toLowerCase().includes(q)) (by[o.store] = by[o.store] || []).push(o); });
+  $("bdStores").innerHTML = Object.keys(by).sort((a, b) => a.localeCompare(b, "bg")).map(st => { const L = by[st], u = L.reduce((a, o) => a + o.qty, 0);
+    return `<details class="help" style="margin:0 0 8px;border:1px solid var(--line,#e7dccb);border-radius:12px;padding:8px 12px"><summary style="cursor:pointer"><b>${esc(st)}</b> · ${fmtN(u)} бр. · ${L.filter(o => o.qty > 0).length} артикула${L.some(o => o.stock < 0) ? ' · <span style="color:#B91C1C">минуси в Мистрал</span>' : ""}</summary>
+    <div class="scroll"><table><thead><tr><th>Артикул</th><th class="num">Продадени 14 дни</th><th class="num">На ден</th><th class="num">Нужно</th><th class="num">Наличност</th><th class="num">Таван (срок)</th><th class="num">Заявка</th><th>Бележка</th></tr></thead><tbody>
+    ${L.map(o => `<tr><td class="name">${esc(o.name)} <span class="muted">${o.code}</span></td><td class="num">${o.sold14 ?? fmtN(o.per_day * 14)}</td><td class="num">${o.per_day}</td><td class="num">${o.need}</td>
+      <td class="num ${o.stock < 0 ? "low" : ""}">${o.stock}</td><td class="num">${o.cap}</td><td class="num"><b>${o.qty}</b></td><td class="note">${esc(o.note || "")}</td></tr>`).join("")}</tbody></table></div></details>`; }).join("");
+}
+async function loadBdSchedule() {
+  const rows = await api("/ui/bandits/schedule");
+  $("bdSch").innerHTML = `<div class="note" style="margin:8px 0">Отметни дните с доставка за всеки магазин (по подразбиране пон–съб). Заявката за ден покрива продажбите до следващата доставка.</div>
+  <div class="scroll"><table><thead><tr><th>Магазин</th>${BDW.map(w => `<th class="num">${w}</th>`).join("")}</tr></thead><tbody>
+  ${rows.map(r => `<tr><td class="name">${esc(r.store)}</td>${BDW.map((w, i) => `<td class="num"><input type="checkbox" data-bl="${r.loc}" data-bd="${i}" ${r.days.includes(i) ? "checked" : ""}></td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  document.querySelectorAll("#bdSch [data-bl]").forEach(cb => cb.onchange = async () => {
+    const loc = +cb.dataset.bl, days = [...document.querySelectorAll(`#bdSch [data-bl="${loc}"]`)].filter(x => x.checked).map(x => +x.dataset.bd);
+    await api("/ui/bandits/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ loc, days }) });
+  });
+}
 // ---------------- Минуси за оправяне ----------------
 let MN = null, mnView = 0, mnStore = "";
 try { mnStore = localStorage.getItem("mnStore") || ""; } catch (e) {}
@@ -2748,6 +2819,7 @@ fetch("/ui/summary").then(r => {
       ["kpis", "freshInfo"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
       if (location.hash !== "#anom") location.hash = "#anom";
     }
+    if (!m.owner) { const a = document.querySelector('nav a[data-tab="bandits"]'); if (a) a.remove(); const t = document.getElementById("tab-bandits"); if (t) t.remove(); if (location.hash === "#bandits") location.hash = "#board"; }
     if (!m.analytics) { ["anal", "promo", "turn", "delist"].forEach(k => { const a = document.querySelector(`nav a[data-tab="${k}"]`); if (a) a.remove();
       const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (["#anal", "#promo", "#turn", "#delist"].includes(location.hash)) location.hash = "#board"; } }).catch(() => {});
   show((location.hash || "#board").slice(1));
