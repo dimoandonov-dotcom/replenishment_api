@@ -320,7 +320,8 @@ def build(db: Session, day: date, save: bool = True) -> dict:
         ret28 = sum(v[1] for d, v in dl.items() if d > today - timedelta(days=28))
         w = ret28 / deliv28 if deliv28 > 0 else 0.0
         ser = S.get(key)
-        if st < EXT_BASE and ser:                       # магазин 300: касата
+        if st < EXT_BASE:                               # магазин 300: САМО касата от Мистрал (Димо, 23.10)
+            ser = ser or {}
             sold14 = sum(ser.get(last - timedelta(days=i), 0.0) for i in range(DAYS))
             fc = lambda x: _forecast(ser, x, last)       # noqa: E731
             src = "каса"
@@ -345,7 +346,7 @@ def build(db: Session, day: date, save: bool = True) -> dict:
             # Бела е видяла X бр. сутринта на ден L: + доставеното след това − продаденото от L до доставката
             L_, lq = lf
             after = sum(v[0] for d, v in dl.items() if d > L_)
-            if st < EXT_BASE and ser:
+            if st < EXT_BASE:
                 sold_since = sum(q for d, q in ser.items() if L_ <= d <= last)
             else:
                 sold_since = per_day * max(0, (last - L_).days + 1)
@@ -353,7 +354,7 @@ def build(db: Session, day: date, save: bool = True) -> dict:
             est = max(0.0, lq + after - sold_since)
             src_st = f"по обхода на Бела ({L_.strftime('%d.%m')}: {lq:g} бр.)"
         elif dl:
-            gone = sum(ser.get(today - timedelta(days=i), 0.0) for i in range(1, k_ + 1)) if (st < EXT_BASE and ser) else per_day * k_
+            gone = sum(ser.get(today - timedelta(days=i), 0.0) for i in range(1, k_ + 1)) if st < EXT_BASE else per_day * k_
             gone += per_day * max(0, (day - last).days - 1)          # от последния ден с данни до доставката
             est = max(0.0, got - gone)
             src_st = "по доставките на Бандитс"
