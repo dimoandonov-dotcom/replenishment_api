@@ -67,13 +67,16 @@ def sync(db: Session, days: int = 35) -> dict:
         cur.execute(f"""SELECT DISTINCT c.MATERIALCODE AS code FROM SALECONTENT c WITH (NOLOCK)
                         JOIN SALE s WITH (NOLOCK) ON s.NUM = c.NUM AND s.LOCATIONID = c.LOCATIONID
                         WHERE c.LASTPARTNERNAMEID IN ({P}) AND s.REPORTINGDATE >= %s""", (since.isoformat(),))
-        codes = sorted({int(r["code"]) for r in cur.fetchall()})
+        codes = sorted({int(r["code"]) for r in cur.fetchall()} | set(SHELF))
         if not codes:
             raise RuntimeError("Няма продажби на Бандитс")
         C = ",".join(map(str, codes))
         cur.execute(f"""SELECT MATERIALCODE AS code, MAX(SEARCHNAME) AS nm, MAX(CATEGORY) AS cat, MAX(AVGDELIVERYPRICE) AS p
                         FROM MATERIAL WITH (NOLOCK) WHERE MATERIALCODE IN ({C}) GROUP BY MATERIALCODE""")
         mat = {int(r["code"]): r for r in cur.fetchall()}
+        # само стоката на Бандитс: в името има „БАНДИТС“ или е от известните (Хляб и кифли и др.)
+        codes = [c for c in codes if c in SHELF or "БАНДИТС" in ((mat.get(c) or {}).get("nm") or "").upper()]
+        C = ",".join(map(str, codes))
         cur.execute("SELECT CATEGORY AS code, MAX(NAME) AS name FROM CATEGORY GROUP BY CATEGORY")
         cname = {(r["code"] or "").strip(): r["name"] for r in cur.fetchall()}
         cur.execute(f"""SELECT s.LOCATIONID AS loc, c.MATERIALCODE AS code, s.REPORTINGDATE AS d, SUM(c.QTY) AS q
@@ -100,11 +103,12 @@ def sync(db: Session, days: int = 35) -> dict:
         db.execute(text("INSERT INTO bd_stores(loc, name) VALUES (:i,:n) ON CONFLICT (loc) DO UPDATE SET name = EXCLUDED.name"),
                    {"i": loc, "n": lname.get(loc, str(loc))})
         db.execute(text("INSERT INTO bd_schedule(loc) VALUES (:i) ON CONFLICT DO NOTHING"), {"i": loc})
+    db.execute(text("UPDATE bd_articles SET active = (code = ANY(:c))"), {"c": codes})
     for code in codes:
         m_ = mat.get(code, {})
         db.execute(text("""INSERT INTO bd_articles(code, name, sub, shelf_days, price) VALUES (:c,:n,:s,:d,:p)
                            ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, sub = EXCLUDED.sub, price = EXCLUDED.price,
-                           shelf_days = COALESCE(bd_articles.shelf_days, EXCLUDED.shelf_days), updated_at = now()"""),
+                           shelf_days = COALESCE(bd_articles.shelf_days, EXCLUDED.shelf_days), active = TRUE, updated_at = now()"""),
                    {"c": code, "n": (m_.get("nm") or str(code)).strip(), "s": cname.get((m_.get("cat") or "").strip(), ""),
                     "d": SHELF.get(code), "p": float(m_.get("p") or 0)})
     db.execute(text("DELETE FROM bd_sales WHERE day >= :d"), {"d": since})
@@ -189,13 +193,16 @@ def build(db: Session, day: date, save: bool = True) -> dict:
         target = need * (1 + safety)
         cap = sum(_forecast(ser, day + timedelta(days=i), last) for i in range(max(1, min(shelf - 1, 7))))
         raw = stock.get((st, k), 0.0)
-        q0 = max(raw, 0.0)
+        note = []
+        # над това, което се продава до изтичане на срока, наличността е невъзможна (грешно заведено / върнато)
+        q0 = min(max(raw, 0.0), cap)
+        if raw > cap + 2:
+            note.append(f"съмнителна наличност {raw:g} (повече, отколкото се продава до изтичане) - броя {q0:.0f}")
         qty = max(0, math.ceil(target - q0 - 0.25))
         qty = int(min(qty, max(0, math.floor(cap - q0 + 0.5))))
-        note = []
-        if qty == 0 and q0 <= 0:
+        if qty == 0 and sold14 >= 2:
             qty = 1
-            note.append("поне 1 бр. - продава се, а е на 0")
+            note.append("поне 1 бр. - никога 0 за артикул, който се продава")
         if raw < 0:
             note.append(f"в Мистрал е {raw:g} (незаведени доставки?)")
         if w > 0.08:
