@@ -19,7 +19,7 @@ def status() -> dict:
     return {"auto_every_min": EVERY_MIN, "auto_hours": f"{HOURS[0]:02d}:00–{HOURS[1]:02d}:00",
             "auto_last_run": f(_state["last_run"]), "auto_last_error": _state["last_error"],
             "auto_last_inserted": (_state["last_result"] or {}).get("inserted"),
-            "dispatch_0930": _state.get("dispatch_result"), "ocr_alerts": _state.get("ocr_alerts")}
+            "dispatch_0930": _state.get("dispatch_result"), "ocr_alerts": _state.get("ocr_alerts"), "pilot_report": _state.get("pilot_report")}
 
 
 def _tick():
@@ -43,6 +43,17 @@ def _tick():
         except Exception as e:  # пробваме пак след 30 мин
             db.rollback()
             _state["last_error"] = f"{type(e).__name__}: {e}"[:300]
+        # пилотните магазини под лупа: справка в 10:00 и 18:00
+        now_ = datetime.now(SOFIA)
+        pslot = max([h for h in (10, 18) if now_.hour >= h], default=None)
+        if pslot is not None and _state.get("pilot_slot") != (now_.date(), pslot):
+            _state["pilot_slot"] = (now_.date(), pslot)
+            try:
+                from . import pilotreport
+                _state["pilot_report"] = {"at": now_.strftime("%d.%m %H:%M"), **{k: v for k, v in pilotreport.send(db).items() if k == "sent"}}
+            except Exception as e:
+                db.rollback()
+                _state["pilot_report"] = f"{type(e).__name__}: {e}"[:300]
         # грешно заведени фактури на НДК -> съобщение до Наде (и Димо)
         if 8 <= datetime.now(SOFIA).hour < 20:
             try:

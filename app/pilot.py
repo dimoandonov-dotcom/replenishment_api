@@ -10,12 +10,28 @@ def _ensure(db: Session):
                        since DATE DEFAULT CURRENT_DATE, note TEXT)"""))
     # Надежда е първата (19-20.10.2026) - заявката ѝ не минава през Ани
     db.execute(text("INSERT INTO pilot_stores(store_id, note) VALUES (46, 'първи пилот') ON CONFLICT DO NOTHING"))
+    # 2-ра вълна от неделя 25.10.2026 (Димо, 23.10): Чаталджа, Странджа, Възраждане, Дубровник, Младост
+    db.execute(text("""INSERT INTO pilot_stores(store_id, since, note) VALUES
+                       (1, '2026-10-25', '2-ра вълна'), (27, '2026-10-25', '2-ра вълна'), (26, '2026-10-25', '2-ра вълна'),
+                       (14, '2026-10-25', '2-ра вълна'), (37, '2026-10-25', '2-ра вълна') ON CONFLICT DO NOTHING"""))
     db.commit()
 
 
 def ids(db: Session) -> set[int]:
     _ensure(db)
     return {r[0] for r in db.execute(text("SELECT store_id FROM pilot_stores")).all()}
+
+
+def since_map(db: Session) -> dict:
+    """store_id -> от коя дата (на заявката) MinMaxAI поръчва истински за магазина."""
+    _ensure(db)
+    return {r[0]: r[1] for r in db.execute(text("SELECT store_id, since FROM pilot_stores")).all()}
+
+
+def active_ids(db: Session, day=None) -> set[int]:
+    from datetime import datetime, timedelta, timezone
+    day = day or datetime.now(timezone(timedelta(hours=3))).date()
+    return {s for s, d in since_map(db).items() if d is None or d <= day}
 
 
 def listing(db: Session) -> list[dict]:
@@ -26,10 +42,12 @@ def listing(db: Session) -> list[dict]:
             for i, n, d in rows]
 
 
-def set_pilot(db: Session, store_id: int, on: bool) -> dict:
+def set_pilot(db: Session, store_id: int, on: bool, since=None) -> dict:
     _ensure(db)
     if on:
-        db.execute(text("INSERT INTO pilot_stores(store_id) VALUES (:s) ON CONFLICT DO NOTHING"), {"s": store_id})
+        db.execute(text("""INSERT INTO pilot_stores(store_id, since) VALUES (:s, COALESCE(:d, CURRENT_DATE))
+                           ON CONFLICT (store_id) DO UPDATE SET since = COALESCE(:d, pilot_stores.since)"""),
+                   {"s": store_id, "d": since})
     else:
         db.execute(text("DELETE FROM pilot_stores WHERE store_id = :s"), {"s": store_id})
     db.commit()

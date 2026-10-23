@@ -599,6 +599,19 @@ def ui_pilot(db: Session = Depends(get_db)):
     return pilot.listing(db)
 
 
+@router.get("/ui/pilot/report")
+def ui_pilot_report(db: Session = Depends(get_db)):
+    """Пилотните магазини под лупа - справката, която отива в Telegram в 10:00 и 18:00."""
+    from . import pilotreport
+    return pilotreport.build(db)
+
+
+@router.post("/ui/pilot/report/send")
+def ui_pilot_report_send(db: Session = Depends(get_db)):
+    from . import pilotreport
+    return pilotreport.send(db)
+
+
 @router.post("/ui/pilot/{store_id}")
 def ui_pilot_set(store_id: int, on: bool = True, db: Session = Depends(get_db)):
     """Магазин в пилота: заявката на MinMaxAI е истинската (НДК доставя по нея)."""
