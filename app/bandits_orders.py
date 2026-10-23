@@ -66,6 +66,8 @@ CREATE TABLE IF NOT EXISTS bd_soft (day DATE, store_id INT, bcode INT, delivered
 CREATE TABLE IF NOT EXISTS bd_meta (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS bd_moni (delivery_day DATE, store_id INT, code INT, qty NUMERIC(10,2), sent_at TEXT,
   PRIMARY KEY (delivery_day, store_id, code));
+CREATE TABLE IF NOT EXISTS bd_moni_log (delivery_day DATE, version INT, sent_at TEXT, seen_at TIMESTAMPTZ DEFAULT now(),
+  lines INT, units NUMERIC(12,2), PRIMARY KEY (delivery_day, version));
 CREATE TABLE IF NOT EXISTS bd_left (store_id INT, bcode INT, day DATE, qty NUMERIC(10,2), src TEXT, PRIMARY KEY (store_id, bcode));
 CREATE TABLE IF NOT EXISTS bd_orders (delivery_day DATE, loc INT, code INT, qty INT, per_day NUMERIC(10,2),
   need NUMERIC(10,2), stock NUMERIC(10,2), cap NUMERIC(10,2), waste_pct NUMERIC(6,1), cover_days INT, note TEXT,
@@ -576,9 +578,59 @@ def fetch_moni(db: Session, day: date) -> dict:
             miss.add(f"{row.get('obekt')} / {row.get('cat')}|{row.get('art')}")
             continue
         agg[(sid, c)] += float(row.get("qty") or 0)
+    new_ver = not db.execute(text("SELECT 1 FROM bd_moni_log WHERE delivery_day = :d AND version = :v"),
+                             {"d": day, "v": int(r.get("version") or 0)}).first()
+    db.execute(text("""INSERT INTO bd_moni_log(delivery_day, version, sent_at, lines, units) VALUES (:d,:v,:t,:l,:u)
+                       ON CONFLICT DO NOTHING"""), {"d": day, "v": int(r.get("version") or 0), "t": r.get("sentAt"),
+                                                    "l": len(agg), "u": sum(agg.values())})
     db.execute(text("DELETE FROM bd_moni WHERE delivery_day = :d"), {"d": day})
     if agg:
         db.execute(text("INSERT INTO bd_moni VALUES (:d,:s,:c,:q,:t)"),
                    [{"d": day, "s": s_, "c": c, "q": q, "t": r.get("sentAt")} for (s_, c), q in agg.items()])
     db.commit()
-    return {"found": True, "sent_at": r.get("sentAt"), "version": r.get("version"), "lines": len(agg), "unmatched": sorted(miss)[:20]}
+    return {"found": True, "new": new_ver, "sent_at": r.get("sentAt"), "version": r.get("version"), "lines": len(agg),
+            "units": sum(agg.values()), "unmatched": sorted(miss)[:20]}
+
+
+def watch_moni(db: Session) -> list[dict]:
+    """Следи „Бандитс заявки“: щом Мони пусне (или поправи) заявка за доставка в следващите 3 дни -
+    записва кога и праща на Димо кратко сравнение с MinMaxAI."""
+    from . import telegram
+    today = datetime.now(SOFIA).date()
+    out = []
+    for i in range(0, 4):
+        d = today + timedelta(days=i)
+        try:
+            r = fetch_moni(db, d)
+        except Exception as e:
+            db.rollback()
+            out.append({"day": d.isoformat(), "error": str(e)[:120]})
+            continue
+        if not r.get("found") or not r.get("new"):
+            continue
+        ours = db.execute(text("SELECT COALESCE(SUM(qty),0), COUNT(*) FILTER (WHERE qty > 0) FROM bd_orders WHERE delivery_day = :d"),
+                          {"d": d}).first()
+        if not ours or not ours[1]:
+            pre = build(db, d, save=False)            # нашата заявка към този момент (без да се записва)
+            ours_u, note = pre.get("units", 0), "MinMaxAI (предварително)"
+        else:
+            ours_u, note = int(ours[0]), "MinMaxAI"
+        msg = (f"🥪 Мони пусна заявката за {WD[d.weekday()]} {d.strftime('%d.%m')} (версия {r.get('version')}, {r.get('sent_at')})\n"
+               f"Мони: {r.get('units', 0):g} бр. в {r.get('lines')} реда · {note}: {ours_u:g} бр.\n"
+               f"Сравнението по обекти: MinMaxAI → Бандитс → 📊 Сравнение с Мони")
+        sent = []
+        if telegram.token():
+            telegram._ensure(db)
+            for cid, u in db.execute(text("SELECT chat_id, username FROM tg_users WHERE username IS NOT NULL")).all():
+                if (u or "").lower() == "dimo":
+                    telegram.send(int(cid), msg); sent.append(u)
+        out.append({"day": d.isoformat(), "version": r.get("version"), "sent_at": r.get("sent_at"), "told": sent})
+    return out
+
+
+def moni_log(db: Session, days: int = 30) -> list[dict]:
+    ensure(db)
+    return [{"delivery": d.strftime("%d.%m.%Y"), "weekday": WD[d.weekday()], "version": v, "sent_at": t,
+             "seen": s_.astimezone(SOFIA).strftime("%d.%m %H:%M"), "lines": l, "units": float(u or 0)}
+            for d, v, t, s_, l, u in db.execute(text("""SELECT delivery_day, version, sent_at, seen_at, lines, units FROM bd_moni_log
+                WHERE seen_at >= now() - make_interval(days => :n) ORDER BY seen_at DESC"""), {"n": days}).all()]

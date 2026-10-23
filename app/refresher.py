@@ -59,14 +59,15 @@ def _tick():
             except Exception as e:
                 db.rollback()
                 _state["bandits"] = f"{type(e).__name__}: {e}"[:300]
-        if (nb.hour, nb.minute) >= (7, 5) and _state.get("bandits_moni_day") != nb.date():
-            _state["bandits_moni_day"] = nb.date()
-            try:
-                from . import bandits_orders as bo
-                _state["bandits_moni"] = bo.fetch_moni(db, nb.date() + timedelta(days=1))
-            except Exception as e:
-                db.rollback()
-                _state["bandits_moni"] = f"{type(e).__name__}: {e}"[:300]
+        # „Бандитс заявки“: на всеки 30 мин - пуснала ли е Мони нова заявка (или поправка) -> съобщение на Димо
+        try:
+            from . import bandits_orders as bo
+            w = bo.watch_moni(db)
+            if w:
+                _state["bandits_moni"] = {"at": nb.strftime("%d.%m %H:%M"), "new": w}
+        except Exception as e:
+            db.rollback()
+            _state["bandits_moni"] = f"{type(e).__name__}: {e}"[:300]
         # пилотните магазини под лупа: справка в 10:00 и 18:00
         now_ = datetime.now(SOFIA)
         pslot = max([h for h in (10, 18) if now_.hour >= h], default=None)

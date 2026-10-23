@@ -1577,6 +1577,12 @@ async function loadBdCompare() {
     ${L.map(r => `<tr><td class="name">${esc(r.name)} <span class="muted">${r.code}</span></td><td class="num">${r.ours}</td><td class="num">${r.moni}</td>
       <td class="num ${Math.abs(r.diff) >= 1 ? "low" : ""}">${r.diff > 0 ? "+" : ""}${r.diff}</td><td class="num">${r.sold == null ? "—" : r.sold}</td>
       <td>${r.better === "MinMaxAI" ? "🟢 MinMaxAI" : r.better === "Мони" ? "🟠 Мони" : r.better === "равно" ? "равно" : ""}</td></tr>`).join("")}</tbody></table></div></details>`; }).join("");
+  try {
+    const lg = await api("/ui/bandits/moni-log?days=21");
+    if (lg.length) h += `<div class="head" style="margin-top:14px"><h2>Кога Мони пуска заявките</h2><span class="note">от „Бандитс заявки“</span></div>
+      <div class="scroll"><table><thead><tr><th>Доставка</th><th>Версия</th><th>Пусната</th><th class="num">Редове</th><th class="num">Бройки</th></tr></thead><tbody>
+      ${lg.map(x => `<tr><td>${x.weekday} ${x.delivery}</td><td>v${x.version}</td><td>${esc(x.sent_at || "")}</td><td class="num">${x.lines}</td><td class="num">${fmtN(x.units)}</td></tr>`).join("")}</tbody></table></div>`;
+  } catch (e) {}
   $("bdCmp").innerHTML = h;
 }
 async function loadBdSchedule() {

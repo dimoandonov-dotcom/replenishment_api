@@ -636,6 +636,13 @@ def ui_bandits_compare(day: str | None = None, fresh: bool = False, db: Session 
     return bo.compare(db, d)
 
 
+@router.get("/ui/bandits/moni-log")
+def ui_bandits_moni_log(days: int = 30, db: Session = Depends(get_db)):
+    """Кога Мони е пуснала заявките си (по „Бандитс заявки“)."""
+    from . import bandits_orders as bo
+    return bo.moni_log(db, days)
+
+
 @router.get("/ui/bandits/schedule")
 def ui_bandits_schedule(db: Session = Depends(get_db)):
     from . import bandits_orders as bo
