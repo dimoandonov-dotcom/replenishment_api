@@ -19,7 +19,7 @@ def status() -> dict:
     return {"auto_every_min": EVERY_MIN, "auto_hours": f"{HOURS[0]:02d}:00–{HOURS[1]:02d}:00",
             "auto_last_run": f(_state["last_run"]), "auto_last_error": _state["last_error"],
             "auto_last_inserted": (_state["last_result"] or {}).get("inserted"),
-            "dispatch_0930": _state.get("dispatch_result"), "ocr_alerts": _state.get("ocr_alerts"), "pilot_report": _state.get("pilot_report")}
+            "dispatch_0930": _state.get("dispatch_result"), "ocr_alerts": _state.get("ocr_alerts"), "pilot_report": _state.get("pilot_report"), "edited_back": _state.get("edited_back")}
 
 
 def _tick():
@@ -39,7 +39,10 @@ def _tick():
                 anomalies.sync(db, 16)
                 anomalies.detect_duplicate_docs(db, 16)
             elif 8 <= datetime.now(SOFIA).hour < 20:
-                anomalies.sync(db, 3)          # днешните фактури -> сигнал за OCR замяна до 30 мин
+                # редакция на стара доставка се записва с датата на ОРИГИНАЛНИЯ документ (напр. 14.10),
+                # затова гледаме кои документи са редактирани след последната проверка и опресняваме назад до тях
+                back = _edited_back_days()
+                anomalies.sync(db, max(3, back))
         except Exception as e:  # пробваме пак след 30 мин
             db.rollback()
             _state["last_error"] = f"{type(e).__name__}: {e}"[:300]
@@ -97,6 +100,32 @@ def _tick():
                 db.rollback()
                 _state["review_result"] = f"{type(e).__name__}: {e}"[:300]
     _state["last_run"] = datetime.now(timezone.utc)
+
+
+def _edited_back_days() -> int:
+    """Колко дни назад да се опреснят движенията: до най-стария документ, редактиран в Мистрал
+    след последната проверка (най-много 30). 0 - няма редакции."""
+    from . import mistral
+    since = _state.get("edit_check") or (datetime.now(timezone.utc) - timedelta(hours=8))
+    now = datetime.now(timezone.utc)
+    try:
+        with mistral.use("varna"), mistral.connect() as conn:
+            cur = conn.cursor()
+            # Мистрал пази бг. време без зона; копието се обновява със закъснение -> презастъпване 2 часа
+            t0 = (since.astimezone(SOFIA) - timedelta(hours=2)).replace(tzinfo=None)
+            cur.execute("""SELECT MIN(o2.DATESAVED) AS d FROM OPERATIONS o2 WITH (NOLOCK)
+                           WHERE o2.NUM IN (SELECT NUM FROM OPERATIONS WITH (NOLOCK) WHERE LASTEDITDATE >= %s)""", (t0,))
+            r = cur.fetchone()
+        _state["edit_check"] = now
+        d = r["d"] if r else None
+        if not d:
+            return 0
+        days = (datetime.now(SOFIA).date() - (d.date() if hasattr(d, "date") else d)).days + 1
+        _state["edited_back"] = {"at": datetime.now(SOFIA).strftime("%d.%m %H:%M"), "days": days}
+        return min(30, max(0, days))
+    except Exception as e:
+        _state["edited_back"] = f"{type(e).__name__}: {e}"[:200]
+        return 0
 
 
 def _dispatch_check():
