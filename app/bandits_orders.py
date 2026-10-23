@@ -203,6 +203,7 @@ def sync_soft(db: Session, days: int = 35) -> dict:
     q = urllib.parse.urlencode({"name": "АРТИКУЛИ", "from": since.strftime("%d.%m.%Y")})
     rows = _json.loads(urllib.request.urlopen(f"{SOFT_API}/sheet?{q}", timeout=180).read().decode()).get("data", [])
     agg = defaultdict(lambda: [0.0, 0.0])
+    issued = defaultdict(set)                          # обект -> дати на изписване (за графика)
     for r in rows:
         kind = r.get("Вид")
         if kind not in ("Стокова", "КИ"):
@@ -216,6 +217,9 @@ def sync_soft(db: Session, days: int = 35) -> dict:
             d = date.fromisoformat(r.get("_d"))
         except Exception:
             continue
+        if kind == "Стокова":
+            issued[sid].add(d)
+            d = d + timedelta(days=1)                   # стоковата се изписва в деня преди доставката
         agg[(d, sid, c)][0 if kind == "Стокова" else 1] += abs(qn)
     # остатъците от обхода на Бела (какво е в хладилника при посещението)
     nleft = 0
@@ -239,12 +243,27 @@ def sync_soft(db: Session, days: int = 35) -> dict:
             nleft += 1
     except Exception:
         db.rollback()
+    # график на доставките от Бандитс софтуеър: дните на изписване за последните 4 седмици (поне 2 пъти) + 1 ден
+    # (ръчно зададеният в таба не се пипа)
+    nsch = 0
+    lim = datetime.now(SOFIA).date() - timedelta(days=28)
+    for sid, ds in issued.items():
+        cnt = defaultdict(int)
+        for d in ds:
+            if d >= lim:
+                cnt[d.weekday()] += 1
+        wd = sorted({(w + 1) % 7 for w, n in cnt.items() if n >= 2})
+        if wd:
+            db.execute(text("""INSERT INTO bd_schedule(loc, delivery_days, note) VALUES (:l,:d,'бандитс')
+                               ON CONFLICT (loc) DO UPDATE SET delivery_days = EXCLUDED.delivery_days, note = 'бандитс'
+                               WHERE bd_schedule.note IS DISTINCT FROM 'ръчно'"""), {"l": sid, "d": ",".join(map(str, wd))})
+            nsch += 1
     db.execute(text("DELETE FROM bd_soft WHERE day >= :d"), {"d": since})
     if agg:
         db.execute(text("INSERT INTO bd_soft VALUES (:d,:s,:c,:i,:o)"),
                    [{"d": d, "s": s_, "c": c, "i": v[0], "o": v[1]} for (d, s_, c), v in agg.items()])
     db.commit()
-    return {"objects": len(ext), "lines": len(rows), "rows": len(agg), "leftovers": nleft}
+    return {"objects": len(ext), "lines": len(rows), "rows": len(agg), "leftovers": nleft, "schedules": nsch}
 
 
 def sync_all(db: Session) -> dict:
@@ -335,7 +354,8 @@ def build(db: Session, day: date, save: bool = True) -> dict:
         if sold14 <= 0:
             continue
         per_day = sold14 / DAYS
-        need = sum(fc(day + timedelta(days=i)) for i in range(cover))
+        # наличността трябва да стигне до ОБЯД в деня на следващата доставка (Димо, 23.10): + половин ден
+        need = sum(fc(day + timedelta(days=i)) for i in range(cover)) + 0.5 * fc(day + timedelta(days=cover))
         safety = 0.0 if w > 0.15 else (SAFETY * 0.5 if w > 0.08 else SAFETY)
         target = need * (1 + safety)
         cap = sum(fc(day + timedelta(days=i)) for i in range(max(1, min(shelf - 1, 7))))
@@ -371,8 +391,7 @@ def build(db: Session, day: date, save: bool = True) -> dict:
             note.append("поне 1 бр. - никога 0 за артикул, който се продава")
         if w > 0.08:
             note.append(f"върнати {round(100 * w)}% - по-малък резерв")
-        if cover > 1:
-            note.append(f"покрива {cover} дни")
+        note.append(f"до {WD[(day + timedelta(days=cover)).weekday()]} обяд ({cover + 0.5:g} дни)")
         out.append({"loc": st, "store": stores[st], "code": k, "name": name, "sub": sub or "", "shelf": shelf,
                     "sold14": round(sold14, 1), "per_day": round(per_day, 2), "need": round(need, 1),
                     "stock": round(est, 1), "cap": round(cap, 1), "qty": qty, "waste_pct": round(100 * w, 1),
@@ -422,11 +441,11 @@ def saved(db: Session, day: date) -> dict:
             "plan": sorted([{"code": c, "name": n, "sub": s, **v} for (c, n, s), v in plan.items()], key=lambda x: -x["qty"])}
 
 
-def set_schedule(db: Session, loc: int, days: list[int], note: str | None = None) -> dict:
+def set_schedule(db: Session, loc: int, days: list[int], note: str | None = "ръчно") -> dict:
     ensure(db)
     v = ",".join(str(d) for d in sorted(set(days)) if 0 <= d <= 6)
     db.execute(text("""INSERT INTO bd_schedule(loc, delivery_days, note) VALUES (:l,:d,:n)
-                       ON CONFLICT (loc) DO UPDATE SET delivery_days = EXCLUDED.delivery_days, note = COALESCE(EXCLUDED.note, bd_schedule.note)"""),
+                       ON CONFLICT (loc) DO UPDATE SET delivery_days = EXCLUDED.delivery_days, note = EXCLUDED.note"""),
                {"l": loc, "d": v, "n": note})
     db.commit()
     return {"loc": loc, "delivery_days": v}

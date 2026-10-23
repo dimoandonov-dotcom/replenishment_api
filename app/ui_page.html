@@ -1581,7 +1581,7 @@ async function loadBdCompare() {
 }
 async function loadBdSchedule() {
   const rows = await api("/ui/bandits/schedule");
-  $("bdSch").innerHTML = `<div class="note" style="margin:8px 0">Отметни дните с доставка за всеки магазин (по подразбиране пон–съб). Заявката за ден покрива продажбите до следващата доставка.</div>
+  $("bdSch").innerHTML = `<div class="note" style="margin:8px 0">Дните на доставка се вземат автоматично от Бандитс софтуеър (денят на изписване + 1). Ако отметнеш ръчно, остава твоето. Доставката покрива продажбите до обяд в деня на следващата доставка.</div>
   <div class="scroll"><table><thead><tr><th>Магазин</th>${BDW.map(w => `<th class="num">${w}</th>`).join("")}</tr></thead><tbody>
   ${rows.map(r => `<tr><td class="name">${esc(r.store)}</td>${BDW.map((w, i) => `<td class="num"><input type="checkbox" data-bl="${r.loc}" data-bd="${i}" ${r.days.includes(i) ? "checked" : ""}></td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
   document.querySelectorAll("#bdSch [data-bl]").forEach(cb => cb.onchange = async () => {
