@@ -589,7 +589,7 @@ def _items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict
         # Поправено е и когато след това има ревизия/корекция: + на поръчания и − на заведения.
         mv7 = defaultdict(lambda: defaultdict(float))     # (sid, aid) -> {"sold": .., "up": .., "days": {...}}
         for s_, a_, d_, op_, qi_, qo_ in db.execute(text("""SELECT store_id, article_id, day, optype, qty_in, qty_out
-                FROM stock_movements WHERE optype IN (1, 38) AND day >= :d"""), {"d": dsince4 - timedelta(days=1)}).all():
+                FROM stock_movements WHERE optype IN (1, 2, 38) AND day >= :d"""), {"d": dsince4 - timedelta(days=1)}).all():
             mv7[(s_, a_, op_)][d_] += float(qo_ or 0) if op_ == 1 else float(qi_ or 0)
         for s_, a_, at_, q_ in db.execute(text("""SELECT store_id, article_id, inv_at, diff_qty FROM inventory_results
                                                   WHERE diff_qty > 0 AND inv_at >= :d"""), {"d": dsince4 - timedelta(days=1)}).all():
@@ -597,6 +597,9 @@ def _items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict
 
         def sold_after(sid, aid, d):
             return sum(v for dd, v in mv7[(sid, aid, 1)].items() if d <= dd <= d + timedelta(days=7))
+
+        def dl_after(sid, aid, d):
+            return sum(v for dd, v in mv7[(sid, aid, 2)].items() if d <= dd <= d + timedelta(days=7))
 
         def up_after(sid, aid, d):
             return sum(v for dd, v in mv7[(sid, aid, 38)].items() if dd >= d)
@@ -606,8 +609,22 @@ def _items(db: Session, days: int = 7, store_id: int | None = None) -> list[dict
             keep = []
             for y, x in prs:
                 q_ = qx.get(x, 0.0)
-                if not fx and sold_after(sid, y, d) <= 0 and up_after(sid, y, d) <= 0:
-                    continue              # поръчаното не се продава -> не е дошло (не е OCR грешка)
+                if not fx:
+                    # наличност на поръчания преди доставката (от нашата заявка за деня или последния snapshot)
+                    pl_ = (ours4.get((sid, d)) or {}).get(y)
+                    if pl_ is not None and pl_.current_stock is not None:
+                        st0 = max(float(pl_.current_stock), 0.0)
+                    else:
+                        st0 = max(float(db.execute(text("""SELECT quantity FROM stock_snapshots WHERE store_id = :s AND article_id = :a
+                                  AND captured_at < :t ORDER BY captured_at DESC LIMIT 1"""),
+                                  {"s": sid, "a": y, "t": datetime.combine(d, datetime.min.time(), SOFIA)}).scalar() or 0), 0.0)
+                    # доказателство: продадено е повече, отколкото е имало (значи е дошло, но е заведено като друго),
+                    # или после е оправено с ревизия: + на поръчания И − на заведения.
+                    # Иначе НДК просто не го е доставил (Надя, 23.10: Корона я няма във фактурата на Колхоза).
+                    sold_more = sold_after(sid, y, d) > st0 + dl_after(sid, y, d) + 0.5
+                    rev_both = q_ > 0 and up_after(sid, y, d) >= 0.5 * q_ and down_after(sid, x, d) >= 0.5 * q_
+                    if not (sold_more or rev_both):
+                        continue
                 keep.append((y, x))
                 if not fx and q_ > 0 and up_after(sid, y, d) >= 0.8 * q_ and down_after(sid, x, d) >= 0.5 * q_:
                     fx = "rev"            # оправено с ревизия/корекция
