@@ -616,7 +616,7 @@ def ui_bandits_orders(day: str | None = None, db: Session = Depends(get_db)):
 @router.post("/ui/bandits/build")
 def ui_bandits_build(day: str | None = None, sync: bool = True, db: Session = Depends(get_db)):
     from . import bandits_orders as bo
-    info = bo.sync(db) if sync else None
+    info = bo.sync_all(db) if sync else None
     r = bo.build(db, _bd_day(day), save=True)
     r["sync"] = info
     return r

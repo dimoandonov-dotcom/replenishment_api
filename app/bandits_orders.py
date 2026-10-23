@@ -27,6 +27,25 @@ SHELF = {939: 4, 22249: 4, 9874: 4, 9873: 4, 16570: 6, 16549: 6, 21088: 6, 16551
          18359: 6, 18938: 6, 18917: 6, 19027: 6, 21086: 6, 16537: 6, 24347: 7, 24346: 7, 22846: 7, 16567: 7,
          16697: 7, 22844: 7, 16694: 4, 16562: 4, 16561: 5, 16692: 4, 26404: 7}
 WD = ["пон", "вт", "ср", "чет", "пет", "съб", "нед"]
+SOFT_API = "https://api-production-eda9.up.railway.app"       # Бандитс софтуеър (документите: стокови, КИ)
+MASTER = "https://bandits-import.netlify.app/master.json"     # обекти и артикули на Бандитс
+MAP_FIX = {26359: 669}                                        # тортия чипотле - без код в името
+EXT_BASE = 100000                                             # обектите извън Мистрал: id от 100001
+ALIAS = {"ДЕТЛАВРЕНТИЙ": "ЛАВРЕНТИЙ", "ДЕТЕЛИНАТРОШЕВО": "ТРОШЕВО", "ПР21РОЗА": "РОЗА"}
+SHELF_CAT = {"Салати": 4, "Десерти": 7, "Принцеса": 7, "ВЕГА": 4}
+
+
+def _norm(s: str) -> str:
+    import re
+    k = re.sub(r"[^А-ЯA-Z0-9]", "", (s or "").upper().replace("300 ", "", 1))
+    return ALIAS.get(k, k)
+
+
+def _bcode_of(name: str) -> int | None:
+    """Кодът на Бандитс е в края на името в Мистрал: „... 200ГР 446“, „... / 510“."""
+    import re
+    m = re.search(r"(?:/\s*)?\b(\d{2,3})\s*$", (name or "").strip())
+    return int(m.group(1)) if m else None
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bd_stores (loc INT PRIMARY KEY, name TEXT, active BOOLEAN DEFAULT TRUE);
@@ -36,7 +55,12 @@ CREATE TABLE IF NOT EXISTS bd_sales (loc INT, code INT, day DATE, qty NUMERIC(12
 CREATE TABLE IF NOT EXISTS bd_stock (loc INT, code INT, qty NUMERIC(12,3), at TIMESTAMPTZ, PRIMARY KEY (loc, code));
 CREATE TABLE IF NOT EXISTS bd_moves (loc INT, code INT, day DATE, delivered NUMERIC(12,3), returned NUMERIC(12,3),
   PRIMARY KEY (day, loc, code));
-CREATE TABLE IF NOT EXISTS bd_schedule (loc INT PRIMARY KEY, delivery_days TEXT DEFAULT '0,1,2,3,4,5', note TEXT);
+CREATE TABLE IF NOT EXISTS bd_schedule (loc INT PRIMARY KEY, delivery_days TEXT DEFAULT '0,1,3,4', note TEXT);
+CREATE TABLE IF NOT EXISTS bd_map (mcode INT PRIMARY KEY, bcode INT);
+CREATE TABLE IF NOT EXISTS bd_ext (obekt TEXT PRIMARY KEY, id SERIAL, razdel TEXT, firma TEXT, grad TEXT, loc INT);
+CREATE TABLE IF NOT EXISTS bd_soft (day DATE, store_id INT, bcode INT, delivered NUMERIC(12,3), returned NUMERIC(12,3),
+  PRIMARY KEY (day, store_id, bcode));
+CREATE TABLE IF NOT EXISTS bd_meta (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS bd_orders (delivery_day DATE, loc INT, code INT, qty INT, per_day NUMERIC(10,2),
   need NUMERIC(10,2), stock NUMERIC(10,2), cap NUMERIC(10,2), waste_pct NUMERIC(6,1), cover_days INT, note TEXT,
   created_at TIMESTAMPTZ DEFAULT now(), PRIMARY KEY (delivery_day, loc, code));
@@ -48,6 +72,12 @@ def ensure(db: Session):
     for q in SCHEMA.strip().split(";"):
         if q.strip():
             db.execute(text(q))
+    # v2 (23.10): артикулите са по кодовете на Бандитс; график по подразбиране пон, вт, чет, пет
+    if not db.execute(text("SELECT 1 FROM bd_meta WHERE k = 'v2'")).first():
+        db.execute(text("TRUNCATE bd_articles, bd_orders"))
+        db.execute(text("ALTER TABLE bd_schedule ALTER COLUMN delivery_days SET DEFAULT '0,1,3,4'"))
+        db.execute(text("UPDATE bd_schedule SET delivery_days = '0,1,3,4'"))
+        db.execute(text("INSERT INTO bd_meta VALUES ('v2', 'ok')"))
     db.commit()
 
 
@@ -71,7 +101,7 @@ def sync(db: Session, days: int = 35) -> dict:
         if not codes:
             raise RuntimeError("Няма продажби на Бандитс")
         C = ",".join(map(str, codes))
-        cur.execute(f"""SELECT MATERIALCODE AS code, MAX(SEARCHNAME) AS nm, MAX(CATEGORY) AS cat, MAX(AVGDELIVERYPRICE) AS p
+        cur.execute(f"""SELECT MATERIALCODE AS code, MAX(MATERIAL) AS nm, MAX(CATEGORY) AS cat, MAX(AVGDELIVERYPRICE) AS p
                         FROM MATERIAL WITH (NOLOCK) WHERE MATERIALCODE IN ({C}) GROUP BY MATERIALCODE""")
         mat = {int(r["code"]): r for r in cur.fetchall()}
         # само стоката на Бандитс: в името има „БАНДИТС“ или е от известните (Хляб и кифли и др.)
@@ -103,14 +133,15 @@ def sync(db: Session, days: int = 35) -> dict:
         db.execute(text("INSERT INTO bd_stores(loc, name) VALUES (:i,:n) ON CONFLICT (loc) DO UPDATE SET name = EXCLUDED.name"),
                    {"i": loc, "n": lname.get(loc, str(loc))})
         db.execute(text("INSERT INTO bd_schedule(loc) VALUES (:i) ON CONFLICT DO NOTHING"), {"i": loc})
-    db.execute(text("UPDATE bd_articles SET active = (code = ANY(:c))"), {"c": codes})
     for code in codes:
         m_ = mat.get(code, {})
+        nm = (m_.get("nm") or str(code)).strip()
+        b = MAP_FIX.get(code) or _bcode_of(nm) or code              # без код на Бандитс в името -> остава кодът от Мистрал (напр. принцеса с кайма)
+        db.execute(text("INSERT INTO bd_map VALUES (:m,:b) ON CONFLICT (mcode) DO UPDATE SET bcode = EXCLUDED.bcode"), {"m": code, "b": b})
         db.execute(text("""INSERT INTO bd_articles(code, name, sub, shelf_days, price) VALUES (:c,:n,:s,:d,:p)
-                           ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, sub = EXCLUDED.sub, price = EXCLUDED.price,
-                           shelf_days = COALESCE(bd_articles.shelf_days, EXCLUDED.shelf_days), active = TRUE, updated_at = now()"""),
-                   {"c": code, "n": (m_.get("nm") or str(code)).strip(), "s": cname.get((m_.get("cat") or "").strip(), ""),
-                    "d": SHELF.get(code), "p": float(m_.get("p") or 0)})
+                           ON CONFLICT (code) DO UPDATE SET shelf_days = COALESCE(bd_articles.shelf_days, EXCLUDED.shelf_days),
+                           active = TRUE, updated_at = now()"""),
+                   {"c": b, "n": nm, "s": cname.get((m_.get("cat") or "").strip(), ""), "d": SHELF.get(code), "p": float(m_.get("p") or 0)})
     db.execute(text("DELETE FROM bd_sales WHERE day >= :d"), {"d": since})
     if sales:
         db.execute(text("INSERT INTO bd_sales VALUES (:s,:c,:d,:q) ON CONFLICT DO NOTHING"),
@@ -128,6 +159,74 @@ def sync(db: Session, days: int = 35) -> dict:
     db.execute(text("INSERT INTO bd_runs(kind, info) VALUES ('sync', :i)"), {"i": str(info)})
     db.commit()
     return info
+
+
+def sync_soft(db: Session, days: int = 35) -> dict:
+    """Обектите и артикулите на Бандитс (master.json) + доставки (стокови) и връщания (КИ) от Бандитс софтуеър."""
+    import json as _json
+    import urllib.parse
+    import urllib.request
+    ensure(db)
+    master = _json.loads(urllib.request.urlopen(MASTER, timeout=60).read().decode())
+    locs = {_norm(n): l for l, n in db.execute(text("SELECT loc, name FROM bd_stores WHERE loc < :e"), {"e": EXT_BASE}).all()}
+    for o in master.get("objects", []):
+        ob = (o.get("obekt") or "").strip()
+        if not ob:
+            continue
+        loc = locs.get(_norm(ob)) if (o.get("razdel") or "").startswith("300") else None
+        db.execute(text("""INSERT INTO bd_ext(obekt, razdel, firma, grad, loc) VALUES (:o,:r,:f,:g,:l)
+                           ON CONFLICT (obekt) DO UPDATE SET razdel = EXCLUDED.razdel, firma = EXCLUDED.firma,
+                           grad = EXCLUDED.grad, loc = EXCLUDED.loc"""),
+                   {"o": ob, "r": o.get("razdel"), "f": o.get("firma"), "g": o.get("grad"), "l": loc})
+    ext = {o: (EXT_BASE + i, l, r) for o, i, l, r in db.execute(text("SELECT obekt, id, loc, razdel FROM bd_ext")).all()}
+    for ob, (eid, loc, razdel) in ext.items():
+        if loc is None:
+            db.execute(text("INSERT INTO bd_stores(loc, name) VALUES (:i,:n) ON CONFLICT (loc) DO UPDATE SET name = EXCLUDED.name"),
+                       {"i": eid, "n": ob})
+            db.execute(text("INSERT INTO bd_schedule(loc) VALUES (:i) ON CONFLICT DO NOTHING"), {"i": eid})
+    for a in master.get("articles", []):
+        try:
+            c = int(a["code"])
+        except Exception:
+            continue
+        db.execute(text("""INSERT INTO bd_articles(code, name, sub, shelf_days) VALUES (:c,:n,:s,:d)
+                           ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, sub = EXCLUDED.sub, active = TRUE,
+                           shelf_days = COALESCE(bd_articles.shelf_days, EXCLUDED.shelf_days)"""),
+                   {"c": c, "n": a.get("name") or str(c), "s": a.get("cat") or "", "d": SHELF_CAT.get(a.get("cat") or "", 6)})
+    since = datetime.now(SOFIA).date() - timedelta(days=days)
+    q = urllib.parse.urlencode({"name": "АРТИКУЛИ", "from": since.strftime("%d.%m.%Y")})
+    rows = _json.loads(urllib.request.urlopen(f"{SOFT_API}/sheet?{q}", timeout=180).read().decode()).get("data", [])
+    agg = defaultdict(lambda: [0.0, 0.0])
+    for r in rows:
+        kind = r.get("Вид")
+        if kind not in ("Стокова", "КИ"):
+            continue
+        e = ext.get((r.get("Обект") or "").strip())
+        if not e:
+            continue
+        sid = e[1] if e[1] is not None else e[0]
+        try:
+            c = int(r.get("Код")); qn = float(str(r.get("Кол.") or 0).replace(",", "."))
+            d = date.fromisoformat(r.get("_d"))
+        except Exception:
+            continue
+        agg[(d, sid, c)][0 if kind == "Стокова" else 1] += abs(qn)
+    db.execute(text("DELETE FROM bd_soft WHERE day >= :d"), {"d": since})
+    if agg:
+        db.execute(text("INSERT INTO bd_soft VALUES (:d,:s,:c,:i,:o)"),
+                   [{"d": d, "s": s_, "c": c, "i": v[0], "o": v[1]} for (d, s_, c), v in agg.items()])
+    db.commit()
+    return {"objects": len(ext), "lines": len(rows), "rows": len(agg)}
+
+
+def sync_all(db: Session) -> dict:
+    out = {"mistral": sync(db)}
+    try:
+        out["soft"] = sync_soft(db)
+    except Exception as e:
+        db.rollback()
+        out["soft"] = f"{type(e).__name__}: {e}"[:200]
+    return out
 
 
 # ------------------------------------------------------------------ прогноза и заявка
@@ -158,61 +257,83 @@ def schedule(db: Session) -> dict[int, set[int]]:
 
 
 def build(db: Session, day: date, save: bool = True) -> dict:
-    """Заявка за доставка на `day` за всички магазини, които имат доставка в този ден."""
+    """Заявка за доставка на `day` за всички обекти с доставка в този ден.
+    Магазини 300: продажбите от касата (Мистрал). Другите обекти: взето минус върнато (Бандитс софтуеър).
+    Наличност: доставено от Бандитс за последните (срок-1) дни минус продаденото - Мистрал за Бандитс е неточен."""
     ensure(db)
-    last = db.execute(text("SELECT MAX(day) FROM bd_sales")).scalar()
-    if not last:
-        return {"ready": False, "lines": []}
-    sales = db.execute(text("SELECT loc, code, day, qty FROM bd_sales WHERE day >= :d"), {"d": last - timedelta(days=35)}).all()
-    stock = {(s, k): float(q) for s, k, q in db.execute(text("SELECT loc, code, qty FROM bd_stock")).all()}
-    arts = {k: (n, d or 4, s) for k, n, d, s in db.execute(text("SELECT code, name, shelf_days, sub FROM bd_articles WHERE active")).all()}
+    today = datetime.now(SOFIA).date()
+    last = db.execute(text("SELECT MAX(day) FROM bd_sales")).scalar() or (today - timedelta(days=1))
+    mp = {m: b for m, b in db.execute(text("SELECT mcode, bcode FROM bd_map")).all()}
+    arts = {k: (n, d or 6, s) for k, n, d, s in db.execute(text("SELECT code, name, shelf_days, sub FROM bd_articles WHERE active")).all()}
     stores = {i: n for i, n in db.execute(text("SELECT loc, name FROM bd_stores WHERE active")).all()}
     sch = schedule(db)
-    mv = db.execute(text("SELECT loc, code, SUM(delivered), SUM(returned) FROM bd_moves WHERE day >= :d GROUP BY loc, code"),
-                    {"d": last - timedelta(days=28)}).all()
-    waste = {(s, k): (float(o or 0) / (float(i or 0) + float(o or 0))) if (float(i or 0) + float(o or 0)) > 0 else 0.0
-             for s, k, i, o in mv}
-    S = defaultdict(dict)
-    for st, k, d, q in sales:
-        S[(st, k)][d] = max(float(q or 0), 0.0)
+    S = defaultdict(lambda: defaultdict(float))            # (store, bcode) -> {day: продадено}
+    for st, k, d, q in db.execute(text("SELECT loc, code, day, qty FROM bd_sales WHERE day >= :d"), {"d": last - timedelta(days=35)}).all():
+        S[(st, mp.get(k, k))][d] += max(float(q or 0), 0.0)
+    mstock = defaultdict(float)
+    for st, k, q in db.execute(text("SELECT loc, code, qty FROM bd_stock")).all():
+        mstock[(st, mp.get(k, k))] += float(q or 0)
+    D = defaultdict(lambda: defaultdict(lambda: [0.0, 0.0]))   # (store, bcode) -> {day: [доставено, върнато]}
+    for d, st, c, i, o in db.execute(text("SELECT day, store_id, bcode, delivered, returned FROM bd_soft WHERE day >= :d"),
+                                     {"d": today - timedelta(days=35)}).all():
+        D[(st, c)][d][0] += float(i or 0); D[(st, c)][d][1] += float(o or 0)
     out = []
-    for (st, k), ser in S.items():
+    for key in set(S) | set(D):
+        st, k = key
         if st not in stores or k not in arts:
             continue
-        dd = sch.get(st) or {0, 1, 2, 3, 4, 5}
+        dd = sch.get(st) or {0, 1, 3, 4}
         if day.weekday() not in dd:
-            continue
-        sold14 = sum(ser.get(last - timedelta(days=i), 0.0) for i in range(DAYS))
-        if sold14 <= 0:
             continue
         name, shelf, sub = arts[k]
         cover = _cover(dd, day)
-        need = sum(_forecast(ser, day + timedelta(days=i), last) for i in range(cover))
-        w = waste.get((st, k), 0.0)
+        dl = D.get(key, {})
+        deliv28 = sum(v[0] for d, v in dl.items() if d > today - timedelta(days=28))
+        ret28 = sum(v[1] for d, v in dl.items() if d > today - timedelta(days=28))
+        w = ret28 / deliv28 if deliv28 > 0 else 0.0
+        ser = S.get(key)
+        if st < EXT_BASE and ser:                       # магазин 300: касата
+            sold14 = sum(ser.get(last - timedelta(days=i), 0.0) for i in range(DAYS))
+            fc = lambda x: _forecast(ser, x, last)       # noqa: E731
+            src = "каса"
+        else:                                           # друг обект: взето - върнато за 28 дни
+            net = max(deliv28 - ret28, 0.0)
+            sold14 = net / 2
+            fc = lambda x, _p=net / 28: _p               # noqa: E731
+            src = "взето−върнато"
+        if sold14 <= 0:
+            continue
+        per_day = sold14 / DAYS
+        need = sum(fc(day + timedelta(days=i)) for i in range(cover))
         safety = 0.0 if w > 0.15 else (SAFETY * 0.5 if w > 0.08 else SAFETY)
         target = need * (1 + safety)
-        cap = sum(_forecast(ser, day + timedelta(days=i), last) for i in range(max(1, min(shelf - 1, 7))))
-        raw = stock.get((st, k), 0.0)
+        cap = sum(fc(day + timedelta(days=i)) for i in range(max(1, min(shelf - 1, 7))))
+        # наличност при доставката: доставеното за последните (срок-1) дни минус продаденото/очакваното до деня
+        k_ = max(1, shelf - 1)
+        got = sum(v[0] - v[1] for d, v in dl.items() if d > today - timedelta(days=k_))
         note = []
-        # над това, което се продава до изтичане на срока, наличността е невъзможна (грешно заведено / върнато)
-        q0 = min(max(raw, 0.0), cap)
-        if raw > cap + 2:
-            note.append(f"съмнителна наличност {raw:g} (повече, отколкото се продава до изтичане) - броя {q0:.0f}")
-        qty = max(0, math.ceil(target - q0 - 0.25))
-        qty = int(min(qty, max(0, math.floor(cap - q0 + 0.5))))
+        if dl:
+            gone = sum(ser.get(today - timedelta(days=i), 0.0) for i in range(1, k_ + 1)) if (st < EXT_BASE and ser) else per_day * k_
+            gone += per_day * max(0, (day - last).days - 1)          # от последния ден с данни до доставката
+            est = max(0.0, got - gone)
+            src_st = "по доставките на Бандитс"
+        else:
+            est = min(max(mstock.get(key, 0.0), 0.0), cap)
+            src_st = "по Мистрал"
+        est = min(est, cap)
+        qty = max(0, math.ceil(target - est - 0.25))
+        qty = int(min(qty, max(0, math.floor(cap - est + 0.5))))
         if qty == 0 and sold14 >= 2:
             qty = 1
             note.append("поне 1 бр. - никога 0 за артикул, който се продава")
-        if raw < 0:
-            note.append(f"в Мистрал е {raw:g} (незаведени доставки?)")
         if w > 0.08:
-            note.append(f"брак {round(100 * w)}% - по-малък резерв")
+            note.append(f"върнати {round(100 * w)}% - по-малък резерв")
         if cover > 1:
-            note.append(f"покрива {cover} дни до следващата доставка")
+            note.append(f"покрива {cover} дни")
         out.append({"loc": st, "store": stores[st], "code": k, "name": name, "sub": sub or "", "shelf": shelf,
-                    "sold14": round(sold14, 1), "per_day": round(sold14 / DAYS, 2), "need": round(need, 1),
-                    "stock": round(raw, 1), "cap": round(cap, 1), "qty": qty, "waste_pct": round(100 * w, 1),
-                    "cover": cover, "note": "; ".join(note)})
+                    "sold14": round(sold14, 1), "per_day": round(per_day, 2), "need": round(need, 1),
+                    "stock": round(est, 1), "cap": round(cap, 1), "qty": qty, "waste_pct": round(100 * w, 1),
+                    "cover": cover, "note": "; ".join([f"{src}, наличност {src_st}"] + note)})
     out.sort(key=lambda r: (r["store"], r["sub"], r["name"]))
     if save:
         db.execute(text("DELETE FROM bd_orders WHERE delivery_day = :d"), {"d": day})

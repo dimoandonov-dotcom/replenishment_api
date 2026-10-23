@@ -52,7 +52,7 @@ def _tick():
             _state["bandits_day"] = nb.date()
             try:
                 from . import bandits_orders as bo
-                info = bo.sync(db)
+                info = bo.sync_all(db)
                 r = bo.build(db, nb.date() + timedelta(days=1), save=True)
                 _state["bandits"] = {"at": nb.strftime("%d.%m %H:%M"), "sync": info, "stores": r.get("stores"), "units": r.get("units")}
             except Exception as e:
