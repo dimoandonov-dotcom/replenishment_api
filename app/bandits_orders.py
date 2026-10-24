@@ -293,6 +293,34 @@ def _forecast(series: dict, day: date, last: date) -> float:
     return 0.6 * wk + 0.4 * avg14
 
 
+def _empty_days(ser: dict, dl: dict, last: date, lf) -> tuple[set, float]:
+    """Дни с празен хладилник (0 продажби, защото няма стока - не защото не се търси).
+    Броим ги като липсващи, не като 0 - иначе прогнозата пада и заявката става все по-малка.
+    Признаци: 0 продажби в деня преди доставка; 2+ поредни дни без продажби при артикул, който се
+    продава почти всеки ден; Бела е видяла 0 бр. в такъв ден. Само за артикули, които се продават поне през ден."""
+    days = [last - timedelta(days=i) for i in range(27, -1, -1)]
+    sale_days = sum(1 for d in days if ser.get(d, 0) > 0)
+    freq = sale_days / len(days)
+    if freq < 0.5:
+        return set(), 0.0
+    empty, run = set(), []
+    for d in days + [None]:
+        if d is not None and ser.get(d, 0) <= 0:
+            run.append(d)
+            continue
+        if run:
+            b = run[-1]
+            nxt = b + timedelta(days=1)
+            before_deliv = (dl.get(nxt, (0, 0))[0] or 0) > 0
+            bella0 = bool(lf and lf[1] <= 0 and run[0] <= lf[0] <= b)
+            if before_deliv or bella0 or (len(run) >= 2 and freq >= 0.7):
+                empty.update(run)
+            run = []
+    ok = [ser.get(d, 0.0) for d in days if d not in empty]
+    fill = sum(ok) / len(ok) if ok else 0.0
+    return empty, fill
+
+
 def _cover(delivery_days: set[int], day: date) -> int:
     """Колко дни трябва да покрие доставката на `day` - до следващата доставка по графика."""
     for i in range(1, 8):
@@ -347,10 +375,16 @@ def build(db: Session, day: date, save: bool = True) -> dict:
         ser = S.get(key)
         if st < EXT_BASE:                               # магазин 300: САМО касата от Мистрал (Димо, 23.10)
             ser = ser or {}
-            sold14 = sum(ser.get(last - timedelta(days=i), 0.0) for i in range(DAYS))
-            fc = lambda x: _forecast(ser, x, last)       # noqa: E731
+            lf0 = LEFT.get(key)
+            empty, fill = _empty_days(ser, {d: tuple(v) for d, v in dl.items()}, last, lf0)
+            serf = dict(ser)
+            for d_ in empty:
+                serf[d_] = fill                         # празен хладилник -> колкото би продал, не 0
+            sold14 = sum(serf.get(last - timedelta(days=i), 0.0) for i in range(DAYS))
+            fc = lambda x, _s=serf: _forecast(_s, x, last)   # noqa: E731
             src = "каса"
         else:                                           # друг обект: взето - върнато за 28 дни
+            empty, fill = set(), 0.0
             net = max(deliv28 - ret28, 0.0)
             sold14 = net / 2
             fc = lambda x, _p=net / 28: _p               # noqa: E731
@@ -405,10 +439,12 @@ def build(db: Session, day: date, save: bool = True) -> dict:
         why = [f"Продава средно {per_day:.1f} бр. на ден ({'касата в Мистрал' if src == 'каса' else 'взето минус върнато за 28 дни'}, последните 14 дни).",
                f"Доставката в {WD[day.weekday()]} трябва да стигне до {nd} обяд ({cover + 0.5:g} дни) → нужни ~{need:.1f} бр."
                + (f" + резерв {round(100 * safety)}% → {target:.1f} бр." if safety else " без резерв (много върнат брак)."),
+               *([f"Празен хладилник {len(empty)} дни ({', '.join(x.strftime('%d.%m') for x in sorted(empty)[-6:])}) - 0 продажби, защото е нямало стока. "
+                  f"Тези дни не се броят като 0, а като ~{fill:.1f} бр. (колкото продава в нормален ден)."] if empty else []),
                st_why,
                f"Срок на годност {shelf} дни → не повече от ~{cap:.0f} бр., колкото ще се продадат, докато е годно.",
                f"Заявка: {qty} бр." + (" (поне 1 - никога 0 за артикул, който се продава)" if any("поне 1" in x for x in note) else "")]
-        out.append({"loc": st, "store": stores[st], "code": k, "name": name, "sub": sub or "", "shelf": shelf, "explain": why,
+        out.append({"loc": st, "store": stores[st], "code": k, "name": name, "sub": sub or "", "shelf": shelf, "explain": why, "empty": sorted(x.isoformat() for x in empty),
                     "sold14": round(sold14, 1), "per_day": round(per_day, 2), "need": round(need, 1),
                     "stock": round(est, 1), "cap": round(cap, 1), "qty": qty, "waste_pct": round(100 * w, 1),
                     "cover": cover, "note": "; ".join([f"{src}, наличност {src_st}"] + note)})
@@ -690,4 +726,5 @@ def line(db: Session, loc: int, code: int, day: date) -> dict:
     return {"line": r, "days": [d.strftime("%d.%m") for d in days], "sales": [sales.get(d, 0.0) for d in days],
             "has_sales": loc < EXT_BASE, "delivered": [dl.get(d, (0, 0))[0] for d in days], "returned": [dl.get(d, (0, 0))[1] for d in days],
             "left": {"day": lf[0].strftime("%d.%m"), "qty": float(lf[1])} if lf else None,
-            "moni": float(moni) if moni is not None else None}
+            "moni": float(moni) if moni is not None else None,
+            "empty": [date.fromisoformat(x).strftime("%d.%m") for x in (r or {}).get("empty", []) if date.fromisoformat(x) >= start]}
