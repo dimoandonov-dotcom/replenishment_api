@@ -1593,7 +1593,7 @@ async function loadBdCompare(dayId = "bdDay", outId = "bdCmp") {
   h += Object.keys(by).sort((a, b) => a.localeCompare(b, "bg")).map(st => { const L = by[st], dif = L.filter(r => Math.abs(r.diff) >= 1).length;
     return `<details style="margin:0 0 6px;border:1px solid var(--line,#e7dccb);border-radius:12px;padding:6px 12px"><summary style="cursor:pointer"><b>${esc(st)}</b> · MinMaxAI ${fmtN(L.reduce((a, r) => a + r.ours, 0))} / Мони ${fmtN(L.reduce((a, r) => a + r.moni, 0))} · ${dif ? dif + " различни реда" : "еднакво"}</summary>
     <div class="scroll"><table><thead><tr><th>Артикул</th><th class="num">MinMaxAI</th><th class="num">Мони</th><th class="num">Разлика</th><th class="num">Продадено</th><th>По-точен</th></tr></thead><tbody>
-    ${L.map(r => `<tr><td class="name">${esc(r.name)} <span class="muted">${r.code}</span></td><td class="num">${r.ours}</td><td class="num">${r.moni}</td>
+    ${L.map(r => `<tr class="bdLn" data-l="${r.loc}" data-c="${r.code}" data-d="${d.day}" style="cursor:pointer" title="Натисни за анализ"><td class="name">▸ ${esc(r.name)} <span class="muted">${r.code}</span></td><td class="num">${r.ours}</td><td class="num">${r.moni}</td>
       <td class="num ${Math.abs(r.diff) >= 1 ? "low" : ""}">${r.diff > 0 ? "+" : ""}${r.diff}</td><td class="num">${r.sold == null ? "—" : r.sold}</td>
       <td>${r.better === "MinMaxAI" ? "🟢 MinMaxAI" : r.better === "Мони" ? "🟠 Мони" : r.better === "равно" ? "равно" : ""}</td></tr>`).join("")}</tbody></table></div></details>`; }).join("");
   try {
@@ -1603,6 +1603,7 @@ async function loadBdCompare(dayId = "bdDay", outId = "bdCmp") {
       ${lg.map(x => `<tr><td>${x.weekday} ${x.delivery}</td><td>v${x.version}</td><td>${esc(x.sent_at || "")}</td><td class="num">${x.lines}</td><td class="num">${fmtN(x.units)}</td></tr>`).join("")}</tbody></table></div>`;
   } catch (e) {}
   $(outId).innerHTML = h;
+  $(outId).querySelectorAll("tr.bdLn").forEach(tr => tr.onclick = () => bdLine(tr));
 }
 function bdNextDelivery() {   // най-близката доставка: пон, вт, чет, пет (днес или напред)
   const d = new Date(); for (let i = 0; i < 7; i++) { const x = new Date(d); x.setDate(d.getDate() + i); if ([1, 2, 4, 5].includes(x.getDay())) return x.toISOString().slice(0, 10); }
@@ -1620,7 +1621,7 @@ async function bdLine(tr) {
   if (nx && nx.classList.contains("bdX")) { nx.remove(); tr.firstElementChild.innerHTML = tr.firstElementChild.innerHTML.replace("▾", "▸"); return; }
   tr.firstElementChild.innerHTML = tr.firstElementChild.innerHTML.replace("▸", "▾");
   const x = document.createElement("tr"); x.className = "bdX"; x.innerHTML = `<td colspan="8"><div class="empty loading">Анализ…</div></td>`; tr.after(x);
-  let d; try { d = await api(`/ui/bandits/line?loc=${tr.dataset.l}&code=${tr.dataset.c}&day=${$("bdDay").value}`); } catch (e) { x.firstElementChild.innerHTML = "Грешка: " + esc(e.message); return; }
+  let d; try { d = await api(`/ui/bandits/line?loc=${tr.dataset.l}&code=${tr.dataset.c}&day=${tr.dataset.d || $("bdDay").value}`); } catch (e) { x.firstElementChild.innerHTML = "Грешка: " + esc(e.message); return; }
   const r = d.line || {}, sum = a => a.reduce((p, v) => p + v, 0);
   const mv = d.days.map((dd, i) => (d.delivered[i] || d.returned[i]) ? `<span style="white-space:nowrap">${dd}: <b style="color:var(--teal)">+${fmtN(d.delivered[i])}</b>${d.returned[i] ? ` <b style="color:var(--danger)">−${fmtN(d.returned[i])} върнати</b>` : ""}</span>` : "").filter(Boolean).join(" · ");
   x.firstElementChild.innerHTML = `<div style="padding:8px 4px 12px">
