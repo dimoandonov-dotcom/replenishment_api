@@ -190,6 +190,15 @@ nav a[data-tab="anom"] .mnBadge{display:inline-block;margin-left:6px;background:
 .mnWho{display:block;font-size:11px;color:#16A34A;margin-top:3px}
 @media (max-width:640px){.mnTask{grid-template-columns:44px 1fr}.mnTask .c{grid-column:2;text-align:left}.mnBig{font-size:32px}}
 @media (prefers-reduced-motion:reduce){.mnHot,.mnDot,nav a[data-tab="anom"] .mnBadge,.mnHero,.mnTask{animation:none}}
+.bdXd { position:sticky; left:0; box-sizing:border-box; padding:12px 12px 16px; font-family:var(--head); white-space:normal; }
+.bdH { font-weight:700; font-size:14px; margin:14px 0 6px; } .bdH:first-child { margin-top:0; } .bdH small { font-weight:400; color:var(--slate); }
+.bdChart { overflow-x:auto; } .bdChart svg { max-width:100%; height:auto; }
+.bdFs { display:grid; grid-template-columns:repeat(auto-fit,minmax(92px,1fr)); gap:8px; margin-top:10px; }
+.bdF { background:var(--raised); border:1px solid var(--line); border-radius:10px; padding:8px; display:flex; flex-direction:column; gap:2px; }
+.bdF span { font-size:12px; color:var(--slate); } .bdF b { font-size:20px; } .bdF small { font-size:11px; color:var(--slate); }
+.bdChips { display:flex; flex-wrap:wrap; gap:6px; }
+.bdChip { background:var(--raised); border:1px solid var(--line); border-radius:14px; padding:3px 10px; font-size:13px; white-space:nowrap; }
+.bdWhy { margin:0; padding-left:20px; font-size:15px; line-height:1.5; } .bdWhy li { margin-bottom:6px; }
 </style>
 
 <script>
@@ -1620,17 +1629,25 @@ async function bdLine(tr) {
   const nx = tr.nextElementSibling;
   if (nx && nx.classList.contains("bdX")) { nx.remove(); tr.firstElementChild.innerHTML = tr.firstElementChild.innerHTML.replace("▾", "▸"); return; }
   tr.firstElementChild.innerHTML = tr.firstElementChild.innerHTML.replace("▸", "▾");
-  const x = document.createElement("tr"); x.className = "bdX"; x.innerHTML = `<td colspan="8"><div class="empty loading">Анализ…</div></td>`; tr.after(x);
-  let d; try { d = await api(`/ui/bandits/line?loc=${tr.dataset.l}&code=${tr.dataset.c}&day=${tr.dataset.d || $("bdDay").value}`); } catch (e) { x.firstElementChild.innerHTML = "Грешка: " + esc(e.message); return; }
-  const r = d.line || {}, sum = a => a.reduce((p, v) => p + v, 0);
-  const mv = d.days.map((dd, i) => (d.delivered[i] || d.returned[i]) ? `<span style="white-space:nowrap">${dd}: <b style="color:var(--teal)">+${fmtN(d.delivered[i])}</b>${d.returned[i] ? ` <b style="color:var(--danger)">−${fmtN(d.returned[i])} върнати</b>` : ""}</span>` : "").filter(Boolean).join(" · ");
-  x.firstElementChild.innerHTML = `<div style="padding:8px 4px 12px">
-    ${d.has_sales ? `<b>Продажби на касата по дни (3 седмици)</b><div style="max-width:640px">${salesChart(d.sales, d.days, null)}</div>` :
-      `<div class="note">Чужд обект - касата му не е в Мистрал. Продажбите са смятани като взето минус върнато.</div>`}
-    <div style="font-size:13.5px;margin:6px 0"><b>Доставки от Бандитс:</b> ${mv || "няма за 3 седмици"}</div>
-    <div style="font-size:13.5px;margin:4px 0">${d.left ? `<b>Обход на Бела:</b> на ${d.left.day} е видяла <b>${fmtN(d.left.qty)}</b> бр. · ` : ""}${d.moni != null ? `<b>Мони:</b> ${fmtN(d.moni)} бр. за тази доставка` : ""}</div>
-    <div style="font-size:14.5px;line-height:1.6;margin-top:8px;max-width:760px"><b>Защо ${r.qty ?? "—"} бр.</b><ol style="margin:4px 0 0 18px;padding:0">${(r.explain || []).map(t => `<li>${esc(t)}</li>`).join("")}</ol></div>
-  </div>`;
+  const sc = tr.closest(".scroll"), w = Math.max(260, (sc ? sc.clientWidth : window.innerWidth) - 2);
+  const x = document.createElement("tr"); x.className = "bdX";
+  x.innerHTML = `<td colspan="8" style="padding:0;background:var(--paper)"><div class="bdXd" style="width:${w}px"><div class="empty loading">Анализ…</div></div></td>`; tr.after(x);
+  const box = x.querySelector(".bdXd");
+  let d; try { d = await api(`/ui/bandits/line?loc=${tr.dataset.l}&code=${tr.dataset.c}&day=${tr.dataset.d || $("bdDay").value}`); } catch (e) { box.innerHTML = "Грешка: " + esc(e.message); return; }
+  const r = d.line || {};
+  const chips = d.days.map((dd, i) => (d.delivered[i] || d.returned[i]) ? `<span class="bdChip">${dd} <b style="color:var(--teal)">+${fmtN(d.delivered[i])}</b>${d.returned[i] ? ` <b style="color:var(--danger)">−${fmtN(d.returned[i])}</b>` : ""}</span>` : "").filter(Boolean).join("");
+  const facts = [];
+  if (d.left) facts.push(`<div class="bdF"><span>👀 Бела видяла</span><b>${fmtN(d.left.qty)} бр.</b><small>${d.left.day}</small></div>`);
+  if (d.moni != null) facts.push(`<div class="bdF"><span>🟠 Мони</span><b>${fmtN(d.moni)} бр.</b><small>тази доставка</small></div>`);
+  facts.push(`<div class="bdF"><span>🟢 MinMaxAI</span><b>${r.qty ?? "—"} бр.</b><small>тази доставка</small></div>`);
+  box.innerHTML = `
+    <div class="bdH">${d.has_sales ? "📊 Продажби по дни · 3 седмици" : "Чужд обект: продажби = взето − върнато"}</div>
+    ${d.has_sales ? `<div class="bdChart">${salesChart(d.sales, d.days, null)}</div>` : ""}
+    <div class="bdFs">${facts.join("")}</div>
+    <div class="bdH">🚚 Доставки от Бандитс <small>(+взето −върнато)</small></div>
+    <div class="bdChips">${chips || '<span class="muted">няма за 3 седмици</span>'}</div>
+    <div class="bdH">💡 Защо ${r.qty ?? "—"} бр.</div>
+    <ol class="bdWhy">${(r.explain || []).map(t => `<li>${esc(t)}</li>`).join("")}</ol>`;
 }
 async function loadBdSchedule() {
   const rows = await api("/ui/bandits/schedule");
