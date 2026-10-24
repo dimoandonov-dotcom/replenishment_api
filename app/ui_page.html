@@ -1579,7 +1579,7 @@ function renderBandits() {
   const q = ($("bdQ").value || "").trim().toLowerCase(), by = {};
   d.lines.forEach(o => { if (!q || (o.store + " " + o.name + " " + o.code).toLowerCase().includes(q)) (by[o.store] = by[o.store] || []).push(o); });
   $("bdStores").innerHTML = Object.keys(by).sort((a, b) => a.localeCompare(b, "bg")).map(st => { const L = by[st], u = L.reduce((a, o) => a + o.qty, 0);
-    return `<details class="help" style="margin:0 0 8px;border:1px solid var(--line,#e7dccb);border-radius:12px;padding:8px 12px"><summary style="cursor:pointer"><b>${esc(st)}</b> · ${fmtN(u)} бр. · ${L.filter(o => o.qty > 0).length} артикула${L.some(o => o.stock < 0) ? ' · <span style="color:#B91C1C">минуси в Мистрал</span>' : ""}</summary>
+    return `<details class="help" style="margin:0 0 8px;border:1px solid var(--line,#e7dccb);border-radius:12px;padding:8px 12px"><summary style="cursor:pointer"><b>${esc(st)}</b> · ${fmtN(u)} бр. · ${L.filter(o => o.qty > 0).length} артикула${L[0] && L[0].eta ? ` · 🚚 ~${L[0].eta}` : ""}${L.some(o => o.stock < 0) ? ' · <span style="color:#B91C1C">минуси в Мистрал</span>' : ""}</summary>
     <div class="scroll"><table><thead><tr><th>Артикул</th><th class="num">Продадени 14 дни</th><th class="num">На ден</th><th class="num">Нужно</th><th class="num">Наличност</th><th class="num">Таван (срок)</th><th class="num">Заявка</th><th>Бележка</th></tr></thead><tbody>
     ${L.map(o => `<tr class="bdLn" data-l="${o.loc}" data-c="${o.code}" style="cursor:pointer" title="Натисни за анализ"><td class="name">▸ ${esc(o.name)} <span class="muted">${o.code}</span></td><td class="num">${o.sold14 ?? fmtN(o.per_day * 14)}</td><td class="num">${o.per_day}</td><td class="num">${o.need}</td>
       <td class="num ${o.stock < 0 ? "low" : ""}">${o.stock}</td><td class="num">${o.cap}</td><td class="num"><b>${o.qty}</b></td><td class="note">${esc(o.note || "")}</td></tr>`).join("")}</tbody></table></div></details>`; }).join("");
@@ -1640,6 +1640,7 @@ async function bdLine(tr) {
   const facts = [];
   if (d.left) facts.push(`<div class="bdF"><span>👀 Бела видяла</span><b>${fmtN(d.left.qty)} бр.</b><small>${d.left.day}</small></div>`);
   if (d.moni != null) facts.push(`<div class="bdF"><span>🟠 Мони</span><b>${fmtN(d.moni)} бр.</b><small>тази доставка</small></div>`);
+  if (r.eta) facts.unshift(`<div class="bdF"><span>🚚 Бусът идва</span><b>~${r.eta}</b><small>следв.: ${esc(r.eta_next || "")}</small></div>`);
   facts.push(`<div class="bdF"><span>🟢 MinMaxAI</span><b>${r.qty ?? "—"} бр.</b><small>тази доставка</small></div>`);
   box.innerHTML = `
     <div class="bdH">${d.has_sales ? "📊 Продажби по дни · 3 седмици" : "Чужд обект: продажби = взето − върнато"}</div>

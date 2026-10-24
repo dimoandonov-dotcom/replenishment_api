@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS bd_moni (delivery_day DATE, store_id INT, code INT, q
   PRIMARY KEY (delivery_day, store_id, code));
 CREATE TABLE IF NOT EXISTS bd_moni_log (delivery_day DATE, version INT, sent_at TEXT, seen_at TIMESTAMPTZ DEFAULT now(),
   lines INT, units NUMERIC(12,2), PRIMARY KEY (delivery_day, version));
+CREATE TABLE IF NOT EXISTS bd_eta (store_id INT, wd INT, mins INT, n INT, name TEXT, PRIMARY KEY (store_id, wd));
 CREATE TABLE IF NOT EXISTS bd_left (store_id INT, bcode INT, day DATE, qty NUMERIC(10,2), src TEXT, PRIMARY KEY (store_id, bcode));
 CREATE TABLE IF NOT EXISTS bd_orders (delivery_day DATE, loc INT, code INT, qty INT, per_day NUMERIC(10,2),
   need NUMERIC(10,2), stock NUMERIC(10,2), cap NUMERIC(10,2), waste_pct NUMERIC(6,1), cover_days INT, note TEXT,
@@ -270,8 +271,80 @@ def sync_soft(db: Session, days: int = 35) -> dict:
     return {"objects": len(ext), "lines": len(rows), "rows": len(agg), "leftovers": nleft, "schedules": nsch}
 
 
+# ------------------------------------------------------------------ часове на доставка („Маршрути 300“ - GPS на шофьорите)
+TRANSPORT_SHEET = "101FzLDRoRGxaxMOhOKe953PvHSHXyAxbkWKMCihEk0M"
+TALIAS = {"ДЕТЕЛИНАЛАВРЕНТИЙ": "ЛАВРЕНТИЙ", "ДЕТЕЛИНАТРОШЕВО": "ТРОШЕВО", "МАРТИНИПЕТЪРРАЙЧЕВ": "МАРТИНИПРАЙЧЕВ",
+          "СИТИ2РИКОРПУС": "СИТИ2КОРПУС", "СИТИКОНТИЕЛЕНА": "СИТИСВКОНСТ", "СТАРЖПГАРА": "СТАРЖПГАРАМОНТЕХ",
+          "СТАРКАЙСИЕВА1": "СТАРКАЙСИЕВА", "СТАРПОПОВ": "СТАРАКАДПОПОВ", "СТАРМИЛАДИНОВИ": "СТАРБРМИЛАДИНОВИ"}
+
+
+def _tnorm(s: str) -> str:
+    import re
+    k = re.sub(r"\b300\b", "", (s or "").upper())
+    k = re.sub(r"[^А-ЯA-Z0-9]", "", k)
+    if k.startswith("БУЛМАГ"):
+        k = re.sub(r"\d", "", k)
+    return TALIAS.get(k, k)
+
+
+def sync_eta(db: Session, weeks: int = 5) -> dict:
+    """Кога шофьорът пристига във всеки обект (медиана по ден от седмицата за последните седмици)
+    - от лист „История“ на „Маршрути 300“ (събития „пристигнал“, иначе „готово“)."""
+    import csv, io, statistics, urllib.parse, urllib.request
+    ensure(db)
+    q = urllib.parse.quote("select A,B,D,E where D = 'пристигнал' or D = 'готово'")
+    u = (f"https://docs.google.com/spreadsheets/d/{TRANSPORT_SHEET}/gviz/tq?tqx=out:csv"
+         f"&sheet={urllib.parse.quote('История')}&tq={q}")
+    rows = list(csv.reader(io.StringIO(urllib.request.urlopen(u, timeout=60).read().decode("utf-8"))))
+    if not rows or rows[0][:2] != ["Дата", "Час"]:
+        raise RuntimeError("листът „История“ не е намерен")
+    cut = datetime.now(SOFIA).date() - timedelta(days=7 * weeks)
+    first = {}
+    for r in rows[1:]:
+        d, t, ev, st = (r + [""] * 4)[:4]
+        try:
+            D = datetime.strptime(d, "%d.%m.%Y").date(); h, m = map(int, t.split(":"))
+        except Exception:
+            continue
+        if D < cut or not st or "ЦЕХ" in st.upper() or "СКЛАД" in st.upper() or "ФУРНА" in st.upper():
+            continue
+        k = (D, st); mins = h * 60 + m
+        if ev == "пристигнал":
+            if k not in first or first[k][1] != "п" or mins < first[k][0]:
+                first[k] = (mins, "п")
+        elif k not in first:
+            first[k] = (mins, "г")
+    by = {_tnorm(n): loc for loc, n in db.execute(text("SELECT loc, name FROM bd_stores WHERE active")).all()}
+    T, miss = defaultdict(list), set()
+    for (D, st), (mins, _) in first.items():
+        loc = by.get(_tnorm(st))
+        if loc is None:
+            miss.add(st); continue
+        T[(loc, D.weekday(), st)].append(mins)
+    db.execute(text("DELETE FROM bd_eta"))
+    vals = [{"s": loc, "w": wd, "m": int(statistics.median(v)), "n": len(v), "nm": st} for (loc, wd, st), v in T.items()]
+    if vals:
+        db.execute(text("INSERT INTO bd_eta(store_id, wd, mins, n, name) VALUES (:s, :w, :m, :n, :nm) ON CONFLICT DO NOTHING"), vals)
+    db.commit()
+    return {"stores": len({v["s"] for v in vals}), "rows": len(vals), "unmatched": sorted(miss)}
+
+
+def eta_map(db: Session) -> dict:
+    ensure(db)
+    return {(s_, w): m for s_, w, m in db.execute(text("SELECT store_id, wd, mins FROM bd_eta")).all()}
+
+
+def _hm(m: int | None) -> str:
+    return f"{m // 60}:{m % 60:02d}" if m is not None else "—"
+
+
 def sync_all(db: Session) -> dict:
     out = {"mistral": sync(db)}
+    try:
+        out["eta"] = sync_eta(db)
+    except Exception as e:
+        db.rollback()
+        out["eta"] = f"{type(e).__name__}: {e}"[:200]
     try:
         out["soft"] = sync_soft(db)
     except Exception as e:
@@ -358,6 +431,7 @@ def build(db: Session, day: date, save: bool = True) -> dict:
         D[(st, c)][d][0] += float(i or 0); D[(st, c)][d][1] += float(o or 0)
     LEFT = {(s_, c): (d, float(q)) for s_, c, d, q in db.execute(text("SELECT store_id, bcode, day, qty FROM bd_left WHERE day >= :d"),
                                                                 {"d": today - timedelta(days=LEFT_DAYS)}).all()}
+    ETA = eta_map(db)
     out = []
     for key in set(S) | set(D):
         st, k = key
@@ -393,7 +467,15 @@ def build(db: Session, day: date, save: bool = True) -> dict:
             continue
         per_day = sold14 / DAYS
         # наличността трябва да стигне до ОБЯД в деня на следващата доставка (Димо, 23.10): + половин ден
-        need = sum(fc(day + timedelta(days=i)) for i in range(cover)) + 0.5 * fc(day + timedelta(days=cover))
+        # часът на доставката (GPS на шофьора): до пристигането се продава старата стока, а новата трябва
+        # да стигне до пристигането на СЛЕДВАЩАТА доставка. Без данни: от сутринта до обяд на следващата.
+        nday = day + timedelta(days=cover)
+        e_d, e_n = ETA.get((st, day.weekday())), ETA.get((st, nday.weekday()))
+        frac = lambda m: min(1.0, max(0.0, (m / 60 - 7) / 15))   # noqa: E731  магазинът продава ~07-22
+        f_d = frac(e_d) if e_d is not None else 0.0
+        f_n = frac(e_n) if e_n is not None else 0.5
+        need = (1 - f_d) * fc(day) + sum(fc(day + timedelta(days=i)) for i in range(1, cover)) + f_n * fc(nday)
+        span = (1 - f_d) + (cover - 1) + f_n
         safety = 0.0 if w > 0.15 else (SAFETY * 0.5 if w > 0.08 else SAFETY)
         target = need * (1 + safety)
         cap = sum(fc(day + timedelta(days=i)) for i in range(max(1, min(shelf - 1, 7))))
@@ -426,6 +508,8 @@ def build(db: Session, day: date, save: bool = True) -> dict:
             est = min(max(mstock.get(key, 0.0), 0.0), cap)
             src_st = "по Мистрал"
             st_why = f"Няма доставки и обход - наличността е по Мистрал: {mstock.get(key, 0.0):g} бр. (броя {est:.0f})."
+        if f_d > 0:                                     # продаденото от старата стока сутринта, преди да дойде бусът
+            est = max(0.0, est - f_d * fc(day))
         est = min(est, cap)
         qty = max(0, math.ceil(target - est - 0.25))
         qty = int(min(qty, max(0, math.floor(cap - est + 0.5))))
@@ -434,17 +518,20 @@ def build(db: Session, day: date, save: bool = True) -> dict:
             note.append("поне 1 бр. - никога 0 за артикул, който се продава")
         if w > 0.08:
             note.append(f"върнати {round(100 * w)}% - по-малък резерв")
-        note.append(f"до {WD[(day + timedelta(days=cover)).weekday()]} обяд ({cover + 0.5:g} дни)")
-        nd = WD[(day + timedelta(days=cover)).weekday()]
+        nd = WD[nday.weekday()]
+        till = f"{nd} ~{_hm(e_n)}" if e_n is not None else f"{nd} обяд"
+        note.append(f"до {till} ({span:.1f} дни)")
         why = [f"Продава средно {per_day:.1f} бр. на ден ({'касата в Мистрал' if src == 'каса' else 'взето минус върнато за 28 дни'}, последните 14 дни).",
-               f"Доставката в {WD[day.weekday()]} трябва да стигне до {nd} обяд ({cover + 0.5:g} дни) → нужни ~{need:.1f} бр."
+               (f"Бусът идва в {WD[day.weekday()]} към {_hm(e_d)} (по GPS на шофьора) - дотогава се продава старата стока. " if e_d is not None else "")
+               + f"Доставката трябва да стигне до {till}" + (" (тогава идва следващата)" if e_n is not None else "")
+               + f" - {span:.1f} дни → нужни ~{need:.1f} бр."
                + (f" + резерв {round(100 * safety)}% → {target:.1f} бр." if safety else " без резерв (много върнат брак)."),
                *([f"Празен хладилник {len(empty)} дни ({', '.join(x.strftime('%d.%m') for x in sorted(empty)[-6:])}) - 0 продажби, защото е нямало стока. "
                   f"Тези дни не се броят като 0, а като ~{fill:.1f} бр. (колкото продава в нормален ден)."] if empty else []),
                st_why,
                f"Срок на годност {shelf} дни → не повече от ~{cap:.0f} бр., колкото ще се продадат, докато е годно.",
                f"Заявка: {qty} бр." + (" (поне 1 - никога 0 за артикул, който се продава)" if any("поне 1" in x for x in note) else "")]
-        out.append({"loc": st, "store": stores[st], "code": k, "name": name, "sub": sub or "", "shelf": shelf, "explain": why, "empty": sorted(x.isoformat() for x in empty),
+        out.append({"loc": st, "store": stores[st], "code": k, "name": name, "sub": sub or "", "shelf": shelf, "explain": why, "eta": _hm(e_d) if e_d is not None else None, "eta_next": till, "empty": sorted(x.isoformat() for x in empty),
                     "sold14": round(sold14, 1), "per_day": round(per_day, 2), "need": round(need, 1),
                     "stock": round(est, 1), "cap": round(cap, 1), "qty": qty, "waste_pct": round(100 * w, 1),
                     "cover": cover, "note": "; ".join([f"{src}, наличност {src_st}"] + note)})

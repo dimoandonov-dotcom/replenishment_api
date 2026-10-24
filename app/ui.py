@@ -623,6 +623,16 @@ def ui_bandits_build(day: str | None = None, sync: bool = True, db: Session = De
     return r
 
 
+@router.get("/ui/bandits/eta")
+def ui_bandits_eta(sync: bool = False, db: Session = Depends(get_db)):
+    """Часове на доставка по обекти (GPS на шофьорите от „Маршрути 300“)."""
+    from . import bandits_orders as bo
+    from sqlalchemy import text as _tx
+    info = bo.sync_eta(db) if sync else None
+    rows = db.execute(_tx("SELECT e.store_id, s.name, e.wd, e.mins, e.n FROM bd_eta e LEFT JOIN bd_stores s ON s.loc = e.store_id ORDER BY s.name, e.wd")).all()
+    return {"sync": info, "rows": [{"loc": a, "store": b, "wd": bo.WD[c], "time": bo._hm(d), "n": e} for a, b, c, d, e in rows]}
+
+
 @router.get("/ui/bandits/compare")
 def ui_bandits_compare(day: str | None = None, fresh: bool = False, db: Session = Depends(get_db)):
     from . import bandits_orders as bo
