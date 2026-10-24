@@ -1571,8 +1571,9 @@ function renderBandits() {
   $("bdStores").innerHTML = Object.keys(by).sort((a, b) => a.localeCompare(b, "bg")).map(st => { const L = by[st], u = L.reduce((a, o) => a + o.qty, 0);
     return `<details class="help" style="margin:0 0 8px;border:1px solid var(--line,#e7dccb);border-radius:12px;padding:8px 12px"><summary style="cursor:pointer"><b>${esc(st)}</b> · ${fmtN(u)} бр. · ${L.filter(o => o.qty > 0).length} артикула${L.some(o => o.stock < 0) ? ' · <span style="color:#B91C1C">минуси в Мистрал</span>' : ""}</summary>
     <div class="scroll"><table><thead><tr><th>Артикул</th><th class="num">Продадени 14 дни</th><th class="num">На ден</th><th class="num">Нужно</th><th class="num">Наличност</th><th class="num">Таван (срок)</th><th class="num">Заявка</th><th>Бележка</th></tr></thead><tbody>
-    ${L.map(o => `<tr><td class="name">${esc(o.name)} <span class="muted">${o.code}</span></td><td class="num">${o.sold14 ?? fmtN(o.per_day * 14)}</td><td class="num">${o.per_day}</td><td class="num">${o.need}</td>
+    ${L.map(o => `<tr class="bdLn" data-l="${o.loc}" data-c="${o.code}" style="cursor:pointer" title="Натисни за анализ"><td class="name">▸ ${esc(o.name)} <span class="muted">${o.code}</span></td><td class="num">${o.sold14 ?? fmtN(o.per_day * 14)}</td><td class="num">${o.per_day}</td><td class="num">${o.need}</td>
       <td class="num ${o.stock < 0 ? "low" : ""}">${o.stock}</td><td class="num">${o.cap}</td><td class="num"><b>${o.qty}</b></td><td class="note">${esc(o.note || "")}</td></tr>`).join("")}</tbody></table></div></details>`; }).join("");
+  document.querySelectorAll("#bdStores tr.bdLn").forEach(tr => tr.onclick = () => bdLine(tr));
 }
 
 async function loadBdCompare(dayId = "bdDay", outId = "bdCmp") {
@@ -1613,6 +1614,22 @@ function initBdCmp() {
   const shift = n => { const x = new Date($("bdcDay").value); for (let i = 0; i < 7; i++) { x.setDate(x.getDate() + n); if ([1, 2, 4, 5].includes(x.getDay())) break; } $("bdcDay").value = x.toISOString().slice(0, 10); go(); };
   $("bdcDay").onchange = go; $("bdcRe").onclick = go; $("bdcPrev").onclick = () => shift(-1); $("bdcNext").onclick = () => shift(1);
   go();
+}
+async function bdLine(tr) {
+  const nx = tr.nextElementSibling;
+  if (nx && nx.classList.contains("bdX")) { nx.remove(); tr.firstElementChild.innerHTML = tr.firstElementChild.innerHTML.replace("▾", "▸"); return; }
+  tr.firstElementChild.innerHTML = tr.firstElementChild.innerHTML.replace("▸", "▾");
+  const x = document.createElement("tr"); x.className = "bdX"; x.innerHTML = `<td colspan="8"><div class="empty loading">Анализ…</div></td>`; tr.after(x);
+  let d; try { d = await api(`/ui/bandits/line?loc=${tr.dataset.l}&code=${tr.dataset.c}&day=${$("bdDay").value}`); } catch (e) { x.firstElementChild.innerHTML = "Грешка: " + esc(e.message); return; }
+  const r = d.line || {}, sum = a => a.reduce((p, v) => p + v, 0);
+  const mv = d.days.map((dd, i) => (d.delivered[i] || d.returned[i]) ? `<span style="white-space:nowrap">${dd}: <b style="color:var(--teal)">+${fmtN(d.delivered[i])}</b>${d.returned[i] ? ` <b style="color:var(--danger)">−${fmtN(d.returned[i])} върнати</b>` : ""}</span>` : "").filter(Boolean).join(" · ");
+  x.firstElementChild.innerHTML = `<div style="padding:8px 4px 12px">
+    ${d.has_sales ? `<b>Продажби на касата по дни (3 седмици)</b><div style="max-width:640px">${salesChart(d.sales, d.days, null)}</div>` :
+      `<div class="note">Чужд обект - касата му не е в Мистрал. Продажбите са смятани като взето минус върнато.</div>`}
+    <div style="font-size:13.5px;margin:6px 0"><b>Доставки от Бандитс:</b> ${mv || "няма за 3 седмици"}</div>
+    <div style="font-size:13.5px;margin:4px 0">${d.left ? `<b>Обход на Бела:</b> на ${d.left.day} е видяла <b>${fmtN(d.left.qty)}</b> бр. · ` : ""}${d.moni != null ? `<b>Мони:</b> ${fmtN(d.moni)} бр. за тази доставка` : ""}</div>
+    <div style="font-size:14.5px;line-height:1.6;margin-top:8px;max-width:760px"><b>Защо ${r.qty ?? "—"} бр.</b><ol style="margin:4px 0 0 18px;padding:0">${(r.explain || []).map(t => `<li>${esc(t)}</li>`).join("")}</ol></div>
+  </div>`;
 }
 async function loadBdSchedule() {
   const rows = await api("/ui/bandits/schedule");

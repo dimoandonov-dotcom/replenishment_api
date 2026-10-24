@@ -379,14 +379,19 @@ def build(db: Session, day: date, save: bool = True) -> dict:
             sold_since += per_day * max(0, (day - last).days - 1)
             est = max(0.0, lq + after - sold_since)
             src_st = f"по обхода на Бела ({L_.strftime('%d.%m')}: {lq:g} бр.)"
+            st_why = (f"Бела на {L_.strftime('%d.%m')} е видяла {lq:g} бр. в хладилника, после са доставени {after:g} бр., "
+                      f"а до доставката ще се продадат ~{sold_since:.0f} бр. → при доставката ще има ~{est:.0f} бр.")
         elif dl:
             gone = sum(ser.get(today - timedelta(days=i), 0.0) for i in range(1, k_ + 1)) if st < EXT_BASE else per_day * k_
             gone += per_day * max(0, (day - last).days - 1)          # от последния ден с данни до доставката
             est = max(0.0, got - gone)
             src_st = "по доставките на Бандитс"
+            st_why = (f"За последните {k_} дни (колкото е срокът) Бандитс е доставил {got:g} бр. (без върнатото), "
+                      f"а ще се продадат ~{gone:.0f} бр. → при доставката ще има ~{est:.0f} бр.")
         else:
             est = min(max(mstock.get(key, 0.0), 0.0), cap)
             src_st = "по Мистрал"
+            st_why = f"Няма доставки и обход - наличността е по Мистрал: {mstock.get(key, 0.0):g} бр. (броя {est:.0f})."
         est = min(est, cap)
         qty = max(0, math.ceil(target - est - 0.25))
         qty = int(min(qty, max(0, math.floor(cap - est + 0.5))))
@@ -396,7 +401,14 @@ def build(db: Session, day: date, save: bool = True) -> dict:
         if w > 0.08:
             note.append(f"върнати {round(100 * w)}% - по-малък резерв")
         note.append(f"до {WD[(day + timedelta(days=cover)).weekday()]} обяд ({cover + 0.5:g} дни)")
-        out.append({"loc": st, "store": stores[st], "code": k, "name": name, "sub": sub or "", "shelf": shelf,
+        nd = WD[(day + timedelta(days=cover)).weekday()]
+        why = [f"Продава средно {per_day:.1f} бр. на ден ({'касата в Мистрал' if src == 'каса' else 'взето минус върнато за 28 дни'}, последните 14 дни).",
+               f"Доставката в {WD[day.weekday()]} трябва да стигне до {nd} обяд ({cover + 0.5:g} дни) → нужни ~{need:.1f} бр."
+               + (f" + резерв {round(100 * safety)}% → {target:.1f} бр." if safety else " без резерв (много върнат брак)."),
+               st_why,
+               f"Срок на годност {shelf} дни → не повече от ~{cap:.0f} бр., колкото ще се продадат, докато е годно.",
+               f"Заявка: {qty} бр." + (" (поне 1 - никога 0 за артикул, който се продава)" if any("поне 1" in x for x in note) else "")]
+        out.append({"loc": st, "store": stores[st], "code": k, "name": name, "sub": sub or "", "shelf": shelf, "explain": why,
                     "sold14": round(sold14, 1), "per_day": round(per_day, 2), "need": round(need, 1),
                     "stock": round(est, 1), "cap": round(cap, 1), "qty": qty, "waste_pct": round(100 * w, 1),
                     "cover": cover, "note": "; ".join([f"{src}, наличност {src_st}"] + note)})
@@ -655,3 +667,27 @@ def moni_log(db: Session, days: int = 30) -> list[dict]:
              "seen": s_.astimezone(SOFIA).strftime("%d.%m %H:%M"), "lines": l, "units": float(u or 0)}
             for d, v, t, s_, l, u in db.execute(text("""SELECT delivery_day, version, sent_at, seen_at, lines, units FROM bd_moni_log
                 WHERE seen_at >= now() - make_interval(days => :n) ORDER BY seen_at DESC"""), {"n": days}).all()]
+
+
+def line(db: Session, loc: int, code: int, day: date) -> dict:
+    """Анализ на един ред от заявката: продажби, доставки, връщания и обход по дни + обяснението на бройката."""
+    ensure(db)
+    r = next((o for o in build(db, day, save=False)["lines"] if o["loc"] == loc and o["code"] == code), None)
+    mp = defaultdict(list)
+    for m_, b in db.execute(text("SELECT mcode, bcode FROM bd_map")).all():
+        mp[b].append(m_)
+    start = day - timedelta(days=21)
+    days = [start + timedelta(days=i) for i in range(21)]
+    sales = defaultdict(float)
+    for d, q in db.execute(text("SELECT day, SUM(qty) FROM bd_sales WHERE loc = :l AND code = ANY(:c) AND day >= :d GROUP BY day"),
+                           {"l": loc, "c": mp.get(code, [code]) or [code], "d": start}).all():
+        sales[d] = float(q or 0)
+    dl = {d: (float(i or 0), float(o or 0)) for d, i, o in db.execute(text(
+        "SELECT day, delivered, returned FROM bd_soft WHERE store_id = :l AND bcode = :c AND day >= :d"), {"l": loc, "c": code, "d": start}).all()}
+    lf = db.execute(text("SELECT day, qty FROM bd_left WHERE store_id = :l AND bcode = :c"), {"l": loc, "c": code}).first()
+    moni = db.execute(text("SELECT qty FROM bd_moni WHERE delivery_day = :d AND store_id = :l AND code = :c"),
+                      {"d": day, "l": loc, "c": code}).scalar()
+    return {"line": r, "days": [d.strftime("%d.%m") for d in days], "sales": [sales.get(d, 0.0) for d in days],
+            "has_sales": loc < EXT_BASE, "delivered": [dl.get(d, (0, 0))[0] for d in days], "returned": [dl.get(d, (0, 0))[1] for d in days],
+            "left": {"day": lf[0].strftime("%d.%m"), "qty": float(lf[1])} if lf else None,
+            "moni": float(moni) if moni is not None else None}

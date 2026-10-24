@@ -643,6 +643,12 @@ def ui_bandits_moni_log(days: int = 30, db: Session = Depends(get_db)):
     return bo.moni_log(db, days)
 
 
+@router.get("/ui/bandits/line")
+def ui_bandits_line(loc: int, code: int, day: str | None = None, db: Session = Depends(get_db)):
+    from . import bandits_orders as bo
+    return bo.line(db, loc, code, _bd_day(day))
+
+
 @router.get("/ui/bandits/partners")
 def ui_bandits_partners(db: Session = Depends(get_db)):
     from . import partner_orders as po
