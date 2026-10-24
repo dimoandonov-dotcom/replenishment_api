@@ -1635,7 +1635,7 @@ async function bdLine(tr) {
   const box = x.querySelector(".bdXd");
   let d; try { d = await api(`/ui/bandits/line?loc=${tr.dataset.l}&code=${tr.dataset.c}&day=${tr.dataset.d || $("bdDay").value}`); } catch (e) { box.innerHTML = "Грешка: " + esc(e.message); return; }
   const r = d.line || {};
-  const chips = d.days.map((dd, i) => (d.delivered[i] || d.returned[i]) ? `<span class="bdChip">${dd} <b style="color:var(--teal)">+${fmtN(d.delivered[i])}</b>${d.returned[i] ? ` <b style="color:var(--danger)">−${fmtN(d.returned[i])}</b>` : ""}</span>` : "").filter(Boolean).join("");
+  const chips = d.days.map((dd, i) => (d.delivered[i] || d.returned[i]) ? `<span class="bdChip">${dd}${d.delivered[i] ? ` <b style="color:var(--teal)">+${fmtN(d.delivered[i])}</b>` : ""}${d.returned[i] ? ` <b style="color:var(--danger)">−${fmtN(d.returned[i])} върнати</b>` : ""}</span>` : "").filter(Boolean).join("");
   const facts = [];
   if (d.left) facts.push(`<div class="bdF"><span>👀 Бела видяла</span><b>${fmtN(d.left.qty)} бр.</b><small>${d.left.day}</small></div>`);
   if (d.moni != null) facts.push(`<div class="bdF"><span>🟠 Мони</span><b>${fmtN(d.moni)} бр.</b><small>тази доставка</small></div>`);
