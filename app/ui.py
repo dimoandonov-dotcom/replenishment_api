@@ -632,8 +632,18 @@ def ui_bandits_compare(day: str | None = None, fresh: bool = False, db: Session 
             bo.fetch_moni(db, d)
         except Exception:
             db.rollback()
-        bo.sync_soft(db)
+        # стоковите от Бандитс софтуеър са бавни (~1 мин) -> най-много веднъж на 30 мин
+        import time as _t
+        if _t.time() - _BD_SOFT.get("t", 0) > 1800:
+            try:
+                bo.sync_soft(db)
+                _BD_SOFT["t"] = _t.time()
+            except Exception:
+                db.rollback()
     return bo.compare(db, d)
+
+
+_BD_SOFT: dict = {}
 
 
 @router.get("/ui/bandits/moni-log")
