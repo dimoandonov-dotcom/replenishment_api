@@ -82,10 +82,14 @@ def in_transit(db: Session, now: datetime | None = None) -> dict[tuple[int, int]
         L = ",".join(str(loc) for sid in sids for loc in rev.get(sid, []))
         C = ",".join(sorted(str(c) for c in codes.values()))
         if L and C:
-            cur.execute(f"""SELECT LOCATIONID AS loc, MATERIALCODE AS code, MAX(CAST(OPERATIONDATE AS date)) AS d
-                            FROM MATERIALQTYLOG WITH (NOLOCK)
-                            WHERE OPERATIONTYPE = 2 AND OPERATIONDATE >= %s AND LOCATIONID IN ({L}) AND MATERIALCODE IN ({C})
-                            GROUP BY LOCATIONID, MATERIALCODE""", (since.date().isoformat(),))
+            # само фактури от НДК: същият артикул от друг доставчик (напр. вода директно) не е нашата доставка
+            import os as _os
+            ndk = int(_os.getenv("NDK_PARTNER_ID", "186"))
+            cur.execute(f"""SELECT q.LOCATIONID AS loc, q.MATERIALCODE AS code, MAX(CAST(q.OPERATIONDATE AS date)) AS d
+                            FROM MATERIALQTYLOG q WITH (NOLOCK) JOIN OPERATIONS o WITH (NOLOCK) ON o.NUM = q.OPERAIONNUM
+                            WHERE q.OPERATIONTYPE = 2 AND q.OPERATIONDATE >= %s AND q.LOCATIONID IN ({L}) AND q.MATERIALCODE IN ({C})
+                              AND o.PARTNERNAMEID = %s
+                            GROUP BY q.LOCATIONID, q.MATERIALCODE""", (since.date().isoformat(), ndk))
             by_code = {c: a for a, c in codes.items()}
             for r in cur.fetchall():
                 sid, aid = locs.get(r["loc"]), by_code.get(int(r["code"]))
