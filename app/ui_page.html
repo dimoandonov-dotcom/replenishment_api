@@ -1496,7 +1496,8 @@ function renderQual() {
 
 /* ---------- експорт на всяка таблица в Excel ---------- */
 function cellValue(td) {
-  const t = (td.innerText || "").replace(/\u00a0/g, " ").trim();
+  const inp = td.querySelector("input:not([type=checkbox]), select");   // поле за въвеждане (поръчка, мин, макс)
+  const t = (inp ? inp.value : (td.innerText || "")).replace(/\u00a0/g, " ").trim();
   // число във формат „1 234,56“ / „-12“ / „12%“ / „×1,5“ -> число
   const m = t.replace(/[€%×]/g, "").replace(/\s/g, "").replace(/бр\.?$|дни$|маг\.?$|\/ден$/i, "");
   if (/^[−-]?\d+(?:[.,]\d+)?$/.test(m)) return parseFloat(m.replace("−", "-").replace(",", "."));
