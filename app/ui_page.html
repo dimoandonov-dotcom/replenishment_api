@@ -1039,9 +1039,15 @@ async function initOrders() {
   $("oFind").oninput = findInOrder;
   $("viberOrder").onclick = async () => {
     const t = orderText();
-    try { await navigator.clipboard.writeText(t); } catch (e) {}
-    toast("Заявката е копирана. Отваря се Viber - избери чата на магазина (ако не се отвори, постави с Ctrl+V).");
-    window.location.href = "viber://forward?text=" + encodeURIComponent(t);
+    // Viber реже дълъг текст в линка -> цялата заявка се копира и се поставя в чата с Ctrl+V
+    let ok = false;
+    try { await navigator.clipboard.writeText(t); ok = true; } catch (e) {
+      const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select();
+      try { ok = document.execCommand("copy"); } catch (e2) {} ta.remove();
+    }
+    const n = t.split("\n").length - 3;
+    toast(ok ? `Копирана цялата заявка (${n} реда). Във Viber отвори чата на магазина и натисни Ctrl+V.` : "Не успях да копирам - маркирай текста ръчно.", ok);
+    window.location.href = "viber://chats";
   };
   let acT; $("acQ").oninput = () => { clearTimeout(acT); acT = setTimeout(acCheck, 450); };
   $("acQ").onkeydown = e => { if (e.key === "Enter") { clearTimeout(acT); acCheck(); } };
