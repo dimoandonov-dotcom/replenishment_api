@@ -10,6 +10,7 @@
   5) грешно заведени фактури (OCR) днес/вчера.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import os
 from collections import defaultdict
@@ -20,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from . import models as m
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 
 
 def users() -> set[str]:

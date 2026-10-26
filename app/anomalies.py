@@ -18,6 +18,7 @@
   correction - корекции надолу без ревизия (ръчни)
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import re
 
@@ -30,7 +31,7 @@ from sqlalchemy.orm import Session
 from . import models as m
 from . import service
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 OPS = {1: "продажба", 2: "доставка", 4: "брак", 37: "корекция надолу", 38: "корекция нагоре"}
 KIND = {
     "shortage": "Липси от ревизия", "surplus": "Излишъци от ревизия",

@@ -10,6 +10,7 @@
 Наличностите в Мистрал за Бандитс често са грешни (доставките се завеждат късно) - отрицателната наличност се брои за 0.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import math
 from collections import defaultdict
@@ -18,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 SUPPLIER = "БАНДИТС"
 DAYS = 14
 SAFETY = 0.15

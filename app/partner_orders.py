@@ -4,6 +4,7 @@
 (не от MinMaxAI - за да е честно сравнението). Записаното влиза в сравнението „Бандитс vs Мони“ като истинската им заявка.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import json
 import secrets
@@ -17,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from .db import get_db
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 router = APIRouter()
 WD = ["понеделник", "вторник", "сряда", "четвъртък", "петък", "събота", "неделя"]
 

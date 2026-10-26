@@ -9,6 +9,7 @@
 акция, сезонни групи и служебни групи. Решенията („делистваме“ / „оставяме“) се пазят.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -16,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 SKIP_GROUPS = {"Без група", "Консумативи", "ПРОМОЦИИ", "Вестници-списания", "Кафемашина", "Топла точка"}
 SEASONAL = {"Сладоледи", "Яйца и боя за яйца"}
 SLOW_PER_STORE_MONTH = 1.0     # под 1 бр. на магазин на месец

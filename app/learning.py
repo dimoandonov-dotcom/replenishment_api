@@ -18,6 +18,7 @@
 се прилагат веднага.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import math
 import re
@@ -30,7 +31,7 @@ from sqlalchemy.orm import Session
 from . import models as m
 from . import service
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 DAYS = 14
 L, R, Z, D, MIN_SHELF = 1, 1, 1.65, 2, 1
 CLASSES = [("A", 3, 2), ("B", 1, 3), ("C", 0.3, 5), ("D", 0, 7)]

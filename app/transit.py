@@ -6,6 +6,7 @@
 Докато фактурата я няма, поръчаното се брои като наличност в път - иначе MinMaxAI ще поръча същото отново.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from . import models as m
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 MAX_WAIT_DAYS = 2          # заявка по-стара от толкова дни вече не се чака
 
 

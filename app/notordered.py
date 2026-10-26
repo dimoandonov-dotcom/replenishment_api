@@ -12,6 +12,7 @@
 („над минимума" не е тук - това е нормално, ще се поръча, щом падне.)
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -22,7 +23,7 @@ from sqlalchemy.orm import Session
 from . import models as m
 from . import service
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 REASONS = {
     "no_order": "🚫 Отбелязан „Не се поръчва“",
     "stopped": "⛔ Спрян 0-0",

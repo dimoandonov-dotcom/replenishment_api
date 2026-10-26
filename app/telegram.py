@@ -6,6 +6,7 @@ Telegram бот: всяка сутрин (12:30) изпраща справкат
 Кой получава сутрешната справка: REPORT_USERS (по подразбиране „asen“).
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import hashlib
 import hmac
@@ -18,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "https://minmaxai.up.railway.app")
 
 

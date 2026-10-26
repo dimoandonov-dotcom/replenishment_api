@@ -7,6 +7,7 @@
 сесия. Машините (cron) ползват X-API-Key.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import hmac
 import os
@@ -29,7 +30,7 @@ from .db import get_db
 router = APIRouter(tags=["Интерфейс"])
 
 _API_KEY = os.getenv("API_KEY", "").strip()
-_SOFIA = timezone(timedelta(hours=3))
+_SOFIA = ZoneInfo("Europe/Sofia")
 _PAGE = Path(__file__).with_name("ui_page.html")
 
 

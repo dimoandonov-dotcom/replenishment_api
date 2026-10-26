@@ -4,6 +4,7 @@ Excel - по колона с код (сигурно). PDF - по текста: �
 имената на артикулите (не е 100% - затова има преглед преди запис).
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import io
 import re
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from . import models as m
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 
 _DATE_RANGE = re.compile(
     r"(\d{1,2})\s*[./]\s*(\d{1,2})(?:\s*[./]\s*(\d{2,4}))?\.?\s*(?:г\.?)?\s*(?:-|–|—|до)\s*"

@@ -9,6 +9,7 @@
 Така сравнението е честно - един и същ момент, една и съща наличност.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 from datetime import date, datetime, timedelta, timezone
 
@@ -19,7 +20,7 @@ from . import models as m
 from . import service
 from .imports import normalize_store_name
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 STALE_AFTER = timedelta(minutes=30)
 
 

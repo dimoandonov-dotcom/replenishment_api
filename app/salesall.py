@@ -7,6 +7,7 @@
   sa_promo    - промоции от Мистрал (PROMOTIONSALEPRICE) по артикул и период
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import threading
 import time
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from . import models as m
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 KEEP_DAYS = 60
 _job = {"running": False, "last": None, "error": None, "progress": ""}
 

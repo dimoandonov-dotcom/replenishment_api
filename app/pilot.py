@@ -1,5 +1,6 @@
 """Пилот: магазини, за които заявката на MinMaxAI е истинската (НДК доставя по нея)."""
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -30,7 +31,7 @@ def since_map(db: Session) -> dict:
 
 def active_ids(db: Session, day=None) -> set[int]:
     from datetime import datetime, timedelta, timezone
-    day = day or datetime.now(timezone(timedelta(hours=3))).date()
+    day = day or datetime.now(ZoneInfo("Europe/Sofia")).date()
     return {s for s, d in since_map(db).items() if d is None or d <= day}
 
 

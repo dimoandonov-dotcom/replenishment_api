@@ -7,6 +7,7 @@
 сравнението с Ани, и „перо" за наличностите: поръчано, но не заведено като доставка.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -17,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from . import models as m
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 
 
 def _bg(dt) -> date:

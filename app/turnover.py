@@ -11,6 +11,7 @@
   артикул  - свършила наличност, свършила акция, по-висока цена, не се продава при наличност
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import json
 import statistics
@@ -24,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from . import models as m
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 WEEKS = 4                    # базата: същите дни от предните 4 седмици
 STORE_DROP_PCT = -8.0        # магазин в червено под -8%
 GRP_DROP_PCT = -15.0         # група в магазин: спад поне 15% ...

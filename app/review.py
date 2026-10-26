@@ -11,6 +11,7 @@
   без продажби        - поръчано (от когото и да е) при 0 продажби за 14 дни - за решение по асортимента
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -20,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from . import models as m, service
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 OVER_DAYS = 10          # над толкова дни запас след доставката = излишно
 
 CATS = {

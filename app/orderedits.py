@@ -4,6 +4,7 @@
 Промяната важи за заявката за деня: и за прегледа/Excel, и за вече пуснатата заявка (09:30).
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 from datetime import date, datetime, timedelta, timezone
 
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from . import models as m
 
-SOFIA = timezone(timedelta(hours=2))
+SOFIA = ZoneInfo("Europe/Sofia")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS order_edits (id BIGSERIAL PRIMARY KEY, day DATE, store_id INT, article_id INT, sku TEXT,

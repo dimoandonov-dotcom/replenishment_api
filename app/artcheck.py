@@ -3,6 +3,7 @@
 мин/макс, наличност, продажби, опаковка и ясна причина.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import math
 from datetime import datetime, timedelta, timezone
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from . import models as m, service
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 
 
 def _n(x) -> str:

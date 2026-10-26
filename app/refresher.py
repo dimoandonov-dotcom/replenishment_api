@@ -8,7 +8,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 EVERY_MIN = 30
 HOURS = (7, 22)
 _state = {"last_run": None, "last_result": None, "last_error": None, "running": False}

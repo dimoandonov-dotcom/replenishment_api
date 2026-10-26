@@ -3,6 +3,7 @@
 Всичко е по НДК артикулите, от продажбите и наличностите от Мистрал.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import re
 from collections import defaultdict
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from . import models as m
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 BEER = {"АРИАНА", "ШУМЕНСКО", "ПИРИНСКО", "СТАРОПРАМЕН", "ХАЙНЕКЕН", "ЗАГОРКА", "БУРГАСКО", "КАМЕНИЦА",
         "МАДРИ", "ТУБОРГ", "СТЕЛА", "КОРОНА", "АМСТЕЛ", "ЖАТЕЦКИ", "АСТИКА", "МОРЕТИ", "БЕКС", "ЛЕВЕН"}
 SPIRITS = {"ВОДКА", "РАКИЯ", "УИСКИ", "ДЖИН", "МЕНТА", "МАСТИКА", "РОМ", "КОНЯК", "ЛИКЬОР", "УЗО", "СПИРТНИ"}

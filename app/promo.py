@@ -5,6 +5,7 @@
 Настройките в базата не се променят - вдигането важи само за изчисляването на заявката.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import math
 from datetime import date, datetime, timedelta, timezone
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from . import models as m
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 DEFAULT_UPLIFT = 1.5
 MIN_UPLIFT, MAX_UPLIFT = 1.0, 3.0
 

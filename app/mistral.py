@@ -12,6 +12,7 @@ MSSQL_HOST, MSSQL_PORT, MSSQL_USER, MSSQL_PASSWORD, MSSQL_DB.
 PARTNER и UOM са по обект - винаги се връзват и по LOCATIONID.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import contextvars
 import os
@@ -289,7 +290,7 @@ def sync_sales(db, days: int = 14) -> dict:
         int(a.sku): a.id for a in db.execute(select(m.Article)).scalars().all()
         if a.sku.isdigit()
     }
-    sofia = timezone(timedelta(hours=3))
+    sofia = ZoneInfo("Europe/Sofia")
     today = datetime.now(sofia).date()
     d_from = today - timedelta(days=days)
     started = datetime.now(timezone.utc)

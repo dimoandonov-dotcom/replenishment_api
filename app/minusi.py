@@ -11,6 +11,7 @@
 Отметката „Готово“ важи 48 часа: ако след това артикулът още е на минус, редът се връща.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import re
 import time
@@ -22,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from . import models as m
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 CODE_PAIRS = {"14314": "24725"}          # Корона 355 -> Корона 330 (НДК доставя само 330)
 DONE_HOURS = 48
 _cache: dict = {"at": 0.0, "data": None}

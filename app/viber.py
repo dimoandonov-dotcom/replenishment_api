@@ -7,6 +7,7 @@ Viber бот: всяка сутрин (12:30) изпраща справката 
 Кой получава справката: VIBER_REPORT_USERS (по подразбиране „asen“).
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import hashlib
 import hmac
@@ -18,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 API = "https://chatapi.viber.com/pa/"
 PUBLIC_URL = os.getenv("PUBLIC_URL", "https://minmaxai.up.railway.app")
 BOT_NAME = os.getenv("VIBER_BOT_NAME", "MinMaxAI 300")

@@ -11,6 +11,7 @@
 Всяка нощ се записва снимка за деня -> тенденция по дни.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import json
 from collections import defaultdict
@@ -22,7 +23,7 @@ from sqlalchemy.orm import Session
 from . import models as m
 from . import service
 
-SOFIA = timezone(timedelta(hours=3))
+SOFIA = ZoneInfo("Europe/Sofia")
 OVER_DAYS = 21
 LABEL = {"out": "свършил", "over": "свръхзапас", "low": "под минимума — в заявката", "ok": "точно"}
 
