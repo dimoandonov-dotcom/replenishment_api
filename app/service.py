@@ -394,6 +394,11 @@ def calculate_for_store(
                 ln.notes = (lab[ln.article_id] + (" · " + ln.notes if ln.notes else ""))
     except Exception:
         db.rollback()
+    try:   # ръчни промени (Ани) - последни, над всичко останало
+        from . import orderedits as _oe
+        _oe.apply(db, store_id, order_date, combined, settings, stock)
+    except Exception:
+        db.rollback()
     return combined
 
 

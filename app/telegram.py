@@ -245,3 +245,15 @@ def review_daily(db: Session, force: bool = False) -> dict:
                    {"i": cid, "ok": ok, "info": json.dumps(r, ensure_ascii=False)[:300]})
     db.commit()
     return {"sent": sent}
+
+
+def send_to(db: Session, username: str, msg: str) -> bool:
+    """Съобщение до свързан потребител по име (напр. "dimo")."""
+    if not token():
+        return False
+    _ensure(db)
+    ok = False
+    for cid, u in db.execute(text("SELECT chat_id, username FROM tg_users WHERE username IS NOT NULL")).all():
+        if (u or "").lower() == username.lower():
+            ok = send(int(cid), msg).get("ok", True) is not False or ok
+    return ok

@@ -924,6 +924,31 @@ def ui_article_check(store_id: int, q: str, db: Session = Depends(get_db)):
     return artcheck.check(db, store_id, q)
 
 
+class OrderEditIn(BaseModel):
+    sku: str
+    qty: int
+    old: int | None = None
+    reason: str | None = None
+
+
+@router.post("/ui/orders/{store_id}/edit")
+def ui_order_edit(store_id: int, changes: list[OrderEditIn], request: Request, day: date | None = None,
+                  db: Session = Depends(get_db)):
+    """Ръчна промяна на количества в заявката за деня (Ани). Всяка промяна се пази и отива при Димо."""
+    from . import orderedits
+    try:
+        return orderedits.save(db, store_id, day or date.today(), [c.model_dump() for c in changes],
+                               getattr(request.state, "user", None))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/ui/order-edits")
+def ui_order_edits(days: int = 7, store_id: int | None = None, db: Session = Depends(get_db)):
+    from . import orderedits
+    return orderedits.listing(db, days, store_id)
+
+
 @router.get("/ui/orders/{store_id}/explain")
 def ui_order_explain(store_id: int, db: Session = Depends(get_db)):
     """Графика на продажбите + обяснение за всеки ред от заявката на магазина."""

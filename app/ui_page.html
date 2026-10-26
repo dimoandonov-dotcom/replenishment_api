@@ -426,10 +426,17 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <button class="warm" id="xlsOrder">Свали Excel</button>
     <button id="oxAll">Покажи всички графики</button>
     <button id="coBtn" style="background:#2563EB;color:#fff">👤 Поръчка от клиент</button>
+    <button id="oeBtn" style="background:#7C3AED;color:#fff">✏️ Промени</button>
     <input id="acQ" placeholder="🔍 Провери артикул (код или име) — мин/макс и защо го няма" style="min-width:260px;flex:1">
     <span class="msg" id="ordMsg"></span>
   </div>
-  <div id="coPanel"></div><div id="acPanel"></div>
+  <div id="coPanel"></div><div id="acPanel"></div><div id="oePanel"></div>
+  <div class="bar" id="oeAdd" style="margin-top:4px">
+    <span class="note">➕ Добави артикул в заявката:</span>
+    <input id="oeSku" placeholder="код" inputmode="numeric" style="width:90px">
+    <input id="oeQty" type="number" min="1" step="1" placeholder="бр." style="width:70px">
+    <button id="oeAddBtn" class="go">Добави</button>
+  </div>
   <div class="totals" id="ordTotals"></div>
   <div class="scroll"><table>
     <thead><tr>
@@ -443,6 +450,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <div class="sticky-save" id="saveBar">
     <button class="go" id="saveOrder">Запази промените</button>
     <span class="note" id="saveCount"></span>
+    <input id="oeWhy" placeholder="Причина за промяната (по желание)" style="min-width:200px;flex:1">
     <button id="undoOrder">Отказ</button>
   </div>
 </section>
@@ -991,7 +999,20 @@ async function initOrders() {
   $("xlsOrder").onclick = () => download(`/orders/preview/${$("storeSel").value}/export`).catch(e => msg("ordMsg", e.message, false));
   $("saveOrder").onclick = saveOrder;
   $("oxAll").onclick = () => document.querySelectorAll("#ordBody td.ox").forEach(td => { if (td.textContent.includes("▸")) td.click(); });
-  $("undoOrder").onclick = () => loadOrder();
+  $("undoOrder").onclick = () => { qedits = {}; edits = {}; loadOrder(); };
+  $("oeBtn").onclick = toggleOrderEdits;
+  $("oeAddBtn").onclick = async () => {
+    const sku = $("oeSku").value.trim(), q = parseInt($("oeQty").value);
+    if (!sku || !(q > 0)) { msg("ordMsg", "Въведи код и бройка", false); return; }
+    const a = (await arts())[sku];
+    if (!a) { msg("ordMsg", `Няма артикул с код ${sku}`, false); return; }
+    try {
+      const r = await api(`/ui/orders/${$("storeSel").value}/edit`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify([{ sku, qty: q, old: 0, reason: $("oeWhy").value.trim() || "добавен ръчно" }]) });
+      $("oeSku").value = ""; $("oeQty").value = "";
+      await loadOrder(); msg("ordMsg", `Добавен „${a.name}“ × ${q}${r.told_dimo ? " · Димо е уведомен" : ""}`);
+    } catch (e) { msg("ordMsg", e.message, false); }
+  };
   if (pendingStore) { $("storeSel").value = pendingStore; pendingStore = null; }
   loadOrder();
 }
@@ -1003,9 +1024,21 @@ function step(d) {
   const sel = $("storeSel"); const i = sel.selectedIndex + d;
   if (i >= 0 && i < sel.options.length) { sel.selectedIndex = i; loadOrder(); }
 }
+async function toggleOrderEdits() {
+  const P = $("oePanel");
+  if (P.innerHTML) { P.innerHTML = ""; return; }
+  P.innerHTML = `<div class="empty loading">Зареждам…</div>`;
+  const all = !!(window.ME && ME.owner);
+  const L = await api(`/ui/order-edits?days=14${all ? "" : "&store_id=" + $("storeSel").value}`);
+  P.innerHTML = `<div style="margin:8px 0 12px"><b>✏️ Ръчни промени в заявките${all ? " (всички магазини, 14 дни)" : " (този магазин, 14 дни)"}</b>
+    <div class="scroll" style="margin-top:6px"><table><thead><tr><th>Кога</th><th>Кой</th><th>Магазин</th><th>Артикул</th><th class="num">Беше</th><th class="num">Стана</th><th>Причина</th></tr></thead><tbody>
+    ${L.map(e => `<tr><td>${esc(e.at)}</td><td>${esc(e.by || "")}</td><td>${esc(e.store || "")}</td><td class="name">${esc(e.name || e.sku)} <span class="muted">${esc(e.sku)}</span></td>
+      <td class="num">${e.old}</td><td class="num"><b style="color:${e.new > e.old ? "var(--teal)" : "var(--danger)"}">${e.new}</b></td><td>${esc(e.reason || "")}</td></tr>`).join("") || `<tr><td colspan="7" class="empty">Няма промени.</td></tr>`}
+    </tbody></table></div></div>`;
+}
 async function loadOrder() {
-  if (Object.keys(edits).length && !confirm("Има незапазени промени. Да ги откажа?")) return;
-  edits = {}; updateSave();
+  if ((Object.keys(edits).length || Object.keys(qedits).length) && !confirm("Има незапазени промени. Да ги откажа?")) return;
+  edits = {}; qedits = {}; updateSave(); $("oePanel").innerHTML = "";
   const id = $("storeSel").value;
   $("ordBody").innerHTML = `<tr><td colspan="10" class="empty">Изчислявам…</td></tr>`;
   try {
@@ -1031,7 +1064,7 @@ async function loadOrder() {
         <td class="num ${l.current_stock < l.min_stock ? "low" : ""}">${fmtN(l.current_stock)}</td>
         <td class="num"><input type="number" min="0" step="1" value="${l.min_stock}" data-f="min_stock" aria-label="Мин"></td>
         <td class="num"><input type="number" min="0" step="1" value="${l.max_stock}" data-f="max_stock" aria-label="Макс"></td>
-        <td class="num"><b>${l.ordered_quantity}</b></td>
+        <td class="num"><input type="number" min="0" step="1" value="${l.ordered_quantity}" data-f="qty" data-o="${l.ordered_quantity}" aria-label="Поръчка" style="font-weight:700;width:64px">${(l.notes || "").includes("✏️") ? ' <span title="Променено ръчно">✏️</span>' : ""}</td>
         <td class="num">${l.pack_size > 1 ? l.pack_size : "бр."}</td>
         <td class="num">${fmtE(price)}</td>
         <td class="num">${fmtE(val)}</td>
@@ -1059,8 +1092,14 @@ async function loadOrder() {
     msg("ordMsg", "");
   } catch (e) { msg("ordMsg", e.message, false); $("ordBody").innerHTML = `<tr><td colspan="10" class="empty">Грешка при зареждане.</td></tr>`; }
 }
+let qedits = {};
 function onEdit(e) {
   const tr = e.target.closest("tr"); const sku = tr.dataset.sku;
+  if (e.target.dataset.f === "qty") {
+    const v = parseInt(e.target.value), o = parseInt(e.target.dataset.o);
+    if (isNaN(v) || v === o) delete qedits[sku]; else qedits[sku] = { sku, qty: v, old: o };
+    e.target.classList.toggle("changed", sku in qedits); updateSave(); return;
+  }
   edits[sku] = {
     min_stock: parseFloat(tr.querySelector('[data-f="min_stock"]').value),
     max_stock: parseFloat(tr.querySelector('[data-f="max_stock"]').value),
@@ -1068,9 +1107,9 @@ function onEdit(e) {
   e.target.classList.add("changed"); updateSave();
 }
 function updateSave() {
-  const n = Object.keys(edits).length;
-  $("saveBar").classList.toggle("on", n > 0);
-  $("saveCount").textContent = n ? `${n} променени артикула` : "";
+  const n = Object.keys(edits).length, q = Object.keys(qedits).length;
+  $("saveBar").classList.toggle("on", n + q > 0);
+  $("saveCount").textContent = [q ? `${q} променени количества` : "", n ? `${n} мин/макс` : ""].filter(Boolean).join(" · ");
 }
 async function saveOrder() {
   const store_id = parseInt($("storeSel").value);
@@ -1078,10 +1117,21 @@ async function saveOrder() {
   if (bad.length) { msg("ordMsg", `Макс е под мин при ${bad.map(b => b[0]).join(", ")}`, false); return; }
   const body = Object.entries(edits).map(([sku, v]) => ({ store_id, sku, ...v }));
   try {
-    const r = await api("/settings?source=manual&reason=" + encodeURIComponent("корекция от пулта"), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const out = [];
+    if (Object.keys(qedits).length) {
+      const why = $("oeWhy").value.trim();
+      const r = await api(`/ui/orders/${store_id}/edit`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(Object.values(qedits).map(x => ({ ...x, reason: why || null }))) });
+      out.push(`Заявката е променена: ${r.saved} реда${r.told_dimo ? " · Димо е уведомен" : ""}`);
+      qedits = {}; $("oeWhy").value = "";
+    }
+    if (body.length) {
+      const r = await api("/settings?source=manual&reason=" + encodeURIComponent("корекция от пулта"), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      out.push(`Мин/макс: ${r.updated} промени — заключени са и ученето няма да ги пипа`);
+    }
     edits = {}; updateSave();
     await loadOrder();
-    msg("ordMsg", `Запазени ${r.updated} промени — заключени са и ученето няма да ги пипа.`);
+    msg("ordMsg", out.join(" · "));
   } catch (e) { msg("ordMsg", e.message, false); }
 }
 
@@ -2905,7 +2955,7 @@ document.querySelectorAll("nav a").forEach(a => a.onclick = () => {
 });
 fetch("/ui/summary").then(r => {
   if (r.status === 401) { showLogin(); return; }
-  api("/ui/me").then(m => { const w = document.getElementById("whoami"); if (w && m.name) w.textContent = "👤 " + m.name;
+  api("/ui/me").then(m => { window.ME = m; const w = document.getElementById("whoami"); if (w && m.name) w.textContent = "👤 " + m.name;
     if (m.analytics_only) {   // профил само за „Анализи"
       document.querySelectorAll('nav a').forEach(a => { if (!["anal", "promo", "turn", "delist"].includes(a.dataset.tab)) a.remove(); });
       document.querySelectorAll('section.tab').forEach(t => { if (!["tab-anal", "tab-promo", "tab-turn", "tab-delist"].includes(t.id)) t.remove(); });
