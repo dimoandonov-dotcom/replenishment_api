@@ -394,6 +394,22 @@ def calculate_for_store(
                 ln.notes = (lab[ln.article_id] + (" · " + ln.notes if ln.notes else ""))
     except Exception:
         db.rollback()
+    # артикул без продажби, който магазинът НИКОГА не е поръчвал (в заявките през Ани), не се поръчва
+    # на цял стек над максимума (напр. макс 2, стек 12) - Димо, 26.10
+    try:
+        from sqlalchemy import text as _tx
+        hist = db.execute(_tx("""SELECT COUNT(DISTINCT o.id) FROM manual_orders o WHERE o.store_id = :s"""), {"s": store_id}).scalar() or 0
+        if hist >= 5:
+            ever = {r[0] for r in db.execute(_tx("""SELECT DISTINCT l.sku FROM manual_order_lines l JOIN manual_orders o ON o.id = l.order_id
+                                                    WHERE o.store_id = :s AND l.store_qty > 0"""), {"s": store_id}).all()}
+            for ln in list(combined.lines):
+                if ("поръчка от клиент" in (ln.notes or "") or ln.sku in ever
+                        or avg_sales.get((store_id, ln.article_id), 0.0) > 0 or ln.ordered_quantity <= ln.max_stock):
+                    continue
+                combined.lines.remove(ln)
+                combined.skipped_above_min += 1
+    except Exception:
+        db.rollback()
     try:   # ръчни промени (Ани) - последни, над всичко останало
         from . import orderedits as _oe
         _oe.apply(db, store_id, order_date, combined, settings, stock)
