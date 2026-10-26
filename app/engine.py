@@ -201,7 +201,9 @@ def calculate_line(
         elif cap < max_target:
             max_target = float(cap)
             notes = ((notes + " · ") if notes else "") + f"до {ORDER_COVER_DAYS + extra_days:g} дни продажби"
-    suggested = max(max_target - current_stock, 0.0)
+    # минусова наличност = грешка в данните (продадено без заведена доставка), не реална липса:
+    # физически стоката е поне 0 -> поръчва се до макса от 0, не до макса + минуса (Димо, 26.10)
+    suggested = max(max_target - max(current_stock, 0.0), 0.0)
 
     # Под минимума, но нуждата е под половин опаковка: цяла опаковка се поръчва
     # САМО ако стоката ще свърши до следващата доставка - иначе трупаме запас
