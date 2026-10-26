@@ -28,7 +28,9 @@ def in_transit(db: Session, now: datetime | None = None) -> dict[tuple[int, int]
     since = datetime.combine(today - timedelta(days=MAX_WAIT_DAYS), datetime.min.time(), SOFIA)
     until = datetime.combine(today, datetime.min.time(), SOFIA)      # днешните заявки са за утре - не се броят
     skus = {a.sku: a.id for a in db.execute(select(m.Article)).scalars().all()}
-    codes = {a_id: int(sku) for sku, a_id in skus.items() if sku.isdigit()}
+    # амбалажът (каси, бутилки) НЕ е доставка: документ само за амбалаж не значи, че стоката е дошла
+    amb = {a.id for a in db.execute(select(m.Article)).scalars().all() if "АМБАЛАЖ" in (a.name or "").upper()}
+    codes = {a_id: int(sku) for sku, a_id in skus.items() if sku.isdigit() and a_id not in amb}
     pending = defaultdict(dict)                                       # (sid, aid) -> {qty, day}
     for o in db.execute(select(m.ManualOrder).where(
             m.ManualOrder.store_id.isnot(None), m.ManualOrder.received_at >= since,
