@@ -715,6 +715,13 @@ def ui_bandits_xlsx(day: str | None = None, db: Session = Depends(get_db)):
                     headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fn)}"})
 
 
+@router.get("/ui/pilot/check")
+def ui_pilot_check(db: Session = Depends(get_db)):
+    """Проверка на днешните пилотни заявки преди изпращане към НДК."""
+    from . import pilotcheck
+    return pilotcheck.check(db)
+
+
 @router.get("/ui/pilot/report")
 def ui_pilot_report(db: Session = Depends(get_db)):
     """Пилотните магазини под лупа - справката, която отива в Telegram в 10:00 и 18:00."""
