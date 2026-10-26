@@ -923,6 +923,26 @@ def planogram_add(items: list[PlanogramItem], db: Session = Depends(get_db)):
     return {"added": len(new), "unknown_skus": sorted(set(unknown))}
 
 
+class PlanogramRemove(BaseModel):
+    skus: list[str]
+    store_ids: list[int] | None = None      # None - от всички магазини
+
+
+@router.post("/planogram/remove")
+def planogram_remove(body: PlanogramRemove, db: Session = Depends(get_db)):
+    """Маха артикули от планограмата (на всички магазини или на изброените)."""
+    from sqlalchemy import delete as _del
+    ids = [a for (a,) in db.execute(select(m.Article.id).where(m.Article.sku.in_(body.skus))).all()]
+    if not ids:
+        return {"removed": 0}
+    q = _del(m.Planogram).where(m.Planogram.article_id.in_(ids))
+    if body.store_ids:
+        q = q.where(m.Planogram.store_id.in_(body.store_ids))
+    n = db.execute(q).rowcount
+    db.commit()
+    return {"removed": n, "articles": len(ids)}
+
+
 # ---------------------------------------------------------------------------
 # Само артикулите от планограмата
 # ---------------------------------------------------------------------------
