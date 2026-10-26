@@ -950,6 +950,18 @@ def ui_order_edit(store_id: int, changes: list[OrderEditIn], request: Request, d
         raise HTTPException(400, str(e))
 
 
+@router.delete("/ui/order-edits")
+def ui_order_edits_delete(store_id: int, by: str, day: date | None = None, db: Session = Depends(get_db)):
+    """Маха ръчните промени на един автор за деня (напр. грешна системна корекция)."""
+    from . import orderedits
+    from sqlalchemy import text as _tx
+    orderedits.ensure(db)
+    n = db.execute(_tx("DELETE FROM order_edits WHERE store_id = :s AND by_user = :b AND day = :d"),
+                   {"s": store_id, "b": by, "d": day or date.today()}).rowcount
+    db.commit()
+    return {"deleted": n}
+
+
 @router.get("/ui/order-edits")
 def ui_order_edits(days: int = 7, store_id: int | None = None, db: Session = Depends(get_db)):
     from . import orderedits

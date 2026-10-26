@@ -1588,9 +1588,11 @@ function tableTitle(el) {
 }
 async function exportTable(table, title) {
   const ths = [...table.querySelectorAll("thead th")];
-  const keep = ths.map((th, i) => i).filter(i => (ths[i].innerText || "").trim() !== "" || i === 0);
+  let keep = ths.map((th, i) => i).filter(i => (ths[i].innerText || "").trim() !== "" || i === 0);
+  // заявката по магазин: само код, артикул и бройката за поръчка (Димо, 26.10)
+  if (table.querySelector("#ordBody")) keep = ths.map((th, i) => i).filter(i => ["Код", "Артикул", "Поръчка"].includes((ths[i].innerText || "").trim()));
   const columns = keep.map(i => ths[i].innerText.trim() || "—");
-  const rows = [...table.querySelectorAll("tbody tr")].filter(tr => tr.style.display !== "none" && tr.children.length >= Math.min(2, columns.length))
+  const rows = [...table.querySelectorAll("tbody tr")].filter(tr => tr.style.display !== "none" && !tr.classList.contains("oxrow") && tr.children.length >= Math.min(2, columns.length))
     .map(tr => keep.map(i => tr.children[i] ? cellValue(tr.children[i]) : ""))
     .filter(r => r.some(v => v !== "" && v != null) && !(r.length > 1 && r.slice(1).every(v => v === "")));
   if (!rows.length) { toast("Таблицата е празна", false); return; }
