@@ -424,6 +424,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <button id="nextStore" aria-label="Следващ магазин">&rarr;</button>
     <button class="go" id="reloadOrder">Преизчисли</button>
     <button class="warm" id="xlsOrder">Свали Excel</button>
+    <button id="ndkDir" title="Смени папката, в която се записват Excel-ите">📁 Папка НДК</button>
     <button id="oxAll">Покажи всички графики</button>
     <button id="coBtn" style="background:#2563EB;color:#fff">👤 Поръчка от клиент</button>
     <button id="oeBtn" style="background:#7C3AED;color:#fff">✏️ Промени</button>
@@ -907,6 +908,46 @@ async function download(path) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
+/* Excel-ът на заявката директно в папка „НДК“ на десктопа (Chrome/Edge: File System Access API).
+   Папката се избира веднъж и браузърът я помни; другаде - обикновено сваляне. */
+function _idb() {
+  return new Promise((ok, no) => { const r = indexedDB.open("mm_fs", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("h"); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+}
+async function _hget(k) { try { const d = await _idb(); return await new Promise(ok => { const q = d.transaction("h").objectStore("h").get(k); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); }); } catch (e) { return null; } }
+async function _hset(k, v) { try { const d = await _idb(); d.transaction("h", "readwrite").objectStore("h").put(v, k); } catch (e) {} }
+async function ndkFolder(pick = false) {
+  if (!window.showDirectoryPicker) return null;
+  let h = pick ? null : await _hget("ndk");
+  if (h) {
+    try { if ((await h.queryPermission({ mode: "readwrite" })) === "granted" || (await h.requestPermission({ mode: "readwrite" })) === "granted") return h; } catch (e) {}
+  }
+  toast("Избери папката „НДК“ на десктопа (ако я няма - създай я с „New folder“). Избира се само веднъж.");
+  try {
+    h = await window.showDirectoryPicker({ id: "ndk", mode: "readwrite", startIn: "desktop" });
+  } catch (e) { return null; }
+  if (h.name.toUpperCase() !== "НДК" && h.name.toUpperCase() !== "NDK") {
+    try { h = await h.getDirectoryHandle("НДК", { create: true }); } catch (e) {}
+  }
+  await _hset("ndk", h);
+  return h;
+}
+async function downloadNdk(path) {
+  if (!window.showDirectoryPicker) return download(path);
+  const res = await fetch(rgPath(path), { headers: HDR });
+  if (!res.ok) throw new Error(res.status + " " + (await res.text()).slice(0, 180));
+  const cd = res.headers.get("Content-Disposition") || "", m = cd.match(/filename\*=UTF-8''([^;]+)/);
+  const name = (m ? decodeURIComponent(m[1]) : "zayavka.xlsx").replace(/[\\/:*?"<>|]/g, " ");
+  const blob = await res.blob();
+  const dir = await ndkFolder();
+  if (!dir) {                                  // отказано - обикновено сваляне
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); return;
+  }
+  const f = await dir.getFileHandle(name, { create: true }), w = await f.createWritable();
+  await w.write(blob); await w.close();
+  toast(`Записано в папка „${dir.name}“: ${name}`);
+}
 function msg(id, text, ok = true) { const el = $(id); el.textContent = text; el.className = "msg " + (ok ? "ok" : "err"); }
 
 /* ---------- навигация ---------- */
@@ -999,7 +1040,9 @@ async function initOrders() {
   $("prevStore").onclick = () => step(-1);
   $("nextStore").onclick = () => step(1);
   $("reloadOrder").onclick = () => loadOrder();
-  $("xlsOrder").onclick = () => download(`/orders/preview/${$("storeSel").value}/export`).catch(e => msg("ordMsg", e.message, false));
+  $("xlsOrder").onclick = () => downloadNdk(`/orders/preview/${$("storeSel").value}/export`).catch(e => msg("ordMsg", e.message, false));
+  $("ndkDir").onclick = () => ndkFolder(true).then(h => h && toast(`Папка за Excel-ите: „${h.name}“`));
+  if (!window.showDirectoryPicker) $("ndkDir").style.display = "none";
   $("saveOrder").onclick = saveOrder;
   $("oxAll").onclick = () => document.querySelectorAll("#ordBody td.ox").forEach(td => { if (td.textContent.includes("▸")) td.click(); });
   $("undoOrder").onclick = () => { qedits = {}; edits = {}; loadOrder(); };
