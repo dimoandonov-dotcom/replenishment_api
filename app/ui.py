@@ -722,6 +722,17 @@ def ui_pilot_check(db: Session = Depends(get_db)):
     return pilotcheck.check(db)
 
 
+@router.get("/ui/orders/{store_id}/delivery-status")
+def ui_delivery_status(store_id: int, db: Session = Depends(get_db)):
+    """Дошла ли е вчерашната доставка от НДК (за Ани в „Заявки по магазин“)."""
+    from . import pilotcheck
+    try:
+        return pilotcheck.delivery_status(db, store_id)
+    except Exception as e:
+        db.rollback()
+        return {"error": f"{type(e).__name__}: {e}"[:200]}
+
+
 @router.get("/ui/pilot/report")
 def ui_pilot_report(db: Session = Depends(get_db)):
     """Пилотните магазини под лупа - справката, която отива в Telegram в 10:00 и 18:00."""

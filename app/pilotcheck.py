@@ -163,3 +163,53 @@ def _text(out: list, now) -> str:
         for x in s["info"]:
             L.append("   ℹ️ " + x)
     return "\n".join(L)
+
+
+def delivery_status(db: Session, store_id: int) -> dict:
+    """За „Заявки по магазин“: дошла ли е вчерашната заявка (фактура от НДК за стока, без амбалаж) и коя заявка е."""
+    import os
+    from . import mistral, pilot
+    from .anomalies import _loc_map
+    now = datetime.now(TZ)
+    today = now.date()
+    y = today - timedelta(days=1)
+    start_y = datetime.combine(y, datetime.min.time(), TZ)
+    start_t = datetime.combine(today, datetime.min.time(), TZ)
+    # вчерашните заявки: нашата (пилот) и на Ани
+    ours = db.execute(select(m.PurchaseOrder).where(m.PurchaseOrder.store_id == store_id, m.PurchaseOrder.created_at >= start_y,
+                                                    m.PurchaseOrder.created_at < start_t)
+                      .order_by(m.PurchaseOrder.created_at.desc())).scalars().first()
+    arts = {a.id: a.sku for a in db.execute(select(m.Article)).scalars()}
+    o_sku = {arts.get(l.article_id) for l in ours.lines if l.ordered_quantity > 0} if ours else set()
+    a_sku = {r[0] for r in db.execute(text("""SELECT l.sku FROM manual_order_lines l JOIN manual_orders o ON o.id = l.order_id
+                                              WHERE o.store_id = :s AND l.store_qty > 0 AND o.received_at >= :a AND o.received_at < :b"""),
+                                      {"s": store_id, "a": start_y, "b": start_t}).all()}
+    pil = store_id in pilot.active_ids(db, y)
+    got, first, last = {}, None, None
+    with mistral.use("varna"), mistral.connect() as conn:
+        cur = conn.cursor()
+        locs = [loc for loc, sid in _loc_map(db, cur).items() if sid == store_id]
+        if locs:
+            cur.execute(f"""SELECT q.MATERIALCODE AS code, SUM(q.QTY) AS qty, MIN(o.DATESAVED) AS t1, MAX(o.DATESAVED) AS t2
+                            FROM MATERIALQTYLOG q WITH (NOLOCK) JOIN OPERATIONS o WITH (NOLOCK) ON o.NUM = q.OPERAIONNUM
+                            WHERE q.OPERATIONTYPE = 2 AND o.PARTNERNAMEID = %s AND q.OPERATIONDATE >= %s
+                              AND q.LOCATIONID IN ({','.join(map(str, locs))}) AND q.MATERIALCODE NOT IN ({','.join(map(str, AMB))})
+                            GROUP BY q.MATERIALCODE""",
+                        (int(os.getenv("NDK_PARTNER_ID", "186")), (start_y + timedelta(hours=12)).replace(tzinfo=None)))
+            for r in cur.fetchall():
+                q = float(r["qty"] or 0)
+                if q > 0:
+                    got[str(r["code"])] = q
+                    first = r["t1"] if first is None or r["t1"] < first else first
+                    last = r["t2"] if last is None or r["t2"] > last else last
+    ordered = o_sku if (pil and o_sku) else (a_sku or o_sku)
+    whose = "MinMaxAI" if (pil and o_sku) else ("Ани" if a_sku else ("MinMaxAI" if o_sku else None))
+    res = {"store_id": store_id, "ordered_by": whose, "ordered_lines": len(ordered), "arrived": bool(got),
+           "lines": len(got), "units": round(sum(got.values()), 1),
+           "at": last.strftime("%d.%m %H:%M") if last else None,
+           "match": len(ordered & set(got)), "missing": len(ordered - set(got))}
+    if got and pil and o_sku and a_sku:
+        mo, ma = len(o_sku & set(got)), len(a_sku & set(got))
+        if ma > mo:
+            res["warning"] = f"дошла е заявката на Ани ({ma} реда съвпадат), не нашата ({mo})"
+    return res
