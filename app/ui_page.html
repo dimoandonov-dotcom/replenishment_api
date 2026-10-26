@@ -427,6 +427,8 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <button id="oxAll">Покажи всички графики</button>
     <button id="coBtn" style="background:#2563EB;color:#fff">👤 Поръчка от клиент</button>
     <button id="oeBtn" style="background:#7C3AED;color:#fff">✏️ Промени</button>
+    <input id="oFind" type="search" placeholder="🔎 Търси в заявката (код или име)" style="min-width:200px;border:2px solid #2F7DD1">
+    <span id="oFindMsg" class="note" style="font-size:13px"></span>
     <input id="acQ" placeholder="🔍 Провери артикул (код или име) — мин/макс и защо го няма" style="min-width:260px;flex:1">
     <span class="msg" id="ordMsg"></span>
   </div>
@@ -991,6 +993,7 @@ async function initOrders() {
   const list = await stores(); fillStoreSelect($("storeSel"), list);
   $("storeSel").onchange = () => { loadOrder(); if ($("coList")) coList(); if (($("acQ").value || "").trim()) acCheck(); };
   $("coBtn").onclick = coOpen;
+  $("oFind").oninput = findInOrder;
   let acT; $("acQ").oninput = () => { clearTimeout(acT); acT = setTimeout(acCheck, 450); };
   $("acQ").onkeydown = e => { if (e.key === "Enter") { clearTimeout(acT); acCheck(); } };
   $("prevStore").onclick = () => step(-1);
@@ -1023,6 +1026,27 @@ function openStore(id) {
 function step(d) {
   const sel = $("storeSel"); const i = sel.selectedIndex + d;
   if (i >= 0 && i < sel.options.length) { sel.selectedIndex = i; loadOrder(); }
+}
+function findInOrder() {
+  const q = ($("oFind").value || "").trim().toUpperCase(), M = $("oFindMsg");
+  const rows = [...document.querySelectorAll("#ordBody tr[data-sku]")];
+  document.querySelectorAll("#ordBody tr.oxrow").forEach(r => { if (q) r.style.display = "none"; });
+  if (!q) { rows.forEach(r => { r.style.display = ""; r.style.outline = ""; }); M.innerHTML = ""; return; }
+  let hit = [];
+  rows.forEach(r => {
+    const name = (r.querySelector("td.name")?.innerText || "").toUpperCase();
+    const ok = r.dataset.sku === q || r.dataset.sku.startsWith(q) || (q.length >= 3 && name.includes(q));
+    r.style.display = ok ? "" : "none"; r.style.outline = ok ? "2px solid #2F7DD1" : "";
+    if (ok) hit.push(r);
+  });
+  if (hit.length) {
+    const qi = hit.map(r => `${r.dataset.sku}: ${r.querySelector('[data-f="qty"]')?.value ?? "?"} бр.`).slice(0, 3).join(" · ");
+    M.innerHTML = `<b style="color:var(--teal)">✅ В заявката (${hit.length}):</b> ${esc(qi)}`;
+    hit[0].scrollIntoView({ behavior: "smooth", block: "center" });
+  } else {
+    M.innerHTML = `<b style="color:var(--danger)">❌ Няма го в заявката</b> <button class="mini" id="oFindWhy">Защо?</button>`;
+    $("oFindWhy").onclick = () => { $("acQ").value = $("oFind").value.trim(); acCheck(); };
+  }
 }
 async function toggleOrderEdits() {
   const P = $("oePanel");
@@ -1077,6 +1101,7 @@ async function loadOrder() {
       `<span>Стойност <b>${fmtE(value)} €</b></span>` +
       `<span>Над минимума ${d.skipped_above_min}</span><span>Без наличност ${d.skipped_no_stock_data.length}</span>`;
     document.querySelectorAll("#ordBody input").forEach(inp => inp.oninput = onEdit);
+    if (($("oFind").value || "").trim()) findInOrder();
     document.querySelectorAll("#ordBody td.ox").forEach(td => td.onclick = () => {
       const sku = td.parentNode.dataset.sku, row = document.querySelector(`#ordBody tr.oxrow[data-for="${CSS.escape(sku)}"]`);
       if (!row) return;
