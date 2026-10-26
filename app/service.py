@@ -398,8 +398,8 @@ def calculate_for_store(
     # на цял стек над максимума (напр. макс 2, стек 12) - Димо, 26.10
     try:
         from sqlalchemy import text as _tx
-        hist = db.execute(_tx("""SELECT COUNT(DISTINCT o.id) FROM manual_orders o WHERE o.store_id = :s"""), {"s": store_id}).scalar() or 0
-        if hist >= 5:
+        # важи и за пилотните магазини (напр. Надежда), чиито заявки не минават през Ани (Димо, 26.10)
+        if True:
             ever = {r[0] for r in db.execute(_tx("""SELECT DISTINCT l.sku FROM manual_order_lines l JOIN manual_orders o ON o.id = l.order_id
                                                     WHERE o.store_id = :s AND l.store_qty > 0"""), {"s": store_id}).all()}
             for ln in list(combined.lines):
