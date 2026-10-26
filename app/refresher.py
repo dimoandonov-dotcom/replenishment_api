@@ -3,6 +3,7 @@
 (07:00-22:00 бг. време), вътре в самия API процес - без отделен cron.
 """
 from __future__ import annotations
+from zoneinfo import ZoneInfo
 
 import threading
 import time
