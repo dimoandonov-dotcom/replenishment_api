@@ -483,7 +483,7 @@ def preview_order(
         raise HTTPException(404, f"Няма магазин с id {store_id}")
 
     d = order_date or date.today()
-    res = service.calculate_for_store(db, store_id, d, supplier_id, respect_schedule)
+    res = service.calculate_with_transit(db, store_id, d, supplier_id, respect_schedule)
     return PreviewOut(
         store_id=store_id, order_date=d,
         total_lines=res.total_lines, total_units=res.total_units,

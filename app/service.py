@@ -418,6 +418,29 @@ def calculate_for_store(
     return combined
 
 
+def calculate_with_transit(db: Session, store_id: int, order_date, supplier_id=None, respect_schedule=False):
+    """Като сутрешното пускане: стоката в път (поръчана, още без фактура от НДК) се брои като наличност.
+    Ползва се в „Заявки по магазин“ и Excel-а, за да е същото като пуснатата заявка."""
+    try:
+        from .transit import in_transit
+        tr = {aid: v for (s_, aid), v in in_transit(db).items() if s_ == store_id}
+    except Exception:
+        db.rollback()
+        tr = {}
+    override = None
+    if tr:
+        override = latest_stock_map(db, store_id)
+        for aid, v in tr.items():
+            override[aid] = max(float(override.get(aid, 0.0) or 0.0), 0.0) + v["qty"]
+    res = calculate_for_store(db, store_id, order_date, supplier_id, respect_schedule, stock_override=override)
+    for ln in res.lines:
+        v = tr.get(ln.article_id)
+        if v:
+            ln.notes = (f"🚚 в път {v['qty']:g} бр. (заявка от {v['ordered']}, още без фактура)"
+                        + (" · " + ln.notes if ln.notes else ""))
+    return res
+
+
 def persist_orders(
     db: Session, result, store_id: int, dispatch_run_id: int | None = None
 ) -> list[m.PurchaseOrder]:

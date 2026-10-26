@@ -397,7 +397,7 @@ def export_preview(
     if not store:
         raise HTTPException(404, f"Няма магазин с id {store_id}")
     d = order_date or date.today()
-    res = service.calculate_for_store(db, store_id, d, None, respect_schedule)
+    res = service.calculate_with_transit(db, store_id, d, None, respect_schedule)
     content = exports_svc.build_workbook_from_lines(res.lines, db)
     filename = exports_svc.order_filename(store)
     return Response(
