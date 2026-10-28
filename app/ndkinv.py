@@ -356,6 +356,9 @@ def check_pending(db: Session, max_age_days: int = 14) -> dict:
             cm[code] = mc
         real = [d for d in diffs if d["kind"] != "unmapped"]
         st = "differs" if real else "ok"
+        # OCR още въвежда (последно движение преди < 3 ч): не е грешка, проверява се пак по-късно
+        if st == "differs" and at is not None and datetime.now() - at < timedelta(hours=3):
+            st = "pending"
         if st == "differs":
             differs += 1
         booked_n += 1
