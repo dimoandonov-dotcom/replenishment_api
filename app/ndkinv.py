@@ -138,23 +138,25 @@ def code_map(db: Session) -> tuple[dict[str, int], dict[int, str]]:
 # 3) Осчетоводеното в Мистрал по номер на фактура
 # ---------------------------------------------------------------------------
 def booked_lines(loc: int, num: str) -> tuple[int | None, datetime | None, dict[int, float]]:
+    """Всички операции в обекта с този номер на фактура (OCR понякога сторнира и записва наново) - сумарно."""
     from . import mistral
     import os
     with mistral.use("varna"), mistral.connect() as conn:
         cur = conn.cursor()
-        cur.execute("""SELECT TOP 1 o.NUM AS num, od.DOCUMENTDATE AS d FROM OPERATIONDOCUMENT od WITH (NOLOCK)
+        cur.execute("""SELECT DISTINCT o.NUM AS num FROM OPERATIONDOCUMENT od WITH (NOLOCK)
                        JOIN OPERATIONS o WITH (NOLOCK) ON o.NUM = od.NUM AND o.LOCATIONID = od.LOCATIONID
                        WHERE od.LOCATIONID = %s AND o.PARTNERNAMEID = %s
-                         AND (od.DOCUMENTNUM = %s OR od.DOCUMENTNUM = %s) ORDER BY o.NUM DESC""",
+                         AND (od.DOCUMENTNUM = %s OR od.DOCUMENTNUM = %s)""",
                     (loc, int(os.getenv("NDK_PARTNER_ID", "186")), num, num.zfill(10)))
-        r = cur.fetchone()
-        if not r:
+        ops = [int(r["num"]) for r in cur.fetchall()]
+        if not ops:
             return None, None, {}
-        cur.execute("""SELECT MATERIALCODE AS c, SUM(QTY) AS q, MAX(OPERATIONDATE) AS d FROM MATERIALQTYLOG WITH (NOLOCK)
-                       WHERE LOCATIONID = %s AND OPERAIONNUM = %s AND OPERATIONTYPE IN (2, 24) GROUP BY MATERIALCODE""", (loc, r["num"]))
+        cur.execute(f"""SELECT MATERIALCODE AS c, SUM(QTY) AS q, MAX(OPERATIONDATE) AS d FROM MATERIALQTYLOG WITH (NOLOCK)
+                        WHERE LOCATIONID = %s AND OPERAIONNUM IN ({','.join(map(str, ops))}) AND OPERATIONTYPE IN (2, 24)
+                        GROUP BY MATERIALCODE""", (loc,))
         rows = cur.fetchall()
         at = max((x["d"] for x in rows if x["d"]), default=None)
-        return int(r["num"]), at, {int(x["c"]): float(x["q"] or 0) for x in rows if float(x["q"] or 0) != 0}
+        return max(ops), at, {int(x["c"]): float(x["q"] or 0) for x in rows if abs(float(x["q"] or 0)) > 0.001}
 
 
 def find_loc(num: str) -> int | None:
