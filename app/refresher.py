@@ -191,6 +191,16 @@ def _loop():
             _dispatch_check()
         except Exception as e:
             _state["dispatch_result"] = f"{type(e).__name__}: {e}"[:300]
+        try:   # НДК е-фактури: на 15 мин
+            _ndk_last = _state.get("ndk_last")
+            if _ndk_last is None or datetime.now(timezone.utc) - _ndk_last >= timedelta(minutes=15):
+                _state["ndk_last"] = datetime.now(timezone.utc)
+                from .db import SessionLocal as _SL
+                from . import ndkinv as _ni
+                with _SL() as _db:
+                    _state["ndk_result"] = str(_ni.run(_db))[:300]
+        except Exception as e:
+            _state["ndk_result"] = f"{type(e).__name__}: {e}"[:300]
         now = datetime.now(SOFIA)
         if HOURS[0] <= now.hour < HOURS[1]:
             last = _state["last_run"]

@@ -18,7 +18,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 from urllib.parse import quote
 
@@ -2018,3 +2018,36 @@ def ui_ndkmail_attachment(uid: str, name: str):
         raise HTTPException(502, f"IMAP: {type(e).__name__}: {e}")
     return Response(content=data, media_type=mimetypes.guess_type(fn)[0] or "application/octet-stream",
                     headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fn}"})
+
+
+@router.post("/ui/ndkinv/run")
+def ui_ndkinv_run(db: Session = Depends(get_db)):
+    """Нови фактури от пощата + сравнение с осчетоводеното в Мистрал."""
+    from . import ndkinv
+    try:
+        return ndkinv.run(db)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(502, f"{type(e).__name__}: {e}")
+
+
+@router.get("/ui/ndkinv")
+def ui_ndkinv(days: int = 7, store_id: int | None = None, only_diff: bool = False, db: Session = Depends(get_db)):
+    from . import ndkinv
+    return {"rows": ndkinv.listing(db, days, store_id, only_diff)}
+
+
+@router.get("/ui/ndkinv/{num}")
+def ui_ndkinv_one(num: str, db: Session = Depends(get_db)):
+    from . import ndkinv
+    ndkinv.ensure(db)
+    r = db.execute(text("SELECT num, inv_date, delivery_date, store_name, store_id, lines, booked, diffs, status, booked_at FROM ndk_invoices WHERE num = :n"), {"n": num.lstrip("0")}).first()
+    if not r:
+        raise HTTPException(404, "няма такава фактура")
+    cm, names = ndkinv.code_map(db)
+    lines = []
+    for l in (r[5] or []):
+        mc = cm.get(l["code"])
+        lines.append({**l, "mc": mc, "mistral_name": names.get(mc) if mc else None})
+    return {"num": r[0], "date": str(r[1]), "delivery": str(r[2]), "store_name": r[3], "store_id": r[4], "lines": lines,
+            "booked": r[6], "diffs": r[7], "status": r[8], "booked_at": str(r[9]) if r[9] else None}
