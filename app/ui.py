@@ -1984,3 +1984,16 @@ def ui_sklad_set(payload: SkladSetIn, request: Request, db: Session = Depends(ge
 def ui_sklad_help(payload: HelpIn, db: Session = Depends(get_db)):
     from . import sklad
     return {"answer": sklad.help_answer(db, payload.q)}
+
+
+@router.get("/ui/ownstock/{store_id}")
+def ui_ownstock(store_id: int, fresh: bool = False, db: Session = Depends(get_db)):
+    """Наша наличност (ревизия + доставки - продажби) срещу Мистрал, с фантомите."""
+    from . import ownstock
+    return ownstock.listing(db, store_id, fresh)
+
+
+@router.get("/ui/ownstock")
+def ui_ownstock_phantoms(db: Session = Depends(get_db)):
+    from . import ownstock
+    return {"phantoms": ownstock.phantoms_all(db)}

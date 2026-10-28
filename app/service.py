@@ -270,6 +270,13 @@ def calculate_for_store(
     delivery_day = (not respect_schedule) or bool(allowed)
 
     stock = stock_override if stock_override is not None else latest_stock_map(db, store_id)
+    _own_notes: dict = {}
+    if stock_override is None:
+        try:   # пилот: наша наличност (ревизия + доставки - продажби) и фантомна наличност
+            from . import ownstock as _own
+            stock, _own_notes = _own.adjust(db, store_id, stock)
+        except Exception:
+            db.rollback()
     closures = load_closures(db)
     avg_sales = load_avg_daily_sales(db, store_id)
     # промо артикули: скоростта на продажби по време на промото
@@ -419,6 +426,10 @@ def calculate_for_store(
                 combined.skipped_above_min += 1
     except Exception:
         db.rollback()
+    if _own_notes:
+        for ln in combined.lines:
+            if ln.article_id in _own_notes and "наличност" not in (ln.notes or ""):
+                ln.notes = _own_notes[ln.article_id] + (" · " + ln.notes if ln.notes else "")
     try:   # ръчни промени (Ани) - последни, над всичко останало
         from . import orderedits as _oe
         _oe.apply(db, store_id, order_date, combined, settings, stock)

@@ -453,9 +453,10 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <input id="oFind" type="search" placeholder="🔎 Търси в заявката (код или име)" style="min-width:200px;border:2px solid #2F7DD1">
     <span id="oFindMsg" class="note" style="font-size:13px"></span>
     <input id="acQ" placeholder="🔍 Провери артикул (код или име) — мин/макс и защо го няма" style="min-width:260px;flex:1">
+    <button id="osBtn" title="Наша наличност: ревизия + доставки − продажби, срещу Мистрал">🧮 Наличност</button>
     <span class="msg" id="ordMsg"></span>
   </div>
-  <div id="coPanel"></div><div id="acPanel"></div><div id="oePanel"></div>
+  <div id="coPanel"></div><div id="acPanel"></div><div id="oePanel"></div><div id="osPanel"></div>
   <div class="bar" id="oeAdd" style="margin-top:4px">
     <span class="note">➕ Добави артикул в заявката:</span>
     <input id="oeSku" placeholder="код" inputmode="numeric" style="width:90px">
@@ -1094,6 +1095,7 @@ async function loadBoard() {
 /* ---------- заявки ---------- */
 let ordLines = [], edits = {}, curIdx = 0, ORD_EX = { days: [], items: {} };
 async function initOrders() {
+  { const b = document.getElementById("osBtn"); if (b) b.onclick = () => toggleOwnStock(false); }
   const list = await stores(); fillStoreSelect($("storeSel"), list);
   $("storeSel").onchange = () => { loadOrder(); if ($("coList")) coList(); if (($("acQ").value || "").trim()) acCheck(); };
   $("coBtn").onclick = coOpen;
@@ -1205,7 +1207,7 @@ async function toggleOrderEdits() {
 }
 async function loadOrder() {
   if ((Object.keys(edits).length || Object.keys(qedits).length) && !confirm("Има незапазени промени. Да ги откажа?")) return;
-  edits = {}; qedits = {}; updateSave(); $("oePanel").innerHTML = "";
+  edits = {}; qedits = {}; updateSave(); $("oePanel").innerHTML = ""; $("osPanel").innerHTML = "";
   const id = $("storeSel").value;
   $("ordBody").innerHTML = `<tr><td colspan="10" class="empty">Изчислявам…</td></tr>`;
   try {
@@ -3120,6 +3122,36 @@ function showLogin(err) {
 }
 async function logout() { await fetch("/ui/logout", { method: "POST" }); location.reload(); }
 
+
+
+/* ---------- Наша наличност (пилот) ---------- */
+async function toggleOwnStock(fresh) {
+  const P = $("osPanel"), id = $("storeSel").value;
+  if (!fresh && P.innerHTML) { P.innerHTML = ""; return; }
+  P.innerHTML = `<div class="note" style="padding:8px">🧮 Смятам: ревизия + доставки − продажби…</div>`;
+  let d;
+  try { d = await api(`/ui/ownstock/${id}${fresh ? "?fresh=true" : ""}`); } catch (e) { P.innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
+  const S = d.summary;
+  if (!d.items.length) { P.innerHTML = `<div class="note" style="padding:8px">Магазинът не е в пилота или няма данни.</div>`; return; }
+  const rows = d.items.map(x => `<tr class="${x.phantom ? "nosale" : x.flag === "≠" ? "bro" : ""}">
+    <td>${esc(x.sku)}</td><td class="name">${esc(x.name)}</td>
+    <td class="num">${fmtN(x.mistral)}</td>
+    <td class="num"><b>${x.own == null ? "—" : fmtN(x.own)}</b></td>
+    <td class="num">${x.phantom ? "<b>0</b>" : fmtN(x.effective)}</td>
+    <td class="num">${x.base == null ? '<span class="note">няма ревизия</span>' : `${fmtN(x.base)} <span class="note">(${esc(x.base_date)}${x.base_ndk ? " НДК" : ""})</span>`}</td>
+    <td class="num">${x.base == null ? "" : "+" + fmtN(x.deliveries)}</td><td class="num">${x.base == null ? "" : "−" + fmtN(x.sales)}</td>
+    <td class="num">${x.per_day}</td><td>${esc(x.last_sale || "—")}</td>
+    <td>${x.flag ? `<span class="tag ${x.phantom ? "nosale" : "bro"}" title="${esc(x.why)}">${x.flag} ${esc(x.why)}</span>` : ""}</td></tr>`).join("");
+  P.innerHTML = `<div style="margin:8px 0 4px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:14px">
+      <b>🧮 Наша наличност</b> <span class="note">към ${esc(d.at)}</span>
+      <span>Артикули <b>${S.articles}</b></span><span>С ревизия <b>${S.with_base}</b></span>
+      <span>🕳 Фантом <b>${S.phantom}</b></span><span>≠ Разминаване <b>${S.differ}</b></span><span>Без ревизия ${S.no_base}</span>
+      <button onclick="toggleOwnStock(true)">Обнови</button><button onclick="$('osPanel').innerHTML=''">Скрий</button></div>
+    <p class="note" style="margin:0 0 8px;line-height:1.5">Наша = преброено на последната ревизия + доставки − продажби (± сторна). Заявката взема по-малката от Мистрал/наша; при 🕳 фантом (продава се, но мълчи дни наред) брои 0.</p>
+    <div class="scroll" style="max-height:480px"><table><thead><tr><th>Код</th><th>Артикул</th><th class="num">Мистрал</th><th class="num">Наша</th><th class="num">За заявка</th>
+      <th class="num">Ревизия</th><th class="num">Доставки</th><th class="num">Продажби</th><th class="num">бр./ден</th><th>Посл. продажба</th><th>Бележка</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+}
 
 /* ---------- От склада ---------- */
 const JH = { "Content-Type": "application/json" };
