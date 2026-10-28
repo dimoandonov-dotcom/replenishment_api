@@ -1997,3 +1997,24 @@ def ui_ownstock(store_id: int, fresh: bool = False, db: Session = Depends(get_db
 def ui_ownstock_phantoms(db: Session = Depends(get_db)):
     from . import ownstock
     return {"phantoms": ownstock.phantoms_all(db)}
+
+
+@router.get("/ui/ndkmail/probe")
+def ui_ndkmail_probe(days: int = 7, limit: int = 30):
+    from . import ndkmail
+    try:
+        return ndkmail.probe(limit, days)
+    except Exception as e:
+        raise HTTPException(502, f"IMAP: {type(e).__name__}: {e}")
+
+
+@router.get("/ui/ndkmail/attachment")
+def ui_ndkmail_attachment(uid: str, name: str):
+    from . import ndkmail
+    import mimetypes
+    try:
+        fn, data = ndkmail.fetch_attachment(uid, name)
+    except Exception as e:
+        raise HTTPException(502, f"IMAP: {type(e).__name__}: {e}")
+    return Response(content=data, media_type=mimetypes.guess_type(fn)[0] or "application/octet-stream",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fn}"})
