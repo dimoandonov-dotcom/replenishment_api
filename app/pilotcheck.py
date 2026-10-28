@@ -146,6 +146,15 @@ def check(db: Session) -> dict:
                 miss.append(f"{arts[aid].name} ({v:.1f}/ден)")
         if miss:
             st["warn"].append(f"{len(miss)} свършили артикула с продажби ги няма в заявката: " + "; ".join(miss[:6]))
+        # 5) фантомна наличност (наша сметка): Мистрал показва стока, а продажбите мълчат -> поръчано като 0; да се преброи
+        try:
+            from . import ownstock
+            ph = [x for x in ownstock.compute(db, sid)["items"].values() if x["phantom"]]
+            if ph:
+                st["warn"].append(f"{len(ph)} фантомна наличност (да се преброят, заявени като 0): "
+                                  + "; ".join(f"{x['name']} (Мистрал {x['mistral']:g}, посл. продажба {x['last_sale']})" for x in ph[:6]))
+        except Exception:
+            db.rollback()
     ok = [s for s in out if not s["stop"] and not s["warn"]]
     return {"at": now.strftime("%d.%m %H:%M"), "stores": out, "ok": len(ok), "stop": sum(1 for s in out if s["stop"]),
             "warn": sum(1 for s in out if s["warn"] and not s["stop"]), "goods_error": gerr, "text": _text(out, now)}
