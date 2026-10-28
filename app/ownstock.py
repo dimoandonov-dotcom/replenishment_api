@@ -85,6 +85,19 @@ def compute(db: Session, store_id: int, fresh: bool = False) -> dict:
         sales = {int(r["code"]): r for r in cur.fetchall()}
         cur.execute(f"SELECT MATERIALCODE AS code, QTY FROM MATERIAL WITH (NOLOCK) WHERE LOCATIONID = {loc} AND MATERIALCODE IN ({cl})")
         mq = {int(r["code"]): float(r["QTY"] or 0) for r in cur.fetchall()}
+        # дни с продажби (28 дни) - за обичайната пауза между продажбите
+        cur.execute(f"""SELECT MATERIALCODE AS code, CONVERT(date, OPERATIONDATE) AS d FROM MATERIALQTYLOG WITH (NOLOCK)
+                        WHERE LOCATIONID = {loc} AND OPERATIONTYPE = 1 AND MATERIALCODE IN ({cl})
+                          AND OPERATIONDATE >= DATEADD(day, -28, GETDATE()) GROUP BY MATERIALCODE, CONVERT(date, OPERATIONDATE)""")
+        sdays: dict[int, list] = {}
+        for r in cur.fetchall():
+            sdays.setdefault(int(r["code"]), []).append(r["d"])
+        # последна ревизия изобщо (и непълна) - скорошно броене бие „тишината“
+        cur.execute(f"""SELECT c.MATERIALCODE AS code, MAX(i.DATEINVENTORY) AS d FROM INVENTORYCONTENT c WITH (NOLOCK)
+                        JOIN INVENTORY i WITH (NOLOCK) ON i.LOCATIONID = c.LOCATIONID AND i.INVENTORYNUM = c.INVENTORYNUM
+                        WHERE c.LOCATIONID = {loc} AND c.MATERIALCODE IN ({cl}) AND c.QTYFOUND > 0
+                          AND i.DATEINVENTORY >= DATEADD(day, -7, GETDATE()) GROUP BY c.MATERIALCODE""")
+        counted7 = {int(r["code"]): r["d"] for r in cur.fetchall()}
         # последна доставка (за фантома: тишина след доставка е още по-подозрителна)
         cur.execute(f"""SELECT MATERIALCODE AS code, MAX(OPERATIONDATE) AS d FROM MATERIALQTYLOG WITH (NOLOCK)
                         WHERE LOCATIONID = {loc} AND OPERATIONTYPE = 2 AND MATERIALCODE IN ({cl})
@@ -114,15 +127,20 @@ def compute(db: Session, store_id: int, fresh: bool = False) -> dict:
             it.update({"base": float(b["found"] or 0), "base_date": b["d"].strftime("%d.%m"),
                        "base_ndk": bool((b["partner"] or "").strip()), "deliveries": dl, "sales": sl, "other": other,
                        "own": round(own, 2)})
-        # фантом: продава се редовно, но мълчи от дълго, а има „стока“
+        # фантом: продава се редовно, но мълчи много по-дълго от обичайната си пауза, а има „стока“;
+        # скорошно броене (до 7 дни, с намерено > 0) бие тишината
         stock_now = it["own"] if it["own"] is not None else it["mistral"]
-        if per_day >= PHANTOM_MIN_PER_DAY and silence is not None and stock_now > 0:
-            need = max(4.0, 3.0 / per_day)
-            # след доставка тишината е още по-показателна
+        days = sorted(sdays.get(code, []))
+        if per_day >= PHANTOM_MIN_PER_DAY and silence is not None and stock_now > 0 and len(days) >= 4 and code not in counted7:
+            gaps = [(b - a).days for a, b in zip(days, days[1:])]
+            typical = max(gaps) if gaps else 1
+            need = max(4.0, 1.5 * typical)
             if silence >= need:
                 it["phantom"] = True
                 it["flag"] = "🕳"
-                it["why"] = f"продава {per_day:.1f}/ден, но няма продажба от {silence:.0f} дни при „наличност“ {stock_now:g} - вероятно е 0"
+                it["why"] = (f"продава {per_day:.1f}/ден (обичайна пауза до {typical} дни), а няма продажба от {silence:.0f} дни "
+                             f"при „наличност“ {stock_now:g} - вероятно е 0")
+        it["counted_recently"] = counted7[code].strftime("%d.%m") if code in counted7 else None
         if it["phantom"]:
             it["effective"] = 0.0
         elif it["own"] is not None:
