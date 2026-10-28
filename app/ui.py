@@ -1920,3 +1920,67 @@ def an_catweeks(q: str = "БИРА", weeks: int = 8, db: Session = Depends(get_d
                     "cur_days": cur_days, "cur": round(r["cur"], 1)})
     res.sort(key=lambda r: -sum(r["w"]))
     return {"weeks": labels, "last_day": last.strftime("%d.%m"), "rows": res}
+
+
+# ---------------------------------------------------------------------------
+# „От склада“ - артикули, които идват от нашия склад, а не от НДК
+# ---------------------------------------------------------------------------
+
+class SkladIn(BaseModel):
+    body: str
+
+
+class SkladSetIn(BaseModel):
+    sku: str
+    source: str
+
+
+class HelpIn(BaseModel):
+    q: str
+
+
+@router.get("/ui/sklad")
+def ui_sklad(request: Request, db: Session = Depends(get_db)):
+    from . import sklad
+    return sklad.state(db, getattr(request.state, "user", None))
+
+
+@router.get("/ui/sklad/new")
+def ui_sklad_new(request: Request, db: Session = Depends(get_db)):
+    from . import sklad
+    return {"new": sklad.unseen(db, getattr(request.state, "user", None))}
+
+
+@router.post("/ui/sklad/seen")
+def ui_sklad_seen(request: Request, db: Session = Depends(get_db)):
+    from . import sklad
+    sklad.mark_seen(db, getattr(request.state, "user", None))
+    return {"ok": True}
+
+
+@router.post("/ui/sklad/preview")
+def ui_sklad_preview(payload: SkladIn, db: Session = Depends(get_db)):
+    from . import sklad
+    return sklad.parse(db, payload.body)
+
+
+@router.post("/ui/sklad/apply")
+def ui_sklad_apply(payload: SkladIn, request: Request, db: Session = Depends(get_db)):
+    from . import sklad
+    if not payload.body.strip():
+        raise HTTPException(400, "Празно съобщение")
+    return sklad.apply(db, payload.body, getattr(request.state, "user", None))
+
+
+@router.post("/ui/sklad/set")
+def ui_sklad_set(payload: SkladSetIn, request: Request, db: Session = Depends(get_db)):
+    from . import sklad
+    if payload.source not in ("sklad", "ndk"):
+        raise HTTPException(400, "source: sklad или ndk")
+    return sklad.set_one(db, payload.sku, payload.source, getattr(request.state, "user", None))
+
+
+@router.post("/ui/sklad/help")
+def ui_sklad_help(payload: HelpIn, db: Session = Depends(get_db)):
+    from . import sklad
+    return {"answer": sklad.help_answer(db, payload.q)}

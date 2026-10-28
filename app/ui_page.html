@@ -189,7 +189,7 @@ nav a[data-tab="anom"] .mnBadge{display:inline-block;margin-left:6px;background:
 .mnOk.on{background:#16A34A;color:#fff}
 .mnWho{display:block;font-size:11px;color:#16A34A;margin-top:3px}
 @media (max-width:640px){.mnTask{grid-template-columns:44px 1fr}.mnTask .c{grid-column:2;text-align:left}.mnBig{font-size:32px}}
-@media (prefers-reduced-motion:reduce){.mnHot,.mnDot,nav a[data-tab="anom"] .mnBadge,.mnHero,.mnTask{animation:none}}
+@media (prefers-reduced-motion:reduce){nav a[data-tab="sklad"] .skNew{animation:none}.mnHot,.mnDot,nav a[data-tab="anom"] .mnBadge,.mnHero,.mnTask{animation:none}}
 .bdXd { position:sticky; left:0; box-sizing:border-box; padding:12px 12px 16px; font-family:var(--head); white-space:normal; }
 .bdH { font-weight:700; font-size:14px; margin:14px 0 6px; } .bdH:first-child { margin-top:0; } .bdH small { font-weight:400; color:var(--slate); }
 .bdChart { overflow-x:auto; } .bdChart svg { max-width:100%; height:auto; }
@@ -200,6 +200,26 @@ nav a[data-tab="anom"] .mnBadge{display:inline-block;margin-left:6px;background:
 .bdChip { background:var(--raised); border:1px solid var(--line); border-radius:14px; padding:3px 10px; font-size:13px; white-space:nowrap; }
 .bdEmpty { margin-top:8px; padding:8px 10px; border-radius:10px; background:#FEF3C7; border:1px solid #F59E0B; font-size:14px; } .bdEmpty small { color:var(--slate); }
 .bdWhy { margin:0; padding-left:20px; font-size:15px; line-height:1.5; } .bdWhy li { margin-bottom:6px; }
+nav a[data-tab="sklad"]{--c:#0369A1}
+nav a[data-tab="sklad"] .skNew{display:inline-block;margin-left:6px;background:#16A34A;color:#fff;border-radius:999px;padding:0 7px;font-size:11px;font-weight:800;animation:mnShake 2.4s ease-in-out infinite}
+.skGrid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px}
+@media(max-width:820px){.skGrid{grid-template-columns:1fr}}
+.skCard{background:#fff;border:1px solid #E5E7EB;border-radius:14px;padding:14px 16px}
+.skCard h3{margin:0 0 8px;font-size:15px}
+#skBody{width:100%;min-height:190px;box-sizing:border-box;font:inherit;font-size:14px;border:1px solid #CBD5E1;border-radius:10px;padding:10px}
+.skPill{display:inline-block;border-radius:999px;padding:1px 9px;font-size:12px;font-weight:700}
+.skPill.s{background:#E0F2FE;color:#075985}.skPill.n{background:#FEF3C7;color:#92400E}
+.skRow.chg{background:#F0FDF4}
+.skHelpBtn{position:fixed;right:18px;bottom:18px;z-index:60;border:none;border-radius:999px;padding:12px 16px;font-weight:800;color:#fff;background:#0369A1;box-shadow:0 8px 20px rgba(3,105,161,.35);cursor:pointer}
+.skHelp{position:fixed;right:18px;bottom:76px;z-index:61;width:min(380px,calc(100vw - 32px));max-height:70vh;display:none;flex-direction:column;background:#fff;border:1px solid #CBD5E1;border-radius:16px;box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden}
+.skHelp.on{display:flex}
+.skHelp header{background:#0369A1;color:#fff;padding:10px 14px;font-weight:800;display:flex;justify-content:space-between}
+#skChat{flex:1;overflow:auto;padding:10px 12px;font-size:14px;line-height:1.5}
+#skChat .q{text-align:right;margin:6px 0}#skChat .q span{background:#E0F2FE;border-radius:12px;padding:6px 10px;display:inline-block}
+#skChat .a{margin:6px 0;white-space:pre-line}#skChat .a span{background:#F3F4F6;border-radius:12px;padding:6px 10px;display:inline-block}
+.skHelp form{display:flex;gap:6px;padding:8px;border-top:1px solid #E5E7EB}
+.skHelp input{flex:1;font:inherit;padding:8px 10px;border:1px solid #CBD5E1;border-radius:10px}
+.skChips button{font-size:12px;margin:2px;border-radius:999px;padding:3px 9px;border:1px solid #BAE6FD;background:#F0F9FF;cursor:pointer}
 </style>
 
 <script>
@@ -388,6 +408,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
 <nav id="nav">
   <a href="#board" data-tab="board">Табло</a>
   <a href="#orders" data-tab="orders">Заявки по магазин</a>
+  <a href="#sklad" data-tab="sklad">📦 От склада</a>
   <a href="#assort" data-tab="assort">Асортимент и цени</a>
   <a href="#plano" data-tab="plano">Планограма</a>
   <a href="#anal" data-tab="anal">Анализи</a>
@@ -753,6 +774,44 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   </table></div>
 </section>
 
+<!-- ============ ОТ СКЛАДА ============ -->
+<section class="tab" id="tab-sklad">
+  <p class="note" style="margin:0 0 14px;line-height:1.6">Артикулите тук идват от <b>нашия склад (Т Логистик)</b> и <b>не влизат в заявката към НДК</b>.
+  Постави съобщението на склада от Вайбър — кодовете с <b>❌</b> се връщат към НДК. Важи от следващото пускане на заявката.</p>
+  <div class="skGrid">
+    <div class="skCard">
+      <h3>1. Постави съобщението на склада</h3>
+      <textarea id="skBody" placeholder="Копирай цялото съобщение от Вайбър и го постави тук…"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button id="skPrev">Прегледай</button>
+        <button class="warm" id="skSave" disabled>Запиши</button>
+        <span class="msg" id="skMsg"></span>
+      </div>
+      <div id="skPreview" style="margin-top:10px"></div>
+    </div>
+    <div class="skCard">
+      <h3>2. Сега от склада <span class="note" id="skCnt"></span></h3>
+      <input id="skFind" placeholder="Търси по код или име…" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #CBD5E1;border-radius:10px;margin-bottom:8px">
+      <div class="scroll" style="max-height:420px"><table>
+        <thead><tr><th>Код</th><th>Артикул</th><th>От кога</th><th>Посл. от склада</th><th>Посл. от НДК</th><th></th></tr></thead>
+        <tbody id="skList"></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="head"><h2>Промени</h2><span class="note">кой, кога, какво</span></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Кога</th><th>Код</th><th>Артикул</th><th>Промяна</th><th>Кой</th></tr></thead>
+    <tbody id="skLog"></tbody>
+  </table></div>
+</section>
+<button class="skHelpBtn" id="skHelpBtn" style="display:none" title="Помощник">💬 Помощ</button>
+<div class="skHelp" id="skHelp">
+  <header><span>💬 Помощник — „От склада“</span><a href="#" id="skHelpX" style="color:#fff;text-decoration:none">✕</a></header>
+  <div id="skChat"><div class="a"><span>Здравей! Питай ме как се работи с раздела или напиши код на артикул (напр. 12817), за да ти кажа откъде се зарежда.</span></div>
+    <div class="skChips"><button>Как да поставя съобщение?</button><button>Какво значи ❌?</button><button>Защо артикул го няма в заявката?</button><button>Сбърках — как да върна?</button></div></div>
+  <form id="skAsk"><input id="skQ" placeholder="Напиши въпрос или код…" autocomplete="off"><button>➤</button></form>
+</div>
+
 <!-- ============ СРАВНЕНИЕ ============ -->
 <section class="tab" id="tab-cmp">
   <div class="bar">
@@ -957,7 +1016,9 @@ const loaded = {};
 function show(tab) {
   document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + tab));
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: () => loadMinusi(), bandits: initBandits, promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, cmp: initCmp, learn: initLearn, run: initRun})[tab]?.(); }
+  { const hb = document.getElementById("skHelpBtn"); if (hb) { hb.style.display = tab === "sklad" ? "" : "none"; if (tab !== "sklad") document.getElementById("skHelp")?.classList.remove("on"); } }
+  if (tab === "sklad") { if (loaded.sklad) loadSklad(); api("/ui/sklad/seen", { method: "POST" }).then(() => skBadge(0)).catch(() => {}); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: () => loadMinusi(), bandits: initBandits, promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, cmp: initCmp, sklad: initSklad, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -3059,6 +3120,81 @@ function showLogin(err) {
 }
 async function logout() { await fetch("/ui/logout", { method: "POST" }); location.reload(); }
 
+
+/* ---------- От склада ---------- */
+const JH = { "Content-Type": "application/json" };
+let SK = null, SKP = null;
+function skBadge(n) {
+  const a = document.querySelector('nav a[data-tab="sklad"]'); if (!a) return;
+  let b = a.querySelector(".skNew"); if (!n) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement("span"); b.className = "skNew"; a.append(b); }
+  b.textContent = "НОВО " + n;
+}
+function initSklad() {
+  $("skPrev").onclick = skPreview;
+  $("skSave").onclick = skSave;
+  $("skBody").oninput = () => { $("skSave").disabled = true; $("skPreview").innerHTML = ""; };
+  $("skFind").oninput = skRender;
+  loadSklad();
+}
+async function loadSklad() {
+  try { SK = await api("/ui/sklad"); skRender(); } catch (e) { msg("skMsg", e.message, false); }
+}
+function skRender() {
+  if (!SK) return;
+  const f = ($("skFind").value || "").toLowerCase();
+  const it = SK.items.filter(x => !f || x.sku.includes(f) || (x.name || "").toLowerCase().includes(f));
+  $("skCnt").textContent = `(${SK.items.length} артикула)`;
+  $("skList").innerHTML = it.map(x => `<tr><td>${esc(x.sku)}</td><td>${esc(x.name)}</td><td>${esc(x.since)}</td>
+    <td>${x.last_sklad ? esc(x.last_sklad) : '<span class="note">—</span>'}</td><td>${x.last_ndk ? esc(x.last_ndk) : '<span class="note">—</span>'}</td>
+    <td><button data-skndk="${esc(x.sku)}" title="Връща артикула в заявката към НДК">→ НДК</button></td></tr>`).join("")
+    || `<tr><td colspan="6" class="note">Няма артикули от склада.</td></tr>`;
+  $("skList").querySelectorAll("[data-skndk]").forEach(b => b.onclick = async () => {
+    if (!confirm("Артикул " + b.dataset.skndk + " да се поръчва пак от НДК?")) return;
+    await api("/ui/sklad/set", { method: "POST", headers: JH, body: JSON.stringify({ sku: b.dataset.skndk, source: "ndk" }) });
+    toast("Върнат към НДК: " + b.dataset.skndk); loadSklad();
+  });
+  $("skLog").innerHTML = SK.log.map(x => `<tr><td>${esc(x.at)}</td><td>${esc(x.sku)}</td><td>${esc(x.name)}</td>
+    <td>${x.new === "sklad" ? '<span class="skPill s">🏬 към склада</span>' : '<span class="skPill n">🚚 към НДК</span>'}</td><td>${esc(x.by)}</td></tr>`).join("")
+    || `<tr><td colspan="5" class="note">Още няма промени.</td></tr>`;
+}
+async function skPreview() {
+  const body = $("skBody").value;
+  if (!body.trim()) { msg("skMsg", "Постави съобщението първо", false); return; }
+  SKP = await api("/ui/sklad/preview", { method: "POST", headers: JH, body: JSON.stringify({ body }) });
+  const ch = SKP.rows.filter(r => r.change).length;
+  $("skPreview").innerHTML = `<div class="note" style="margin-bottom:6px">Разчетени <b>${SKP.rows.length}</b> артикула, от тях <b>${ch}</b> се променят (в зелено).</div>
+    <div class="scroll" style="max-height:300px"><table><thead><tr><th>Код</th><th>Артикул</th><th>Сега</th><th>След записа</th></tr></thead><tbody>
+    ${SKP.rows.map(r => `<tr class="skRow ${r.change ? "chg" : ""}"><td>${esc(r.sku)}</td><td>${esc(r.name)}</td>
+      <td>${r.now === "sklad" ? "🏬 склад" : "🚚 НДК"}</td><td>${r.source === "sklad" ? '<span class="skPill s">🏬 склад</span>' : '<span class="skPill n">🚚 НДК</span>'}</td></tr>`).join("")}
+    </tbody></table></div>
+    ${SKP.unknown.length ? `<div class="note" style="margin-top:6px">Пропуснати (не се поръчват от НДК): ${SKP.unknown.map(u => esc(u.sku)).join(", ")}</div>` : ""}`;
+  $("skSave").disabled = !ch;
+  msg("skMsg", ch ? "Провери и натисни „Запиши“" : "Няма промени — всичко вече е така", !!ch);
+}
+async function skSave() {
+  $("skSave").disabled = true;
+  const r = await api("/ui/sklad/apply", { method: "POST", headers: JH, body: JSON.stringify({ body: $("skBody").value }) });
+  msg("skMsg", `Записано: ${r.changed.length} промени` + (r.told_dimo ? " · Димо е уведомен" : ""));
+  $("skBody").value = ""; $("skPreview").innerHTML = ""; loadSklad();
+}
+(function skHelp() {
+  const box = $("skHelp"), chat = $("skChat");
+  if (!box) return;
+  $("skHelpBtn").onclick = () => { box.classList.toggle("on"); if (box.classList.contains("on")) $("skQ").focus(); };
+  $("skHelpX").onclick = e => { e.preventDefault(); box.classList.remove("on"); };
+  async function ask(q) {
+    if (!q.trim()) return;
+    chat.insertAdjacentHTML("beforeend", `<div class="q"><span>${esc(q)}</span></div>`);
+    try { const r = await api("/ui/sklad/help", { method: "POST", headers: JH, body: JSON.stringify({ q }) });
+      chat.insertAdjacentHTML("beforeend", `<div class="a"><span>${esc(r.answer)}</span></div>`); }
+    catch (e) { chat.insertAdjacentHTML("beforeend", `<div class="a"><span>Грешка: ${esc(e.message)}</span></div>`); }
+    chat.scrollTop = chat.scrollHeight;
+  }
+  chat.querySelectorAll(".skChips button").forEach(b => b.onclick = () => ask(b.textContent));
+  $("skAsk").onsubmit = e => { e.preventDefault(); const q = $("skQ").value; $("skQ").value = ""; ask(q); };
+})();
+
 /* ---------- старт ---------- */
 document.querySelectorAll("nav a").forEach(a => a.onclick = () => {
   if (a.dataset.tab === "board") loaded.board = false;
@@ -3084,6 +3220,7 @@ fetch("/ui/summary").then(r => {
       const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (["#anal", "#promo", "#turn", "#delist"].includes(location.hash)) location.hash = "#board"; } }).catch(() => {});
   show((location.hash || "#board").slice(1));
   updateFresh();
+  setTimeout(() => { if (document.querySelector('nav a[data-tab="sklad"]') && location.hash !== "#sklad") api("/ui/sklad/new").then(d => skBadge(d.new)).catch(() => {}); }, 1200);
   setTimeout(() => { if (document.querySelector('nav a[data-tab="anom"]')) api("/ui/anomalies/minusi").then(d => { if (!MN) MN = d; mnBadge(d.left); const c = $("mnCnt"); if (c) c.textContent = d.left; }).catch(() => {}); }, 1500);
 });
 if ((location.hash || "#board") !== "#board") api("/ui/summary").then(d => $("stamp").innerHTML = `Обновено <b>${d.generated}</b>`).catch(() => {});

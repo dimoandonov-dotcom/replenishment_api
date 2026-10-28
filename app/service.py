@@ -85,6 +85,13 @@ def load_settings(
         ).scalars().all()
     )
 
+    try:
+        from . import sklad as _sklad
+        from_sklad = _sklad.sklad_skus(db)   # зареждат се от нашия склад - не от НДК
+    except Exception:
+        db.rollback()
+        from_sklad = set()
+
     out: list[ArticleSetting] = []
     for setting, article in db.execute(stmt).all():
         sup_id = setting.supplier_id or article.default_supplier_id
@@ -96,6 +103,8 @@ def load_settings(
             continue  # само с „да" в планограмата на ТОЗИ магазин - без изключения
         if getattr(article, "no_order", False):
             continue  # отбелязан "Не се поръчва" - важи винаги
+        if article.sku in from_sklad:
+            continue  # „От склада“ (раздел Склад) - идва от Т Логистик
         out.append(
             ArticleSetting(
                 store_id=store_id,
