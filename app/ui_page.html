@@ -224,6 +224,19 @@ nav a[data-tab="sklad"] .skNew{display:inline-block;margin-left:6px;background:#
 .niK{display:inline-block;border-radius:6px;padding:1px 7px;font-size:12px;font-weight:700;margin-right:4px}
 .niK.swap{background:#FEE2E2;color:#991B1B}.niK.missing{background:#FFEDD5;color:#9A3412}.niK.extra{background:#E0E7FF;color:#3730A3}.niK.qty{background:#FEF9C3;color:#854D0E}
 .niDone{color:#15803D;font-weight:700}
+.niGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px;margin-top:10px}
+@media(max-width:600px){.niGrid{grid-template-columns:1fr}}
+.niCard{background:#fff;border:1px solid #E5E7EB;border-left:6px solid #DC2626;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;font-family:var(--head),system-ui,sans-serif}
+.niCard.ok{border-left-color:#16A34A}.niCard.wait{border-left-color:#94A3B8}.niCard.fixed{border-left-color:#16A34A;opacity:.75}
+.niHead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.niStore{font-size:18px;font-weight:800;color:#111827}
+.niMeta{font-size:13px;color:#6B7280}
+.niLine{display:flex;gap:10px;align-items:flex-start;font-size:15px;line-height:1.4;color:#111827}
+.niLine .ic{flex:none;width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px}
+.niLine .ic.swap{background:#FEE2E2}.niLine .ic.missing{background:#FFEDD5}.niLine .ic.extra{background:#E0E7FF}.niLine .ic.qty{background:#FEF9C3}
+.niLine .what{color:#4B5563;font-size:14px}
+.niAct{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.niAct button.warm{flex:1;min-height:42px;font-size:15px}
 </style>
 
 <script>
@@ -830,10 +843,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <input id="niFind" placeholder="Търси магазин, номер, артикул…" style="min-width:220px;flex:1">
     <span class="note" id="niSum"></span>
   </div>
-  <div class="scroll"><table>
-    <thead><tr><th>Дата</th><th>Магазин</th><th>Фактура</th><th>Осчетоводена</th><th>Разминавания</th><th></th></tr></thead>
-    <tbody id="niBody"><tr><td colspan="6" class="empty">Зареждам…</td></tr></tbody>
-  </table></div>
+  <div id="niBody" class="niGrid"><div class="empty">Зареждам…</div></div>
 </section>
 
 <!-- ============ СРАВНЕНИЕ ============ -->
@@ -3180,12 +3190,15 @@ async function toggleOwnStock(fresh) {
 /* ---------- НДК фактури ---------- */
 let NI = [];
 const NIK = { swap: "🔁", missing: "❌", extra: "➕", qty: "≠" };
+function niShort(n) { return String(n || "").split("/")[0].replace(/\s+/g, " ").trim(); }
 function niDiff(x) {
-  const n = esc(x.name || "");
-  if (x.kind === "swap") return `<span class="niK swap">🔁</span>${n} <b>${fmtN(x.expected)} бр.</b> е записан като <b>${esc(x.swap_name || "")}</b>`;
-  if (x.kind === "missing") return `<span class="niK missing">❌</span>${n} <b>${fmtN(x.expected)} бр.</b> — не е записан`;
-  if (x.kind === "extra") return `<span class="niK extra">➕</span>${n} <b>${fmtN(x.booked)} бр.</b> — записан, а го няма във фактурата`;
-  return `<span class="niK qty">≠</span>${n}: фактура <b>${fmtN(x.expected)}</b>, записани <b>${fmtN(x.booked)}</b>`;
+  const n = esc(niShort(x.name)), q = v => `<b>${fmtN(v)} бр.</b>`;
+  let ic, txt;
+  if (x.kind === "swap") { ic = "🔁"; txt = `${n} ${q(x.expected)}<div class="what">записан като „${esc(niShort(x.swap_name))}“</div>`; }
+  else if (x.kind === "missing") { ic = "❌"; txt = `${n} ${q(x.expected)}<div class="what">по фактура е, в Мистрал не е записан</div>`; }
+  else if (x.kind === "extra") { ic = "➕"; txt = `${n} ${q(x.booked)}<div class="what">записан в Мистрал, а го няма във фактурата</div>`; }
+  else { ic = "≠"; txt = `${n}<div class="what">фактура ${q(x.expected)} · записани ${q(x.booked)}</div>`; }
+  return `<div class="niLine"><span class="ic ${x.kind}">${ic}</span><div>${txt}</div></div>`;
 }
 function initNdkInv() {
   ["niDays", "niWhat"].forEach(id => $(id).onchange = loadNdkInv);
@@ -3211,7 +3224,7 @@ async function loadScore() {
 async function loadNdkInv() {
   const w = $("niWhat").value;
   try { NI = (await api(`/ui/ndkinv?days=${$("niDays").value}${w === "all" ? "" : "&only_diff=true"}`)).rows; }
-  catch (e) { $("niBody").innerHTML = `<tr><td colspan="6" class="msg err">${esc(e.message)}</td></tr>`; return; }
+  catch (e) { $("niBody").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; return; }
   renderNdkInv();
 }
 function renderNdkInv() {
@@ -3221,14 +3234,19 @@ function renderNdkInv() {
     || r.diffs.some(x => (x.name || "").toLowerCase().includes(f)));
   const all = NI.length, open = NI.filter(r => r.status === "differs" && !r.fixed_at).length;
   $("niSum").textContent = `${rows.length} показани · ${open} неоправени`;
-  $("niBody").innerHTML = rows.map(r => `<tr>
-      <td>${esc(r.date)}</td><td>${esc(r.store || r.store_name || "—")}</td><td>${esc(r.num)}</td>
-      <td>${r.booked_at ? esc(r.booked_at) : '<span class="note">още не</span>'}</td>
-      <td>${r.diffs.length ? r.diffs.map(niDiff).join("<br>") : (r.status === "ok" ? '<span class="niDone">✓ съвпада</span>' : '<span class="note">чака осчетоводяване</span>')}
-        ${r.note ? `<div class="note">📝 ${esc(r.note)}</div>` : ""}</td>
-      <td>${r.status !== "differs" ? "" : r.fixed_at ? `<span class="niDone" title="${esc(r.fixed_by || "")}">✔ ${esc(r.fixed_at)}</span> <button data-niu="${esc(r.num)}">Върни</button>`
-        : `<button class="warm" data-nif="${esc(r.num)}">✔ Оправено</button>`}</td></tr>`).join("")
-    || `<tr><td colspan="6" class="empty">Няма разминавания 🎉</td></tr>`;
+  $("niBody").innerHTML = rows.map(r => {
+    const cls = r.status === "ok" ? "ok" : r.status !== "differs" ? "wait" : r.fixed_at ? "fixed" : "";
+    const body = r.diffs.length ? r.diffs.map(niDiff).join("")
+      : r.status === "ok" ? '<div class="niDone">✓ съвпада с Мистрал</div>' : '<div class="niMeta">чака осчетоводяване в Мистрал</div>';
+    const act = r.status !== "differs" ? "" : r.fixed_at
+      ? `<span class="niDone">✔ оправено ${esc(r.fixed_at)}${r.fixed_by ? " · " + esc(r.fixed_by) : ""}</span><button data-niu="${esc(r.num)}">Върни</button>`
+      : `<button class="warm" data-nif="${esc(r.num)}">✔ Оправено</button>`;
+    return `<div class="niCard ${cls}">
+      <div class="niHead"><span class="niStore">${esc(r.store || r.store_name || "—")}</span>
+        <span class="niMeta">ф. ${esc(r.num)} · ${esc(r.date)}${r.booked_at ? " · записана " + esc(r.booked_at) : ""}</span></div>
+      ${body}${r.note ? `<div class="niMeta">📝 ${esc(r.note)}</div>` : ""}
+      ${act ? `<div class="niAct">${act}</div>` : ""}</div>`;
+  }).join("") || `<div class="empty">Няма разминавания 🎉</div>`;
   $("niBody").querySelectorAll("[data-nif]").forEach(b => b.onclick = async () => {
     const note = prompt("Бележка (по желание): какво е оправено?") ;
     if (note === null) return;
