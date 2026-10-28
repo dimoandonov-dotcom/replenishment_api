@@ -23,7 +23,10 @@ CREATE TABLE IF NOT EXISTS ndk_invoices (
   lines JSONB, n_lines INT, total NUMERIC(12,2), fetched_at TIMESTAMPTZ DEFAULT now(),
   booked_num BIGINT, booked_at TIMESTAMPTZ, booked JSONB, diffs JSONB, status TEXT DEFAULT 'pending', checked_at TIMESTAMPTZ);
 CREATE INDEX IF NOT EXISTS ndk_invoices_store ON ndk_invoices(store_id, inv_date);
-CREATE TABLE IF NOT EXISTS ndk_mail_state (k TEXT PRIMARY KEY, v TEXT)
+CREATE TABLE IF NOT EXISTS ndk_mail_state (k TEXT PRIMARY KEY, v TEXT);
+ALTER TABLE ndk_invoices ADD COLUMN IF NOT EXISTS obj TEXT;
+CREATE TABLE IF NOT EXISTS ndk_obj_map (obj TEXT PRIMARY KEY, store_id INT, loc INT);
+CREATE TABLE IF NOT EXISTS ndk_code_map (code TEXT PRIMARY KEY, mc INT, how TEXT, n INT DEFAULT 1, at TIMESTAMPTZ DEFAULT now())
 """
 _ok = False
 PACK = re.compile(r"(\d+)\s*бр\s*/\s*(стек|каса|кашон|пакет)", re.I)
@@ -76,7 +79,9 @@ def parse_pdf(data: bytes) -> dict:
     num = re.search(r"(\d{6,10})\s*/\s*(\d{2}\.\d{2}\.\d{4})", head)
     store = re.search(r'МАГАЗИН\s*"([^"]+)"', head)
     deliv = re.search(r"ДАТА НА ДОСТАВКА\s*:\s*(\d{2}\.\d{2}\.\d{4})", head)
-    tot = re.search(r"Всичко:\s*([\d.,]+)\s*$", head, re.M)
+    obj = re.search(r"ОБЕКТ\s*:\s*(.+?)\s+РЕГИСТРАЦИОНЕН", head)
+    addr = re.search(r"АДРЕС ЗА ДОСТАВКА\s*:\s*(.+)", head)
+    eik = re.search(r"ЕИК\s*:\s*(\d+)", head)
     def _d(s):
         try:
             return datetime.strptime(s, "%d.%m.%Y").date()
@@ -85,6 +90,8 @@ def parse_pdf(data: bytes) -> dict:
     return {"num": num.group(1).lstrip("0") if num else None, "inv_date": _d(num.group(2)) if num else None,
             "store_name": store.group(1).strip() if store else None,
             "delivery_date": _d(deliv.group(1)) if deliv else None, "lines": lines,
+            "obj": " | ".join(x for x in [(eik.group(1) if eik else ""), (obj.group(1).strip() if obj else ""),
+                                          (addr.group(1).strip() if addr else "")] if x)[:300],
             "total": sum(l["total"] for l in lines)}
 
 
@@ -117,7 +124,12 @@ def code_map(db: Session) -> tuple[dict[str, int], dict[int, str]]:
         for c in codes:
             cand.setdefault(c, set()).add(mc)
     cm = {c: next(iter(v)) for c, v in cand.items() if len(v) == 1}
-    # и собствените ни артикули (sku = MATERIALCODE): ако НДК кодът е в името им
+    try:   # научени връзки (от сдвоени редове фактура <-> Мистрал)
+        ensure(db)
+        for c, mc in db.execute(text("SELECT code, mc FROM ndk_code_map")).all():
+            cm[c] = int(mc)
+    except Exception:
+        db.rollback()
     _map_cache.update({"at": now, "map": cm, "names": names})
     return cm, names
 
@@ -143,6 +155,20 @@ def booked_lines(loc: int, num: str) -> tuple[int | None, datetime | None, dict[
         rows = cur.fetchall()
         at = max((x["d"] for x in rows if x["d"]), default=None)
         return int(r["num"]), at, {int(x["c"]): float(x["q"] or 0) for x in rows if float(x["q"] or 0) != 0}
+
+
+def find_loc(num: str) -> int | None:
+    """В кой обект на Мистрал е осчетоводена фактурата (по номер)."""
+    from . import mistral
+    import os
+    with mistral.use("varna"), mistral.connect() as conn:
+        cur = conn.cursor()
+        cur.execute("""SELECT TOP 1 od.LOCATIONID AS loc FROM OPERATIONDOCUMENT od WITH (NOLOCK)
+                       JOIN OPERATIONS o WITH (NOLOCK) ON o.NUM = od.NUM AND o.LOCATIONID = od.LOCATIONID
+                       WHERE o.PARTNERNAMEID = %s AND (od.DOCUMENTNUM = %s OR od.DOCUMENTNUM = %s)""",
+                    (int(os.getenv("NDK_PARTNER_ID", "186")), num, num.zfill(10)))
+        r = cur.fetchone()
+        return int(r["loc"]) if r else None
 
 
 AMB = {17729, 17730}   # амбалаж
@@ -176,8 +202,26 @@ def compare(inv: dict, cm: dict, names: dict, booked: dict[int, float]) -> list[
                 m_["swap_name"] = e["name"]
                 break
     diffs = [d for d in diffs if not d.get("paired")]
+    # неразпознат ред от фактурата + излишен ред в Мистрал със същите бройки -> същият артикул (учим се)
+    learned = []
+    extra = [d for d in diffs if d["kind"] == "extra"]
     for l in unmapped:
+        same = [e for e in extra if not e.get("paired") and abs(e["booked"] - l["pieces"]) < 0.01]
+        same_u = [u for u in unmapped if abs(u["pieces"] - l["pieces"]) < 0.01]
+        if len(same) == 1 and len(same_u) == 1:
+            same[0]["paired"] = True
+            learned.append((l["code"], same[0]["mc"]))
+            continue
+        if len(same) > 1:   # по ключова дума от името
+            w = (l["name"].split() or [""])[0].upper()
+            hit = [e for e in same if w and w in (e["name"] or "").upper()]
+            if len(hit) == 1:
+                hit[0]["paired"] = True
+                learned.append((l["code"], hit[0]["mc"]))
+                continue
         diffs.append({"kind": "unmapped", "code": l["code"], "name": l["name"], "expected": l["pieces"], "booked": None})
+    diffs = [d for d in diffs if not d.get("paired")]
+    compare.learned = learned
     return diffs
 
 
@@ -248,11 +292,18 @@ def sync_mail(db: Session, days: int = 3, limit: int = 400) -> dict:
                 skipped += 1
                 continue
             sid = _store_id(db, inv["store_name"])
-            db.execute(text("""INSERT INTO ndk_invoices(num, mail_uid, inv_date, delivery_date, store_name, store_id, lines, n_lines, total)
-                               VALUES (:n,:u,:d,:dd,:sn,:s,CAST(:l AS jsonb),:nl,:t)
-                               ON CONFLICT (num) DO UPDATE SET mail_uid = EXCLUDED.mail_uid"""),
+            loc = None
+            if inv.get("obj"):
+                om = db.execute(text("SELECT store_id, loc FROM ndk_obj_map WHERE obj = :o"), {"o": inv["obj"]}).first()
+                if om:
+                    sid = sid or om[0]
+                    loc = om[1]
+            db.execute(text("""INSERT INTO ndk_invoices(num, mail_uid, inv_date, delivery_date, store_name, store_id, loc, obj, lines, n_lines, total)
+                               VALUES (:n,:u,:d,:dd,:sn,:s,:lc,:ob,CAST(:l AS jsonb),:nl,:t)
+                               ON CONFLICT (num) DO UPDATE SET mail_uid = EXCLUDED.mail_uid, obj = EXCLUDED.obj"""),
                        {"n": inv["num"], "u": uid, "d": inv["inv_date"], "dd": inv["delivery_date"], "sn": inv["store_name"],
-                        "s": sid, "l": json.dumps(inv["lines"], ensure_ascii=False), "nl": len(inv["lines"]), "t": inv["total"]})
+                        "s": sid, "lc": loc, "ob": inv.get("obj"), "l": json.dumps(inv["lines"], ensure_ascii=False),
+                        "nl": len(inv["lines"]), "t": inv["total"]})
             new += 1
         db.commit()
     finally:
@@ -264,22 +315,40 @@ def check_pending(db: Session, max_age_days: int = 14) -> dict:
     """За всяка неосчетоводена фактура: намираме я в Мистрал и сравняваме."""
     ensure(db)
     cm, names = code_map(db)
-    rows = db.execute(text("""SELECT num, store_id, loc, lines, status FROM ndk_invoices
+    rows = db.execute(text("""SELECT num, store_id, loc, lines, status, obj FROM ndk_invoices
                               WHERE status IN ('pending','differs') AND inv_date >= :d ORDER BY inv_date""" ),
                       {"d": date.today() - timedelta(days=max_age_days)}).all()
     checked, booked_n, differs = 0, 0, 0
-    for num, sid, loc, lines, status in rows:
-        if loc is None:
+    locmap = None
+    for num, sid, loc, lines, status, obj in rows:
+        if loc is None and sid is not None:
             loc = _loc_for(db, sid)
+        if loc is None:
+            loc = find_loc(num)          # осчетоводена ли е някъде -> оттам знаем обекта
             if loc is None:
                 continue
-            db.execute(text("UPDATE ndk_invoices SET loc = :l WHERE num = :n"), {"l": loc, "n": num})
+            if locmap is None:
+                from . import mistral
+                from .anomalies import _loc_map
+                with mistral.use("varna"), mistral.connect() as conn:
+                    locmap = _loc_map(db, conn.cursor())
+            sid = sid or locmap.get(loc)
+            if obj:
+                db.execute(text("""INSERT INTO ndk_obj_map(obj, store_id, loc) VALUES (:o,:s,:l)
+                                   ON CONFLICT (obj) DO UPDATE SET store_id = :s, loc = :l"""), {"o": obj, "s": sid, "l": loc})
+        db.execute(text("UPDATE ndk_invoices SET loc = :l, store_id = COALESCE(store_id, :s) WHERE num = :n"),
+                   {"l": loc, "s": sid, "n": num})
         onum, at, booked = booked_lines(loc, num)
         checked += 1
         if onum is None:
             continue
         inv = {"lines": lines if isinstance(lines, list) else json.loads(lines)}
         diffs = compare(inv, cm, names, booked)
+        for code, mc in getattr(compare, "learned", []):
+            db.execute(text("""INSERT INTO ndk_code_map(code, mc, how) VALUES (:c,:m,'pair')
+                               ON CONFLICT (code) DO UPDATE SET n = ndk_code_map.n + (CASE WHEN ndk_code_map.mc = :m THEN 1 ELSE 0 END)"""),
+                       {"c": code, "m": mc})
+            cm[code] = mc
         real = [d for d in diffs if d["kind"] != "unmapped"]
         st = "differs" if real else "ok"
         if st == "differs":
