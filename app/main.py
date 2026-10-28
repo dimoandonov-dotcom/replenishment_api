@@ -167,7 +167,7 @@ async def _require_auth(request: Request, call_next):
         return await call_next(request)
     # профили „само Аномалии" (напр. Надежда - ревизори и доставчици)
     if user0 is not None and user0.lower() in anomalies_only_users():
-        ok = ((request.method == "GET" and (p.startswith("/ui/anomalies") or p.startswith("/ui/mistral/") or p.startswith("/ui/ndkinv")
+        ok = ((request.method == "GET" and (p.startswith("/ui/anomalies") or p.startswith("/ui/mistral/") or p.startswith("/ui/ndkinv") or p.startswith("/ui/ownstock-score")
                                             or p in ("/", "/ui/me", "/stores", "/ui/version")))
               or (request.method == "POST" and (p in ("/ui/export-xlsx", "/ui/anomalies/minusi/fix")
                                                  or (p.startswith("/ui/ndkinv/") and p.endswith("/fixed")))))

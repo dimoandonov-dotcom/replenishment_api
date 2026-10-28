@@ -823,6 +823,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <p class="note" style="margin:0 0 12px;line-height:1.6">Всяка <b>електронна фактура на НДК</b> (от пощата invoices@trista.bg) се сравнява с осчетоводеното в Мистрал.
   Тук са разминаванията: <span class="niK swap">🔁 записан като друг</span><span class="niK missing">❌ незаписан</span><span class="niK extra">➕ излишен</span><span class="niK qty">≠ количество</span>.
   След като го оправиш в Мистрал, натисни <b>„✔ Оправено“</b>. Проверява се на всеки 15 мин.</p>
+  <div id="niScore" style="margin:0 0 14px"></div>
   <div class="bar">
     <select id="niDays"><option value="2">2 дни</option><option value="7" selected>7 дни</option><option value="14">14 дни</option></select>
     <select id="niWhat"><option value="open" selected>Само неоправени</option><option value="diff">Всички с разминаване</option><option value="all">Всички фактури</option></select>
@@ -3189,7 +3190,23 @@ function niDiff(x) {
 function initNdkInv() {
   ["niDays", "niWhat"].forEach(id => $(id).onchange = loadNdkInv);
   $("niFind").oninput = renderNdkInv;
-  loadNdkInv();
+  loadNdkInv(); loadScore();
+}
+async function loadScore() {
+  const B = $("niScore");
+  let d; try { d = await api("/ui/ownstock-score?days=60"); } catch (e) { B.innerHTML = ""; return; }
+  const T = d.total || {};
+  if (!T.counted) { B.innerHTML = `<div class="skCard"><b>⚖️ Съдия: ревизията</b> — <span class="note">${esc(d.note || "още няма ревизии след първата снимка")}. При всяка ревизия в пилотните магазини ще се вижда кой е бил по-близо до преброеното: Мистрал или нашата сметка.</span></div>`; return; }
+  const ex = d.stores.flatMap(s => s.examples.map(e => ({ ...e, store: s.store }))).slice(0, 30);
+  B.innerHTML = `<div class="skCard"><b>⚖️ Мистрал срещу нас при ревизия</b> <span class="note">от ${esc(d.since)} · пилотни магазини</span>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;margin:8px 0;font-size:15px">
+      <span>Преброени <b>${T.counted}</b></span><span>Различна прогноза <b>${T.differ}</b></span>
+      <span style="color:#15803D">🏆 Ние по-близо <b>${T.ours}</b></span><span style="color:#B91C1C">Мистрал по-близо <b>${T.mistral}</b></span><span>Равни ${T.tie}</span>
+      <span class="note">обща грешка: ние ${fmtN(T.err_ours)} бр. · Мистрал ${fmtN(T.err_mistral)} бр.</span></div>
+    <table><thead><tr><th>Магазин</th><th class="num">Преброени</th><th class="num">Различни</th><th class="num">Ние</th><th class="num">Мистрал</th><th class="num">Равни</th></tr></thead>
+    <tbody>${d.stores.map(s => `<tr><td>${esc(s.store)}</td><td class="num">${s.counted}</td><td class="num">${s.differ}</td><td class="num"><b>${s.ours}</b></td><td class="num">${s.mistral}</td><td class="num">${s.tie}</td></tr>`).join("")}</tbody></table>
+    ${ex.length ? `<details style="margin-top:8px"><summary>Примери</summary><table><thead><tr><th>Магазин</th><th>Ревизия</th><th>Артикул</th><th class="num">Преброено</th><th class="num">Мистрал</th><th class="num">Ние</th><th></th><th>Защо се различавахме</th></tr></thead><tbody>
+      ${ex.map(e => `<tr><td>${esc(e.store)}</td><td>${esc(e.rev)}</td><td>${esc(e.name || e.mc)}</td><td class="num"><b>${fmtN(e.found)}</b></td><td class="num">${fmtN(e.mistral)}</td><td class="num">${fmtN(e.ours)}</td><td>${e.win === "ours" ? "🏆" : e.win === "mistral" ? "❌" : "="}</td><td class="note">${esc(e.why || "")}</td></tr>`).join("")}</tbody></table></details>` : ""}</div>`;
 }
 async function loadNdkInv() {
   const w = $("niWhat").value;

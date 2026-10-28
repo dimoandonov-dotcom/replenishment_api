@@ -2063,3 +2063,16 @@ def ui_ndkinv_fixed(num: str, payload: NdkFixIn, request: Request, db: Session =
     """Надя отбелязва, че разминаването е оправено в Мистрал."""
     from . import ndkinv
     return ndkinv.set_fixed(db, num, payload.done, payload.note, getattr(request.state, "user", None))
+
+
+@router.get("/ui/ownstock-score")
+def ui_ownstock_score(days: int = 30, db: Session = Depends(get_db)):
+    """Мистрал срещу нашата сметка при всяка ревизия (пилотните магазини)."""
+    from . import ownstock
+    return ownstock.score(db, days)
+
+
+@router.post("/ui/ownstock-snapshot")
+def ui_ownstock_snapshot(db: Session = Depends(get_db)):
+    from . import ownstock
+    return ownstock.snapshot(db)

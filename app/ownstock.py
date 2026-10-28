@@ -229,3 +229,129 @@ def phantoms_all(db: Session) -> list[dict]:
             if it["phantom"]:
                 out.append({"store_id": sid, "store": names.get(sid), **it})
     return out
+
+
+# ---------------------------------------------------------------------------
+# Съдия: ревизията. Всяка сутрин пазим снимка (Мистрал / наша / за заявка);
+# при ревизия сравняваме кое е било по-близо до преброеното.
+#   прогноза Мистрал = SEARCHQTY (очакваното от Мистрал в момента на броене)
+#   наша прогноза    = SEARCHQTY + (наша - Мистрал) от последната снимка преди броенето
+# ---------------------------------------------------------------------------
+SNAP_SCHEMA = """
+CREATE TABLE IF NOT EXISTS ownstock_snap (day DATE, store_id INT, mc INT, mistral NUMERIC(12,2), own NUMERIC(12,2),
+  eff NUMERIC(12,2), phantom BOOLEAN, flag TEXT, why TEXT, at TIMESTAMPTZ DEFAULT now(), PRIMARY KEY (day, store_id, mc))
+"""
+_snap_ok = False
+
+
+def _snap_ensure(db: Session):
+    global _snap_ok
+    if not _snap_ok:
+        db.execute(text(SNAP_SCHEMA))
+        db.commit()
+        _snap_ok = True
+
+
+def snapshot(db: Session) -> dict:
+    """Снимка за днес за пилотните магазини (веднъж на ден)."""
+    from . import pilot
+    _snap_ensure(db)
+    today = datetime.now(TZ).date()
+    n = 0
+    for sid in sorted(pilot.active_ids(db)):
+        try:
+            d = compute(db, sid, fresh=True)
+        except Exception:
+            db.rollback()
+            continue
+        for sku, it in d["items"].items():
+            ours = it["effective"] if (it["phantom"] or it.get("ndk_fix") or it["own"] is not None) else it["mistral"]
+            db.execute(text("""INSERT INTO ownstock_snap(day, store_id, mc, mistral, own, eff, phantom, flag, why)
+                               VALUES (:d,:s,:m,:mi,:o,:e,:p,:f,:w)
+                               ON CONFLICT (day, store_id, mc) DO UPDATE SET mistral=:mi, own=:o, eff=:e, phantom=:p, flag=:f, why=:w, at=now()"""),
+                       {"d": today, "s": sid, "m": int(sku), "mi": it["mistral"], "o": it["own"], "e": ours,
+                        "p": bool(it["phantom"]), "f": it.get("flag") or "", "w": (it.get("why") or "")[:300]})
+            n += 1
+        db.commit()
+    return {"day": str(today), "rows": n}
+
+
+def snapshot_if_needed(db: Session) -> str | None:
+    _snap_ensure(db)
+    now = datetime.now(TZ)
+    if now.hour < 6:
+        return None
+    have = db.execute(text("SELECT 1 FROM ownstock_snap WHERE day = :d LIMIT 1"), {"d": now.date()}).first()
+    if have:
+        return None
+    return str(snapshot(db))
+
+
+def score(db: Session, days: int = 30) -> dict:
+    """При всяка ревизия в пилотните магазини: Мистрал или ние бяхме по-близо до преброеното."""
+    from . import mistral, pilot
+    from .anomalies import _loc_map
+    _snap_ensure(db)
+    snaps = db.execute(text("""SELECT day, store_id, mc, mistral, eff, phantom, flag, why, at FROM ownstock_snap
+                               WHERE day >= :d"""), {"d": datetime.now(TZ).date() - timedelta(days=days)}).all()
+    if not snaps:
+        return {"stores": [], "total": {}, "since": None, "note": "още няма снимки - първата е тази сутрин"}
+    by: dict = {}
+    for r in snaps:
+        by.setdefault((r[1], r[2]), []).append(r)
+    first = min(r[8] for r in snaps)
+    names = {s.id: s.name for s in db.execute(select(m.Store)).scalars()}
+    sids = sorted(pilot.active_ids(db))
+    with mistral.use("varna"), mistral.connect() as conn:
+        cur = conn.cursor()
+        locs = {s: l for l, s in _loc_map(db, cur).items() if s in sids}
+        if not locs:
+            return {"stores": [], "total": {}}
+        cur.execute(f"""SELECT i.LOCATIONID AS loc, i.INVENTORYNUM AS num, i.DATEINVENTORY AS d, c.MATERIALCODE AS mc,
+                               c.SEARCHQTY AS exp, c.QTYFOUND AS found
+                        FROM INVENTORY i WITH (NOLOCK) JOIN INVENTORYCONTENT c WITH (NOLOCK)
+                          ON c.LOCATIONID = i.LOCATIONID AND c.INVENTORYNUM = i.INVENTORYNUM
+                        WHERE i.LOCATIONID IN ({','.join(map(str, locs.values()))}) AND i.DATEINVENTORY >= %s
+                          AND i.CHECKEDMATERIALCOUNT >= i.MATERIALCOUNT""", (first.astimezone(TZ).replace(tzinfo=None),))
+        revs = cur.fetchall()
+    sid_by_loc = {l: s for s, l in locs.items()}
+    stores: dict = {}
+    for r in revs:
+        sid = sid_by_loc.get(r["loc"])
+        cand = [x for x in by.get((sid, int(r["mc"])), []) if x[8].astimezone(TZ).replace(tzinfo=None) < r["d"]]
+        if not cand:
+            continue
+        sn = max(cand, key=lambda x: x[8])
+        exp_m = float(r["exp"] or 0)
+        gap = float(sn[4] or 0) - float(sn[3] or 0)      # наша - Мистрал към снимката
+        exp_o = max(exp_m + gap, 0.0)                    # (фантом: снимката казва 0 -> gap = -Мистрал)
+        found = float(r["found"] or 0)
+        st = stores.setdefault(sid, {"store_id": sid, "store": names.get(sid), "counted": 0, "differ": 0, "ours": 0,
+                                     "mistral": 0, "tie": 0, "err_ours": 0.0, "err_mistral": 0.0, "examples": []})
+        st["counted"] += 1
+        if abs(gap) < 0.5 and not sn[5]:
+            continue                                    # предвиждахме същото като Мистрал - не се брои
+        st["differ"] += 1
+        eo, em = abs(exp_o - found), abs(exp_m - found)
+        st["err_ours"] += eo
+        st["err_mistral"] += em
+        win = "ours" if eo + 0.01 < em else "mistral" if em + 0.01 < eo else "tie"
+        st[win] += 1
+        if len(st["examples"]) < 15:
+            st["examples"].append({"mc": int(r["mc"]), "rev": r["d"].strftime("%d.%m"), "found": found, "mistral": exp_m,
+                                   "ours": round(exp_o, 2), "win": win, "flag": sn[6], "why": sn[7]})
+    tot = {k: sum(s[k] for s in stores.values()) for k in ("counted", "differ", "ours", "mistral", "tie")}
+    tot["err_ours"] = round(sum(s["err_ours"] for s in stores.values()), 1)
+    tot["err_mistral"] = round(sum(s["err_mistral"] for s in stores.values()), 1)
+    nm = {}
+    try:
+        from . import ndkinv
+        _, nm = ndkinv.code_map(db)
+    except Exception:
+        db.rollback()
+    for s in stores.values():
+        s["err_ours"], s["err_mistral"] = round(s["err_ours"], 1), round(s["err_mistral"], 1)
+        for e in s["examples"]:
+            e["name"] = nm.get(e["mc"], "")
+    return {"stores": sorted(stores.values(), key=lambda x: -x["differ"]), "total": tot,
+            "since": first.astimezone(TZ).strftime("%d.%m %H:%M")}

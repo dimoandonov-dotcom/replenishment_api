@@ -201,6 +201,15 @@ def _loop():
                     _state["ndk_result"] = str(_ni.run(_db))[:300]
         except Exception as e:
             _state["ndk_result"] = f"{type(e).__name__}: {e}"[:300]
+        try:   # сутрешна снимка „Мистрал / наша“ за съдията (ревизиите)
+            from .db import SessionLocal as _SL2
+            from . import ownstock as _os
+            with _SL2() as _db2:
+                r_ = _os.snapshot_if_needed(_db2)
+                if r_:
+                    _state["ownstock_snap"] = r_
+        except Exception as e:
+            _state["ownstock_snap"] = f"{type(e).__name__}: {e}"[:300]
         now = datetime.now(SOFIA)
         if HOURS[0] <= now.hour < HOURS[1]:
             last = _state["last_run"]
