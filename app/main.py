@@ -167,9 +167,10 @@ async def _require_auth(request: Request, call_next):
         return await call_next(request)
     # профили „само Аномалии" (напр. Надежда - ревизори и доставчици)
     if user0 is not None and user0.lower() in anomalies_only_users():
-        ok = ((request.method == "GET" and (p.startswith("/ui/anomalies") or p.startswith("/ui/mistral/")
+        ok = ((request.method == "GET" and (p.startswith("/ui/anomalies") or p.startswith("/ui/mistral/") or p.startswith("/ui/ndkinv")
                                             or p in ("/", "/ui/me", "/stores", "/ui/version")))
-              or (request.method == "POST" and p in ("/ui/export-xlsx", "/ui/anomalies/minusi/fix")))
+              or (request.method == "POST" and (p in ("/ui/export-xlsx", "/ui/anomalies/minusi/fix")
+                                                 or (p.startswith("/ui/ndkinv/") and p.endswith("/fixed")))))
         if not ok:
             return JSONResponse(status_code=403, content={"detail": "Профилът е само за „Аномалии“"})
     # Бандитс - само главният потребител (Димо) или API ключ

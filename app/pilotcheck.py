@@ -157,7 +157,17 @@ def check(db: Session) -> dict:
             db.rollback()
     ok = [s for s in out if not s["stop"] and not s["warn"]]
     return {"at": now.strftime("%d.%m %H:%M"), "stores": out, "ok": len(ok), "stop": sum(1 for s in out if s["stop"]),
-            "warn": sum(1 for s in out if s["warn"] and not s["stop"]), "goods_error": gerr, "text": _text(out, now)}
+            "warn": sum(1 for s in out if s["warn"] and not s["stop"]), "goods_error": gerr, "text": _text(out, now) + _inv_text(db)}
+
+
+def _inv_text(db: Session) -> str:
+    try:
+        from . import ndkinv
+        t = ndkinv.text_report(db, 2)
+        return ("\n\n" + t) if t else ""
+    except Exception:
+        db.rollback()
+        return ""
 
 
 def _text(out: list, now) -> str:

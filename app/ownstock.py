@@ -105,6 +105,12 @@ def compute(db: Session, store_id: int, fresh: bool = False) -> dict:
         lastd = {int(r["code"]): r["d"] for r in cur.fetchall()}
 
     names = {a.id: a.name for a in db.execute(select(m.Article).where(m.Article.id.in_(list(codes.values())))).scalars()}
+    try:   # поправки по е-фактурите на НДК (фактура - осчетоводено от OCR)
+        from . import ndkinv
+        fixes = ndkinv.corrections(db, store_id)
+    except Exception:
+        db.rollback()
+        fixes = []
     now_dt = datetime.now()
     for code, aid in codes.items():
         s = sales.get(code)
@@ -118,12 +124,16 @@ def compute(db: Session, store_id: int, fresh: bool = False) -> dict:
               "base": None, "base_date": None, "deliveries": 0.0, "sales": 0.0, "other": 0.0, "own": None,
               "phantom": False, "effective": mq.get(code, 0.0), "flag": "", "why": ""}
         b = base.get(code)
+        t0 = b["d"] if b is not None else None
+        fx = [f for f in fixes if f["mc"] == code and (t0 is None or (f["at"] and f["at"].replace(tzinfo=None) > t0))]
+        it["ndk_fix"] = round(sum(f["delta"] for f in fx), 2)
+        it["ndk_fix_docs"] = sorted({f["num"] for f in fx})
         if b is not None:
             mv = mov.get(code, {})
             dl = mv.get(2, 0.0)
             sl = -mv.get(1, 0.0)
             other = sum(q for t, q in mv.items() if t not in (1, 2))
-            own = float(b["found"] or 0) + dl - sl + other
+            own = float(b["found"] or 0) + dl - sl + other + it["ndk_fix"]
             it.update({"base": float(b["found"] or 0), "base_date": b["d"].strftime("%d.%m"),
                        "base_ndk": bool((b["partner"] or "").strip()), "deliveries": dl, "sales": sl, "other": other,
                        "own": round(own, 2)})
@@ -143,15 +153,24 @@ def compute(db: Session, store_id: int, fresh: bool = False) -> dict:
         it["counted_recently"] = counted7[code].strftime("%d.%m") if code in counted7 else None
         if it["phantom"]:
             it["effective"] = 0.0
-        elif it["own"] is not None:
+        elif it["own"] is None and it["ndk_fix"]:
+            it["own"] = round(it["mistral"] + it["ndk_fix"], 2)
+            it["effective"] = max(it["own"], 0.0)
+            it["flag"] = "📄"
+            it["why"] = f"Мистрал {it['mistral']:g} {it['ndk_fix']:+g} по фактура {', '.join(it['ndk_fix_docs'])} = {it['own']:g}"
+        if not it["phantom"] and it["own"] is not None and it["flag"] != "📄":
             own = max(it["own"], 0.0)
             mi = max(it["mistral"], 0.0)
-            it["effective"] = min(own, mi)
+            # с доказателство от фактурата вярваме на нашата; иначе по-малката
+            it["effective"] = own if it["ndk_fix"] else min(own, mi)
             diff = own - it["mistral"]
             if abs(diff) >= 1:
                 it["flag"] = "≠"
+                it["flag"] = "📄" if it["ndk_fix"] else "≠"
                 it["why"] = (f"ревизия {it['base_date']}: {it['base']:g} + доставки {it['deliveries']:g} - продажби {it['sales']:g}"
-                             + (f" {it['other']:+g}" if it["other"] else "") + f" = {own:g}, Мистрал {it['mistral']:g}")
+                             + (f" {it['other']:+g}" if it["other"] else "")
+                             + (f" {it['ndk_fix']:+g} по фактура {', '.join(it['ndk_fix_docs'])}" if it["ndk_fix"] else "")
+                             + f" = {own:g}, Мистрал {it['mistral']:g}")
         out["items"][str(code)] = it
     _cache[store_id] = (now, out)
     return out
@@ -176,6 +195,9 @@ def adjust(db: Session, store_id: int, stock: dict[int, float]) -> tuple[dict[in
         if it["phantom"]:
             new[aid] = 0.0
             notes[aid] = "🕳 фантомна наличност: " + it["why"]
+        elif it.get("ndk_fix") and abs(it["effective"] - cur) >= 0.5:
+            new[aid] = it["effective"]
+            notes[aid] = f"📄 по фактура на НДК: наличност {it['effective']:g} (Мистрал {it['mistral']:g}, {it['ndk_fix']:+g})"
         elif it["own"] is not None and it["effective"] < cur - 0.5:
             new[aid] = it["effective"]
             notes[aid] = f"🧮 наша наличност {it['own']:g} (Мистрал {it['mistral']:g})"

@@ -2051,3 +2051,15 @@ def ui_ndkinv_one(num: str, db: Session = Depends(get_db)):
         lines.append({**l, "mc": mc, "mistral_name": names.get(mc) if mc else None})
     return {"num": r[0], "date": str(r[1]), "delivery": str(r[2]), "store_name": r[3], "store_id": r[4], "lines": lines,
             "booked": r[6], "diffs": r[7], "status": r[8], "booked_at": str(r[9]) if r[9] else None}
+
+
+class NdkFixIn(BaseModel):
+    done: bool = True
+    note: str | None = None
+
+
+@router.post("/ui/ndkinv/{num}/fixed")
+def ui_ndkinv_fixed(num: str, payload: NdkFixIn, request: Request, db: Session = Depends(get_db)):
+    """Надя отбелязва, че разминаването е оправено в Мистрал."""
+    from . import ndkinv
+    return ndkinv.set_fixed(db, num, payload.done, payload.note, getattr(request.state, "user", None))

@@ -200,7 +200,7 @@ nav a[data-tab="anom"] .mnBadge{display:inline-block;margin-left:6px;background:
 .bdChip { background:var(--raised); border:1px solid var(--line); border-radius:14px; padding:3px 10px; font-size:13px; white-space:nowrap; }
 .bdEmpty { margin-top:8px; padding:8px 10px; border-radius:10px; background:#FEF3C7; border:1px solid #F59E0B; font-size:14px; } .bdEmpty small { color:var(--slate); }
 .bdWhy { margin:0; padding-left:20px; font-size:15px; line-height:1.5; } .bdWhy li { margin-bottom:6px; }
-nav a[data-tab="sklad"]{--c:#0369A1}
+nav a[data-tab="sklad"]{--c:#0369A1} nav a[data-tab="ndkinv"]{--c:#B91C1C}
 nav a[data-tab="sklad"] .skNew{display:inline-block;margin-left:6px;background:#16A34A;color:#fff;border-radius:999px;padding:0 7px;font-size:11px;font-weight:800;animation:mnShake 2.4s ease-in-out infinite}
 .skGrid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px}
 @media(max-width:820px){.skGrid{grid-template-columns:1fr}}
@@ -220,6 +220,10 @@ nav a[data-tab="sklad"] .skNew{display:inline-block;margin-left:6px;background:#
 .skHelp form{display:flex;gap:6px;padding:8px;border-top:1px solid #E5E7EB}
 .skHelp input{flex:1;font:inherit;padding:8px 10px;border:1px solid #CBD5E1;border-radius:10px}
 .skChips button{font-size:12px;margin:2px;border-radius:999px;padding:3px 9px;border:1px solid #BAE6FD;background:#F0F9FF;cursor:pointer}
+.niRow{cursor:pointer}.niRow:hover{background:#FEF2F2}
+.niK{display:inline-block;border-radius:6px;padding:1px 7px;font-size:12px;font-weight:700;margin-right:4px}
+.niK.swap{background:#FEE2E2;color:#991B1B}.niK.missing{background:#FFEDD5;color:#9A3412}.niK.extra{background:#E0E7FF;color:#3730A3}.niK.qty{background:#FEF9C3;color:#854D0E}
+.niDone{color:#15803D;font-weight:700}
 </style>
 
 <script>
@@ -417,6 +421,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <a href="#delist" data-tab="delist">Делистване</a>
   <a href="#qual" data-tab="qual">Качество</a>
   <a href="#anom" data-tab="anom">Аномалии</a>
+  <a href="#ndkinv" data-tab="ndkinv">📄 НДК фактури</a>
   <a href="#bandits" data-tab="bandits">🥪 Бандитс</a>
   <a href="#nord" data-tab="nord">Не се поръчват</a>
   <a href="#cmp" data-tab="cmp">Сравнение</a>
@@ -813,6 +818,23 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <form id="skAsk"><input id="skQ" placeholder="Напиши въпрос или код…" autocomplete="off"><button>➤</button></form>
 </div>
 
+<!-- ============ НДК ФАКТУРИ ============ -->
+<section class="tab" id="tab-ndkinv">
+  <p class="note" style="margin:0 0 12px;line-height:1.6">Всяка <b>електронна фактура на НДК</b> (от пощата invoices@trista.bg) се сравнява с осчетоводеното в Мистрал.
+  Тук са разминаванията: <span class="niK swap">🔁 записан като друг</span><span class="niK missing">❌ незаписан</span><span class="niK extra">➕ излишен</span><span class="niK qty">≠ количество</span>.
+  След като го оправиш в Мистрал, натисни <b>„✔ Оправено“</b>. Проверява се на всеки 15 мин.</p>
+  <div class="bar">
+    <select id="niDays"><option value="2">2 дни</option><option value="7" selected>7 дни</option><option value="14">14 дни</option></select>
+    <select id="niWhat"><option value="open" selected>Само неоправени</option><option value="diff">Всички с разминаване</option><option value="all">Всички фактури</option></select>
+    <input id="niFind" placeholder="Търси магазин, номер, артикул…" style="min-width:220px;flex:1">
+    <span class="note" id="niSum"></span>
+  </div>
+  <div class="scroll"><table>
+    <thead><tr><th>Дата</th><th>Магазин</th><th>Фактура</th><th>Осчетоводена</th><th>Разминавания</th><th></th></tr></thead>
+    <tbody id="niBody"><tr><td colspan="6" class="empty">Зареждам…</td></tr></tbody>
+  </table></div>
+</section>
+
 <!-- ============ СРАВНЕНИЕ ============ -->
 <section class="tab" id="tab-cmp">
   <div class="bar">
@@ -1019,7 +1041,7 @@ function show(tab) {
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
   { const hb = document.getElementById("skHelpBtn"); if (hb) { hb.style.display = tab === "sklad" ? "" : "none"; if (tab !== "sklad") document.getElementById("skHelp")?.classList.remove("on"); } }
   if (tab === "sklad") { if (loaded.sklad) loadSklad(); api("/ui/sklad/seen", { method: "POST" }).then(() => skBadge(0)).catch(() => {}); }
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: () => loadMinusi(), bandits: initBandits, promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, cmp: initCmp, sklad: initSklad, learn: initLearn, run: initRun})[tab]?.(); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: () => loadMinusi(), bandits: initBandits, promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, cmp: initCmp, sklad: initSklad, ndkinv: initNdkInv, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -3153,6 +3175,55 @@ async function toggleOwnStock(fresh) {
       <tbody>${rows}</tbody></table></div>`;
 }
 
+
+/* ---------- НДК фактури ---------- */
+let NI = [];
+const NIK = { swap: "🔁", missing: "❌", extra: "➕", qty: "≠" };
+function niDiff(x) {
+  const n = esc(x.name || "");
+  if (x.kind === "swap") return `<span class="niK swap">🔁</span>${n} <b>${fmtN(x.expected)} бр.</b> е записан като <b>${esc(x.swap_name || "")}</b>`;
+  if (x.kind === "missing") return `<span class="niK missing">❌</span>${n} <b>${fmtN(x.expected)} бр.</b> — не е записан`;
+  if (x.kind === "extra") return `<span class="niK extra">➕</span>${n} <b>${fmtN(x.booked)} бр.</b> — записан, а го няма във фактурата`;
+  return `<span class="niK qty">≠</span>${n}: фактура <b>${fmtN(x.expected)}</b>, записани <b>${fmtN(x.booked)}</b>`;
+}
+function initNdkInv() {
+  ["niDays", "niWhat"].forEach(id => $(id).onchange = loadNdkInv);
+  $("niFind").oninput = renderNdkInv;
+  loadNdkInv();
+}
+async function loadNdkInv() {
+  const w = $("niWhat").value;
+  try { NI = (await api(`/ui/ndkinv?days=${$("niDays").value}${w === "all" ? "" : "&only_diff=true"}`)).rows; }
+  catch (e) { $("niBody").innerHTML = `<tr><td colspan="6" class="msg err">${esc(e.message)}</td></tr>`; return; }
+  renderNdkInv();
+}
+function renderNdkInv() {
+  const w = $("niWhat").value, f = ($("niFind").value || "").toLowerCase();
+  let rows = NI.filter(r => w !== "open" || !r.fixed_at);
+  if (f) rows = rows.filter(r => (r.store || r.store_name || "").toLowerCase().includes(f) || String(r.num).includes(f)
+    || r.diffs.some(x => (x.name || "").toLowerCase().includes(f)));
+  const all = NI.length, open = NI.filter(r => r.status === "differs" && !r.fixed_at).length;
+  $("niSum").textContent = `${rows.length} показани · ${open} неоправени`;
+  $("niBody").innerHTML = rows.map(r => `<tr>
+      <td>${esc(r.date)}</td><td>${esc(r.store || r.store_name || "—")}</td><td>${esc(r.num)}</td>
+      <td>${r.booked_at ? esc(r.booked_at) : '<span class="note">още не</span>'}</td>
+      <td>${r.diffs.length ? r.diffs.map(niDiff).join("<br>") : (r.status === "ok" ? '<span class="niDone">✓ съвпада</span>' : '<span class="note">чака осчетоводяване</span>')}
+        ${r.note ? `<div class="note">📝 ${esc(r.note)}</div>` : ""}</td>
+      <td>${r.status !== "differs" ? "" : r.fixed_at ? `<span class="niDone" title="${esc(r.fixed_by || "")}">✔ ${esc(r.fixed_at)}</span> <button data-niu="${esc(r.num)}">Върни</button>`
+        : `<button class="warm" data-nif="${esc(r.num)}">✔ Оправено</button>`}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="empty">Няма разминавания 🎉</td></tr>`;
+  $("niBody").querySelectorAll("[data-nif]").forEach(b => b.onclick = async () => {
+    const note = prompt("Бележка (по желание): какво е оправено?") ;
+    if (note === null) return;
+    await api(`/ui/ndkinv/${b.dataset.nif}/fixed`, { method: "POST", headers: JH, body: JSON.stringify({ done: true, note }) });
+    toast("Отбелязано като оправено"); loadNdkInv();
+  });
+  $("niBody").querySelectorAll("[data-niu]").forEach(b => b.onclick = async () => {
+    await api(`/ui/ndkinv/${b.dataset.niu}/fixed`, { method: "POST", headers: JH, body: JSON.stringify({ done: false }) });
+    loadNdkInv();
+  });
+}
+
 /* ---------- От склада ---------- */
 const JH = { "Content-Type": "application/json" };
 let SK = null, SKP = null;
@@ -3242,10 +3313,10 @@ fetch("/ui/summary").then(r => {
       if (location.hash !== "#anal") location.hash = "#anal";
     }
     if (m.anomalies_only) {   // профил само за „Аномалии"
-      document.querySelectorAll('nav a').forEach(a => { if (a.dataset.tab !== "anom") a.remove(); });
-      document.querySelectorAll('section.tab').forEach(t => { if (t.id !== "tab-anom") t.remove(); });
+      document.querySelectorAll('nav a').forEach(a => { if (!["anom", "ndkinv"].includes(a.dataset.tab)) a.remove(); });
+      document.querySelectorAll('section.tab').forEach(t => { if (!["tab-anom", "tab-ndkinv"].includes(t.id)) t.remove(); });
       ["kpis", "freshInfo"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
-      if (location.hash !== "#anom") location.hash = "#anom";
+      if (!["#anom", "#ndkinv"].includes(location.hash)) location.hash = "#anom";
     }
     if (!m.owner) { ["bandits"].forEach(k => { const a = document.querySelector(`nav a[data-tab="${k}"]`); if (a) a.remove(); const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (location.hash === "#bandits") location.hash = "#board"; }
     if (!m.analytics) { ["anal", "promo", "turn", "delist"].forEach(k => { const a = document.querySelector(`nav a[data-tab="${k}"]`); if (a) a.remove();

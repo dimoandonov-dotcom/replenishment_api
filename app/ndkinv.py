@@ -26,6 +26,9 @@ CREATE INDEX IF NOT EXISTS ndk_invoices_store ON ndk_invoices(store_id, inv_date
 CREATE TABLE IF NOT EXISTS ndk_mail_state (k TEXT PRIMARY KEY, v TEXT);
 ALTER TABLE ndk_invoices ADD COLUMN IF NOT EXISTS obj TEXT;
 CREATE TABLE IF NOT EXISTS ndk_obj_map (obj TEXT PRIMARY KEY, store_id INT, loc INT);
+ALTER TABLE ndk_invoices ADD COLUMN IF NOT EXISTS fixed_by TEXT;
+ALTER TABLE ndk_invoices ADD COLUMN IF NOT EXISTS fixed_at TIMESTAMPTZ;
+ALTER TABLE ndk_invoices ADD COLUMN IF NOT EXISTS note TEXT;
 CREATE TABLE IF NOT EXISTS ndk_code_map (code TEXT PRIMARY KEY, mc INT, how TEXT, n INT DEFAULT 1, at TIMESTAMPTZ DEFAULT now())
 """
 _ok = False
@@ -376,7 +379,7 @@ def run(db: Session) -> dict:
 def listing(db: Session, days: int = 7, store_id: int | None = None, only_diff: bool = False) -> list[dict]:
     ensure(db)
     q = """SELECT i.num, i.inv_date, i.delivery_date, i.store_name, i.store_id, s.name, i.n_lines, i.total, i.status,
-                  i.booked_at, i.diffs FROM ndk_invoices i LEFT JOIN stores s ON s.id = i.store_id
+                  i.booked_at, i.diffs, i.fixed_by, i.fixed_at, i.note FROM ndk_invoices i LEFT JOIN stores s ON s.id = i.store_id
            WHERE i.inv_date >= :d""" + (" AND i.store_id = :s" if store_id else "") + (" AND i.status = 'differs'" if only_diff else "") + \
         " ORDER BY i.inv_date DESC, i.num DESC LIMIT 600"
     rows = db.execute(text(q), {"d": date.today() - timedelta(days=days), "s": store_id}).all()
@@ -386,7 +389,8 @@ def listing(db: Session, days: int = 7, store_id: int | None = None, only_diff: 
         out.append({"num": r[0], "date": r[1].strftime("%d.%m") if r[1] else None, "delivery": r[2].strftime("%d.%m") if r[2] else None,
                     "store_name": r[3], "store_id": r[4], "store": r[5], "lines": r[6], "total": float(r[7] or 0), "status": r[8],
                     "booked_at": r[9].astimezone(TZ).strftime("%d.%m %H:%M") if r[9] else None,
-                    "diffs": [d for d in diffs if d["kind"] != "unmapped"], "unmapped": sum(1 for d in diffs if d["kind"] == "unmapped")})
+                    "diffs": [d for d in diffs if d["kind"] != "unmapped"], "unmapped": sum(1 for d in diffs if d["kind"] == "unmapped"),
+                    "fixed_by": r[11], "fixed_at": r[12].astimezone(TZ).strftime("%d.%m %H:%M") if r[12] else None, "note": r[13]})
     return out
 
 
@@ -406,7 +410,7 @@ def pending_transit(db: Session) -> dict[tuple[int, str], float]:
 
 
 def text_report(db: Session, days: int = 1) -> str:
-    rows = listing(db, days, only_diff=True)
+    rows = [r for r in listing(db, days, only_diff=True) if not r["fixed_at"]]
     if not rows:
         return ""
     L = [f"📄 НДК фактури с разминаване спрямо осчетоводеното ({len(rows)}):"]
@@ -422,3 +426,33 @@ def text_report(db: Session, days: int = 1) -> str:
             else:
                 L.append(f"   ≠ {d['name']}: фактура {d['expected']:g}, записани {d['booked']:g}")
     return "\n".join(L)
+
+
+def corrections(db: Session, store_id: int) -> list[dict]:
+    """Поправки по фактура за магазина: {mc, delta, booked_at, num} (фактура - осчетоводено) за неоправените разминавания."""
+    ensure(db)
+    rows = db.execute(text("""SELECT num, booked_at, diffs FROM ndk_invoices WHERE store_id = :s AND status = 'differs'
+                              AND fixed_at IS NULL AND inv_date >= :d"""), {"s": store_id, "d": date.today() - timedelta(days=21)}).all()
+    out = []
+    for num, at, diffs in rows:
+        for d in diffs or []:
+            k = d["kind"]
+            if k == "unmapped":
+                continue
+            if k == "swap":
+                out.append({"mc": d["mc"], "delta": d["expected"], "at": at, "num": num})
+                out.append({"mc": d["swap_with"], "delta": -d["expected"], "at": at, "num": num})
+            elif k == "extra":
+                out.append({"mc": d["mc"], "delta": -d["booked"], "at": at, "num": num})
+            else:
+                out.append({"mc": d["mc"], "delta": d["expected"] - d["booked"], "at": at, "num": num})
+    return out
+
+
+def set_fixed(db: Session, num: str, done: bool, note: str | None, user: str | None) -> dict:
+    ensure(db)
+    db.execute(text("""UPDATE ndk_invoices SET fixed_by = CASE WHEN :d THEN :u ELSE NULL END,
+                       fixed_at = CASE WHEN :d THEN now() ELSE NULL END, note = COALESCE(:n, note) WHERE num = :num"""),
+               {"d": done, "u": user or "система", "n": (note or "").strip() or None, "num": num.lstrip("0")})
+    db.commit()
+    return {"ok": True}
