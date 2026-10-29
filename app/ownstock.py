@@ -252,13 +252,18 @@ def _snap_ensure(db: Session):
         _snap_ok = True
 
 
-def snapshot(db: Session) -> dict:
+def _all_store_ids(db: Session) -> list[int]:
+    return [r[0] for r in db.execute(text("""SELECT id FROM stores WHERE is_active AND COALESCE(mistral_db_path,'') <> 'sofia'
+                                             ORDER BY id""")).all()]
+
+
+def snapshot(db: Session, all_stores: bool = False) -> dict:
     """Снимка за днес за пилотните магазини (веднъж на ден)."""
     from . import pilot
     _snap_ensure(db)
     today = datetime.now(TZ).date()
     n = 0
-    for sid in sorted(pilot.active_ids(db)):
+    for sid in (_all_store_ids(db) if all_stores else sorted(pilot.active_ids(db))):
         try:
             d = compute(db, sid, fresh=True)
         except Exception:
@@ -284,7 +289,7 @@ def snapshot_if_needed(db: Session) -> str | None:
     have = db.execute(text("SELECT 1 FROM ownstock_snap WHERE day = :d LIMIT 1"), {"d": now.date()}).first()
     if have:
         return None
-    return str(snapshot(db))
+    return str(snapshot(db, all_stores=True))
 
 
 def score(db: Session, days: int = 30) -> dict:
@@ -301,7 +306,7 @@ def score(db: Session, days: int = 30) -> dict:
         by.setdefault((r[1], r[2]), []).append(r)
     first = min(r[8] for r in snaps)
     names = {s.id: s.name for s in db.execute(select(m.Store)).scalars()}
-    sids = sorted(pilot.active_ids(db))
+    sids = sorted({r[1] for r in snaps})        # всички магазини, за които има снимка
     with mistral.use("varna"), mistral.connect() as conn:
         cur = conn.cursor()
         locs = {s: l for l, s in _loc_map(db, cur).items() if s in sids}

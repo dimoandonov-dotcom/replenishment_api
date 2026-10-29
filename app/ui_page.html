@@ -3211,7 +3211,7 @@ async function loadScore() {
   const T = d.total || {};
   if (!T.counted) { B.innerHTML = `<div class="skCard"><b>⚖️ Съдия: ревизията</b> — <span class="note">${esc(d.note || "още няма ревизии след първата снимка")}. При всяка ревизия в пилотните магазини ще се вижда кой е бил по-близо до преброеното: Мистрал или нашата сметка.</span></div>`; return; }
   const ex = d.stores.flatMap(s => s.examples.map(e => ({ ...e, store: s.store }))).slice(0, 30);
-  B.innerHTML = `<div class="skCard"><b>⚖️ Мистрал срещу нас при ревизия</b> <span class="note">от ${esc(d.since)} · пилотни магазини</span>
+  B.innerHTML = `<div class="skCard"><b>⚖️ Мистрал срещу нас при ревизия</b> <span class="note">от ${esc(d.since)}</span>
     <div style="display:flex;gap:18px;flex-wrap:wrap;margin:8px 0;font-size:15px">
       <span>Преброени <b>${T.counted}</b></span><span>Различна прогноза <b>${T.differ}</b></span>
       <span style="color:#15803D">🏆 Ние по-близо <b>${T.ours}</b></span><span style="color:#B91C1C">Мистрал по-близо <b>${T.mistral}</b></span><span>Равни ${T.tie}</span>

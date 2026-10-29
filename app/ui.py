@@ -2073,6 +2073,14 @@ def ui_ownstock_score(days: int = 30, db: Session = Depends(get_db)):
 
 
 @router.post("/ui/ownstock-snapshot")
-def ui_ownstock_snapshot(db: Session = Depends(get_db)):
+def ui_ownstock_snapshot(all_stores: bool = False):
+    """Снимка Мистрал/наша - пуска се на заден план (всички магазини отнема няколко минути)."""
+    import threading
     from . import ownstock
-    return ownstock.snapshot(db)
+    from .db import SessionLocal
+
+    def _run():
+        with SessionLocal() as db:
+            ownstock._last_bg = ownstock.snapshot(db, all_stores)
+    threading.Thread(target=_run, daemon=True).start()
+    return {"started": True, "all_stores": all_stores}
