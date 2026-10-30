@@ -445,10 +445,10 @@ def corrections(db: Session, store_id: int) -> list[dict]:
             if k == "swap":
                 out.append({"mc": d["mc"], "delta": d["expected"], "at": at, "num": num})
                 out.append({"mc": d["swap_with"], "delta": -d["expected"], "at": at, "num": num})
-            elif k == "extra":
-                out.append({"mc": d["mc"], "delta": -d["booked"], "at": at, "num": num})
-            else:
-                out.append({"mc": d["mc"], "delta": d["expected"] - d["booked"], "at": at, "num": num})
+            elif k == "missing":
+                out.append({"mc": d["mc"], "delta": d["expected"], "at": at, "num": num})
+            # „≠ количество“ и „➕ излишен“ НЕ се прилагат: ревизията от 29.10 показа, че там магазинът
+            # обикновено е прав (прието по-малко/счупено, мостри без фактура) - само се показват на Надя
     return out
 
 

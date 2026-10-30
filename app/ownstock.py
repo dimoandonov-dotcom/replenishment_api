@@ -23,7 +23,7 @@ from . import models as m
 
 TZ = ZoneInfo("Europe/Sofia")
 BASE_MAX_DAYS = 45          # ревизия, по-стара от това, не е основа
-PHANTOM_MIN_PER_DAY = 0.4   # под това продажбите са твърде редки, за да съдим по тишина
+PHANTOM_MIN_PER_DAY = 1.0   # под 1/ден тишината не доказва нищо (ревизия 29.10: при 0.4-0.8/ден стоката си беше там)
 _cache: dict[int, tuple[float, dict]] = {}
 CACHE_SEC = 600
 
@@ -144,7 +144,7 @@ def compute(db: Session, store_id: int, fresh: bool = False) -> dict:
         if per_day >= PHANTOM_MIN_PER_DAY and silence is not None and stock_now > 0 and len(days) >= 4 and code not in counted7:
             gaps = [(b - a).days for a, b in zip(days, days[1:])]
             typical = max(gaps) if gaps else 1
-            need = max(4.0, 1.5 * typical)
+            need = max(5.0, 2.0 * typical)
             if silence >= need:
                 it["phantom"] = True
                 it["flag"] = "🕳"
