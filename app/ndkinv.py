@@ -181,6 +181,7 @@ AMB = {17729, 17730}   # амбалаж
 
 def compare(inv: dict, cm: dict, names: dict, booked: dict[int, float]) -> list[dict]:
     exp: dict[int, float] = {}
+    free: dict[int, float] = {}          # редове с цена 0 (напр. подмяна срещу капачки при промо)
     unmapped = []
     for l in inv["lines"]:
         mc = cm.get(l["code"])
@@ -188,6 +189,8 @@ def compare(inv: dict, cm: dict, names: dict, booked: dict[int, float]) -> list[
             unmapped.append(l)
             continue
         exp[mc] = exp.get(mc, 0.0) + l["pieces"]
+        if abs(float(l.get("total") or 0)) < 0.005:
+            free[mc] = free.get(mc, 0.0) + l["pieces"]
     bk = {c: q for c, q in booked.items() if c not in AMB}
     diffs = []
     for mc, q in exp.items():
@@ -226,6 +229,12 @@ def compare(inv: dict, cm: dict, names: dict, booked: dict[int, float]) -> list[
                 continue
         diffs.append({"kind": "unmapped", "code": l["code"], "name": l["name"], "expected": l["pieces"], "booked": None})
     diffs = [d for d in diffs if not d.get("paired")]
+    # липсата е точно безплатните бройки -> не е грешка на OCR, а промо подмяна (капачки)
+    for d in diffs:
+        if d["kind"] in ("missing", "qty") and d.get("mc") in free:
+            short = d["expected"] - (d["booked"] or 0)
+            if abs(short - free[d["mc"]]) < 0.01:
+                d["kind"], d["free"] = "free", free[d["mc"]]
     compare.learned = learned
     return diffs
 
@@ -354,7 +363,7 @@ def check_pending(db: Session, max_age_days: int = 14) -> dict:
                                ON CONFLICT (code) DO UPDATE SET n = ndk_code_map.n + (CASE WHEN ndk_code_map.mc = :m THEN 1 ELSE 0 END)"""),
                        {"c": code, "m": mc})
             cm[code] = mc
-        real = [d for d in diffs if d["kind"] != "unmapped"]
+        real = [d for d in diffs if d["kind"] not in ("unmapped", "free")]
         st = "differs" if real else "ok"
         # OCR още въвежда (последно движение преди < 3 ч): не е грешка, проверява се пак по-късно
         if st == "differs" and at is not None and datetime.now() - at < timedelta(hours=3):
@@ -392,7 +401,8 @@ def listing(db: Session, days: int = 7, store_id: int | None = None, only_diff: 
         out.append({"num": r[0], "date": r[1].strftime("%d.%m") if r[1] else None, "delivery": r[2].strftime("%d.%m") if r[2] else None,
                     "store_name": r[3], "store_id": r[4], "store": r[5], "lines": r[6], "total": float(r[7] or 0), "status": r[8],
                     "booked_at": r[9].astimezone(TZ).strftime("%d.%m %H:%M") if r[9] else None,
-                    "diffs": [d for d in diffs if d["kind"] != "unmapped"], "unmapped": sum(1 for d in diffs if d["kind"] == "unmapped"),
+                    "diffs": [d for d in diffs if d["kind"] not in ("unmapped", "free")],
+                    "free": [d for d in diffs if d["kind"] == "free"], "unmapped": sum(1 for d in diffs if d["kind"] == "unmapped"),
                     "fixed_by": r[11], "fixed_at": r[12].astimezone(TZ).strftime("%d.%m %H:%M") if r[12] else None, "note": r[13]})
     return out
 
