@@ -2041,7 +2041,7 @@ def ui_ndkinv(days: int = 7, store_id: int | None = None, only_diff: bool = Fals
 def ui_ndkinv_one(num: str, db: Session = Depends(get_db)):
     from . import ndkinv
     ndkinv.ensure(db)
-    r = db.execute(text("SELECT num, inv_date, delivery_date, store_name, store_id, lines, booked, diffs, status, booked_at FROM ndk_invoices WHERE num = :n"), {"n": num.lstrip("0")}).first()
+    r = db.execute(text("SELECT num, inv_date, delivery_date, store_name, store_id, lines, booked, diffs, status, booked_at, mail_uid FROM ndk_invoices WHERE num = :n"), {"n": num.lstrip("0")}).first()
     if not r:
         raise HTTPException(404, "няма такава фактура")
     cm, names = ndkinv.code_map(db)
@@ -2050,7 +2050,7 @@ def ui_ndkinv_one(num: str, db: Session = Depends(get_db)):
         mc = cm.get(l["code"])
         lines.append({**l, "mc": mc, "mistral_name": names.get(mc) if mc else None})
     return {"num": r[0], "date": str(r[1]), "delivery": str(r[2]), "store_name": r[3], "store_id": r[4], "lines": lines,
-            "booked": r[6], "diffs": r[7], "status": r[8], "booked_at": str(r[9]) if r[9] else None}
+            "booked": r[6], "diffs": r[7], "status": r[8], "booked_at": str(r[9]) if r[9] else None, "mail_uid": r[10]}
 
 
 class NdkFixIn(BaseModel):
