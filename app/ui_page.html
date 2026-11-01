@@ -3307,14 +3307,15 @@ function renderMargin() {
   $("mgBody").innerHTML = rows.map(r => {
     const low = r.margin_pct < avg - 3, ch = r.rev_change_pct;
     return `<tr><td>${esc(r.store)}</td><td>${esc(r.region)}</td><td class="num">${e0(r.rev)}</td>
-      <td class="num">${ch == null ? "—" : `<span style="color:${ch < -5 ? "#B91C1C" : ch > 5 ? "#15803D" : "inherit"}">${ch > 0 ? "+" : ""}${ch}%</span>`}</td>
+      <td class="num">${ch == null || (MG.stale || []).some(x => x.startsWith(r.region)) ? "—" : `<span style="color:${ch < -5 ? "#B91C1C" : ch > 5 ? "#15803D" : "inherit"}">${ch > 0 ? "+" : ""}${ch}%</span>`}</td>
       <td class="num">${e0(r.cogs)}</td><td class="num">${e0(r.margin)}</td>
       <td class="num" style="${low ? "color:#B91C1C;font-weight:700" : ""}">${r.margin_pct.toFixed(1)}%</td>
       <td class="num">${r.margin_pct_prev == null ? "—" : r.margin_pct_prev.toFixed(1) + "%"}</td>
       <td class="num">${e0(r.deliv)}</td><td class="num" style="${r.revdiff < -3000 ? "color:#B91C1C;font-weight:700" : ""}">${e0(r.revdiff)}</td>
       <td class="num"><b>${e0(r.profit)}</b></td><td class="num">${e0(r.profit_net)}</td></tr>`;
   }).join("") + `<tr style="font-weight:800;background:#F1F5F9"><td>ОБЩО</td><td></td><td class="num">${e0(T.rev)}</td><td></td><td class="num">${e0(T.cogs)}</td><td class="num">${e0(T.margin)}</td><td class="num">${pct.toFixed(1)}%</td><td></td><td class="num">${e0(T.deliv)}</td><td class="num">${e0(T.revdiff)}</td><td class="num">${e0(T.profit)}</td><td class="num">${e0(T.profit_net)}</td></tr>`;
-  $("mgMsg").textContent = MG.errors && MG.errors.length ? "⚠️ " + MG.errors.map(x => x.region + ": " + x.error).join("; ") : "";
+  $("mgMsg").textContent = [...(MG.stale || []), ...(MG.errors || []).map(x => x.region + ": " + x.error)].map(x => "⚠️ " + x).join(" · ");
+  $("mgMsg").className = "msg err";
 }
 
 /* ---------- От склада ---------- */

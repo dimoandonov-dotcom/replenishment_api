@@ -46,17 +46,24 @@ def _region(region: str, a: date, b: date) -> list[dict]:
         cur = conn.cursor()
         cur.execute(SQL, (a.strftime("%Y-%m-%d"), b.strftime("%Y-%m-%d")))
         rows = cur.fetchall()
+        cur.execute("SELECT MAX(OPERATIONDATE) AS d FROM MATERIALQTYLOG WITH (NOLOCK) WHERE OPERATIONTYPE = 1")
+        last = cur.fetchone()["d"]
     out = []
     for r in rows:
         rev, cogs = float(r["rev"] or 0), float(r["cogs"] or 0)
-        if rev <= 0:
+        if rev < 10:
             continue
         dl, rv = float(r["deliv"] or 0), float(r["revdiff"] or 0)
         out.append({"region": "София" if region == "sofia" else "Варна", "loc": int(r["loc"]), "store": (r["name"] or "").strip(),
                     "rev": round(rev, 2), "cogs": round(cogs, 2), "margin": round(rev - cogs, 2),
                     "margin_pct": round((rev - cogs) / rev * 100, 1), "deliv": round(dl, 2), "revdiff": round(rv, 2),
-                    "profit": round(rev - cogs + rv, 2), "profit_net": round((rev - cogs + rv) / VAT, 2)})
+                    "profit": round(rev - cogs + rv, 2), "profit_net": round((rev - cogs + rv) / VAT, 2),
+                    "data_until": last.strftime("%d.%m.%Y %H:%M") if last else None})
+    _last[region] = last
     return out
+
+
+_last: dict = {}
 
 
 def report(month: str | None = None, d_from: str | None = None, d_to: str | None = None, fresh: bool = False) -> dict:
@@ -74,7 +81,12 @@ def report(month: str | None = None, d_from: str | None = None, d_to: str | None
     tot = {k: round(sum(r[k] for r in good), 2) for k in ("rev", "cogs", "margin", "deliv", "revdiff", "profit", "profit_net")}
     tot["margin_pct"] = round(tot["margin"] / tot["rev"] * 100, 1) if tot["rev"] else 0
     # предходен период със същата дължина - за сравнение
-    out = {"period": label, "from": str(a), "to": str(b - timedelta(days=1)), "days": (b - a).days,
+    stale = []
+    for reg, name in (("varna", "Варна"), ("sofia", "София")):
+        l = _last.get(reg)
+        if l is not None and l.date() < min(b - timedelta(days=1), date.today()) - timedelta(days=1):
+            stale.append(f"{name}: данните в копието на Мистрал свършват на {l:%d.%m.%Y %H:%M} - периодът е непълен")
+    out = {"period": label, "stale": stale, "from": str(a), "to": str(b - timedelta(days=1)), "days": (b - a).days,
            "rows": sorted(good, key=lambda r: -r["rev"]), "total": tot,
            "errors": [r for r in rows if "error" in r]}
     _cache[key] = (time.time(), out)
