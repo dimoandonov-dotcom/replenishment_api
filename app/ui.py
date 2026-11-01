@@ -2087,14 +2087,28 @@ def ui_ownstock_snapshot(all_stores: bool = False):
 
 
 @router.get("/ui/margin")
-def ui_margin(month: str | None = None, d_from: str | None = None, d_to: str | None = None, fresh: bool = False):
+def ui_margin(month: str | None = None, d_from: str | None = None, d_to: str | None = None, fresh: bool = False,
+              db: Session = Depends(get_db)):
     """Марж и печалба преди разходи по магазини (Варна + София), със сравнение с предходния месец."""
     from . import margin
     try:
         if d_from and d_to:
-            return margin.report(None, d_from, d_to, fresh)
+            return margin.report(None, d_from, d_to, fresh, db=db)
         if fresh:
             margin._cache.clear()
-        return margin.compare(month)
+        return margin.compare(month, db=db)
     except Exception as e:
         raise HTTPException(502, f"{type(e).__name__}: {e}")
+
+
+class MarginOkIn(BaseModel):
+    mc: int
+    ok: bool = True
+
+
+@router.post("/ui/margin/ok")
+def ui_margin_ok(payload: MarginOkIn, request: Request, db: Session = Depends(get_db)):
+    """„Цената е вярна“ - артикулът не се брои за съмнителен (напр. торбички с голям марж)."""
+    from . import margin
+    margin.set_ok(db, payload.mc, payload.ok, getattr(request.state, "user", None))
+    return {"ok": True}
