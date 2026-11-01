@@ -2084,3 +2084,17 @@ def ui_ownstock_snapshot(all_stores: bool = False):
             ownstock._last_bg = ownstock.snapshot(db, all_stores)
     threading.Thread(target=_run, daemon=True).start()
     return {"started": True, "all_stores": all_stores}
+
+
+@router.get("/ui/margin")
+def ui_margin(month: str | None = None, d_from: str | None = None, d_to: str | None = None, fresh: bool = False):
+    """Марж и печалба преди разходи по магазини (Варна + София), със сравнение с предходния месец."""
+    from . import margin
+    try:
+        if d_from and d_to:
+            return margin.report(None, d_from, d_to, fresh)
+        if fresh:
+            margin._cache.clear()
+        return margin.compare(month)
+    except Exception as e:
+        raise HTTPException(502, f"{type(e).__name__}: {e}")

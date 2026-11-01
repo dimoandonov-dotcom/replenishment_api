@@ -200,7 +200,7 @@ nav a[data-tab="anom"] .mnBadge{display:inline-block;margin-left:6px;background:
 .bdChip { background:var(--raised); border:1px solid var(--line); border-radius:14px; padding:3px 10px; font-size:13px; white-space:nowrap; }
 .bdEmpty { margin-top:8px; padding:8px 10px; border-radius:10px; background:#FEF3C7; border:1px solid #F59E0B; font-size:14px; } .bdEmpty small { color:var(--slate); }
 .bdWhy { margin:0; padding-left:20px; font-size:15px; line-height:1.5; } .bdWhy li { margin-bottom:6px; }
-nav a[data-tab="sklad"]{--c:#0369A1} nav a[data-tab="ndkinv"]{--c:#B91C1C}
+nav a[data-tab="sklad"]{--c:#0369A1} nav a[data-tab="margin"]{--c:#15803D} nav a[data-tab="ndkinv"]{--c:#B91C1C}
 nav a[data-tab="sklad"] .skNew{display:inline-block;margin-left:6px;background:#16A34A;color:#fff;border-radius:999px;padding:0 7px;font-size:11px;font-weight:800;animation:mnShake 2.4s ease-in-out infinite}
 .skGrid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px}
 @media(max-width:820px){.skGrid{grid-template-columns:1fr}}
@@ -436,6 +436,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <a href="#anom" data-tab="anom">Аномалии</a>
   <a href="#ndkinv" data-tab="ndkinv">📄 НДК фактури</a>
   <a href="#bandits" data-tab="bandits">🥪 Бандитс</a>
+  <a href="#margin" data-tab="margin">💰 Марж</a>
   <a href="#nord" data-tab="nord">Не се поръчват</a>
   <a href="#cmp" data-tab="cmp">Сравнение</a>
   <a href="#learn" data-tab="learn">Обучение</a>
@@ -846,6 +847,23 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <div id="niBody" class="niGrid"><div class="empty">Зареждам…</div></div>
 </section>
 
+<!-- ============ МАРЖ ============ -->
+<section class="tab" id="tab-margin">
+  <p class="note" style="margin:0 0 12px;line-height:1.6">Оборот, себестойност на продаденото, марж, доставки, ревизии и <b>печалба преди разходи</b> по магазини — от движенията в Мистрал. Суми в евро <b>с ДДС</b>; „без ДДС“ = /1.2.</p>
+  <div class="bar">
+    <input type="month" id="mgMonth">
+    <span class="note">или период:</span><input type="date" id="mgFrom"><input type="date" id="mgTo">
+    <button id="mgGo">Покажи</button>
+    <select id="mgReg"><option value="">Всички</option><option>Варна</option><option>София</option></select>
+    <span class="msg" id="mgMsg"></span>
+  </div>
+  <div class="board" id="mgKpis"></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Магазин</th><th>Регион</th><th class="num">Оборот</th><th class="num">Оборот/ден спрямо пред. месец</th><th class="num">Себестойност</th><th class="num">Марж</th><th class="num">Марж %</th><th class="num">Пред. месец %</th><th class="num">Доставки</th><th class="num">Ревизии</th><th class="num">Печалба преди разходи</th><th class="num">без ДДС</th></tr></thead>
+    <tbody id="mgBody"><tr><td colspan="12" class="empty">Избери месец.</td></tr></tbody>
+  </table></div>
+</section>
+
 <!-- ============ СРАВНЕНИЕ ============ -->
 <section class="tab" id="tab-cmp">
   <div class="bar">
@@ -1052,7 +1070,7 @@ function show(tab) {
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
   { const hb = document.getElementById("skHelpBtn"); if (hb) { hb.style.display = tab === "sklad" ? "" : "none"; if (tab !== "sklad") document.getElementById("skHelp")?.classList.remove("on"); } }
   if (tab === "sklad") { if (loaded.sklad) loadSklad(); api("/ui/sklad/seen", { method: "POST" }).then(() => skBadge(0)).catch(() => {}); }
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: () => loadMinusi(), bandits: initBandits, promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, cmp: initCmp, sklad: initSklad, ndkinv: initNdkInv, learn: initLearn, run: initRun})[tab]?.(); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: () => loadMinusi(), bandits: initBandits, promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, cmp: initCmp, sklad: initSklad, margin: initMargin, ndkinv: initNdkInv, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -3259,6 +3277,46 @@ function renderNdkInv() {
   });
 }
 
+
+/* ---------- Марж ---------- */
+let MG = null;
+function initMargin() {
+  const t = new Date(); $("mgMonth").value = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
+  if (t.getDate() <= 3) { const p = new Date(t.getFullYear(), t.getMonth() - 1, 1); $("mgMonth").value = `${p.getFullYear()}-${String(p.getMonth() + 1).padStart(2, "0")}`; }
+  $("mgGo").onclick = () => loadMargin(); $("mgMonth").onchange = () => { $("mgFrom").value = $("mgTo").value = ""; loadMargin(); };
+  $("mgReg").onchange = renderMargin;
+  loadMargin();
+}
+async function loadMargin() {
+  const f = $("mgFrom").value, t = $("mgTo").value;
+  $("mgBody").innerHTML = `<tr><td colspan="12" class="empty">Смятам от Мистрал… (до минута)</td></tr>`;
+  try { MG = await api(f && t ? `/ui/margin?d_from=${f}&d_to=${t}` : `/ui/margin?month=${$("mgMonth").value}`); }
+  catch (e) { $("mgBody").innerHTML = `<tr><td colspan="12" class="msg err">${esc(e.message)}</td></tr>`; return; }
+  renderMargin();
+}
+function renderMargin() {
+  if (!MG) return;
+  const reg = $("mgReg").value, rows = MG.rows.filter(r => !reg || r.region === reg);
+  const T = rows.reduce((a, r) => { ["rev", "cogs", "margin", "deliv", "revdiff", "profit", "profit_net"].forEach(k => a[k] = (a[k] || 0) + r[k]); return a; }, {});
+  const pct = T.rev ? T.margin / T.rev * 100 : 0, e0 = v => fmtE(Math.round(v || 0));
+  $("mgKpis").innerHTML = [["Период", MG.period + (MG.prev_period ? ` <span class="note">(срещу ${esc(MG.prev_period)})</span>` : "")], ["Оборот", e0(T.rev) + " €"],
+    ["Марж", e0(T.margin) + ` € · ${pct.toFixed(1)}%`], ["Ревизии", e0(T.revdiff) + " €"],
+    ["Печалба преди разходи", e0(T.profit) + " € <span class=\"note\">с ДДС</span><br>" + e0(T.profit_net) + " € <span class=\"note\">без ДДС</span>"], ["Доставки", e0(T.deliv) + " €"]]
+    .map(([k, v]) => `<div class="tile"><div class="l">${k}</div><div class="v" style="font-size:20px">${v}</div></div>`).join("");
+  const avg = pct;
+  $("mgBody").innerHTML = rows.map(r => {
+    const low = r.margin_pct < avg - 3, ch = r.rev_change_pct;
+    return `<tr><td>${esc(r.store)}</td><td>${esc(r.region)}</td><td class="num">${e0(r.rev)}</td>
+      <td class="num">${ch == null ? "—" : `<span style="color:${ch < -5 ? "#B91C1C" : ch > 5 ? "#15803D" : "inherit"}">${ch > 0 ? "+" : ""}${ch}%</span>`}</td>
+      <td class="num">${e0(r.cogs)}</td><td class="num">${e0(r.margin)}</td>
+      <td class="num" style="${low ? "color:#B91C1C;font-weight:700" : ""}">${r.margin_pct.toFixed(1)}%</td>
+      <td class="num">${r.margin_pct_prev == null ? "—" : r.margin_pct_prev.toFixed(1) + "%"}</td>
+      <td class="num">${e0(r.deliv)}</td><td class="num" style="${r.revdiff < -3000 ? "color:#B91C1C;font-weight:700" : ""}">${e0(r.revdiff)}</td>
+      <td class="num"><b>${e0(r.profit)}</b></td><td class="num">${e0(r.profit_net)}</td></tr>`;
+  }).join("") + `<tr style="font-weight:800;background:#F1F5F9"><td>ОБЩО</td><td></td><td class="num">${e0(T.rev)}</td><td></td><td class="num">${e0(T.cogs)}</td><td class="num">${e0(T.margin)}</td><td class="num">${pct.toFixed(1)}%</td><td></td><td class="num">${e0(T.deliv)}</td><td class="num">${e0(T.revdiff)}</td><td class="num">${e0(T.profit)}</td><td class="num">${e0(T.profit_net)}</td></tr>`;
+  $("mgMsg").textContent = MG.errors && MG.errors.length ? "⚠️ " + MG.errors.map(x => x.region + ": " + x.error).join("; ") : "";
+}
+
 /* ---------- От склада ---------- */
 const JH = { "Content-Type": "application/json" };
 let SK = null, SKP = null;
@@ -3353,7 +3411,7 @@ fetch("/ui/summary").then(r => {
       ["kpis", "freshInfo"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
       if (!["#anom", "#ndkinv"].includes(location.hash)) location.hash = "#anom";
     }
-    if (!m.owner) { ["bandits"].forEach(k => { const a = document.querySelector(`nav a[data-tab="${k}"]`); if (a) a.remove(); const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (location.hash === "#bandits") location.hash = "#board"; }
+    if (!m.owner) { ["bandits", "margin"].forEach(k => { const a = document.querySelector(`nav a[data-tab="${k}"]`); if (a) a.remove(); const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (["#bandits", "#margin"].includes(location.hash)) location.hash = "#board"; }
     if (!m.analytics) { ["anal", "promo", "turn", "delist"].forEach(k => { const a = document.querySelector(`nav a[data-tab="${k}"]`); if (a) a.remove();
       const t = document.getElementById("tab-" + k); if (t) t.remove(); }); if (["#anal", "#promo", "#turn", "#delist"].includes(location.hash)) location.hash = "#board"; } }).catch(() => {});
   show((location.hash || "#board").slice(1));

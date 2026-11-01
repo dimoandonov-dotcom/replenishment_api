@@ -174,7 +174,7 @@ async def _require_auth(request: Request, call_next):
         if not ok:
             return JSONResponse(status_code=403, content={"detail": "Профилът е само за „Аномалии“"})
     # Бандитс - само главният потребител (Димо) или API ключ
-    if p.startswith("/ui/bandits"):
+    if p.startswith("/ui/bandits") or p.startswith("/ui/margin"):
         is_owner = user0 is not None and bool(APP_USER) and user0.lower() == APP_USER.lower()
         main_key = user0 is None and bool(_API_KEY) and _hmac.compare_digest(request.headers.get("X-API-Key", ""), _API_KEY)
         if not (is_owner or main_key):           # никой друг: нито Асен, нито ключът само за четене
