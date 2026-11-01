@@ -1,6 +1,7 @@
 """
 Марж и печалба преди разходи по магазини (Варна + София), от движенията в Мистрал.
-  оборот        = продадени бройки × продажна цена (с ДДС)
+  оборот        = по касовите бележки (с ДДС) - движенията изписват кафе автоматите като съставки
+                  (кафе/мляко на кг, чаши), затова там оборотът е с ~0.4% по-малък
   себестойност  = продадени бройки × средна доставна цена (с ДДС)
   доставки      = доставки + сторна по доставна цена (с ДДС)
   ревизии       = ± при ревизия по средна доставна цена
@@ -40,6 +41,10 @@ SQL_SUS = """SELECT q.LOCATIONID AS loc, SUM(-q.QTY * q.PRICE) AS rev, SUM(-q.QT
 FROM MATERIALQTYLOG q WITH (NOLOCK)
 WHERE q.OPERATIONTYPE = 1 AND q.OPERATIONDATE >= %s AND q.OPERATIONDATE < %s AND q.MATERIALCODE IN ({codes})
 GROUP BY q.LOCATIONID"""
+# оборот по касови бележки (истинският): движенията изписват кафе автоматите като съставки, не като напитки
+SQL_RCPT = """SELECT sc.LOCATIONID AS loc, SUM(sc.QTY * sc.SALEPRICE) AS rev
+FROM SALECONTENT sc WITH (NOLOCK) JOIN SALE s WITH (NOLOCK) ON s.LOCATIONID = sc.LOCATIONID AND s.NUM = sc.NUM
+WHERE s.SALEDATE >= %s AND s.SALEDATE < %s GROUP BY sc.LOCATIONID"""
 LOW, HIGH, MIN_REV = 0.35, 1.5, 50.0     # себестойност под 35% или над 150% от продажната = съмнителна цена
 GENERIC = {6884}                          # „СТОКА БР“ - общ артикул на OCR
 
@@ -90,6 +95,11 @@ def _region(region: str, a: date, b: date, okset: set[int]) -> tuple[list[dict],
         rows = cur.fetchall()
         cur.execute("SELECT MAX(OPERATIONDATE) AS d FROM MATERIALQTYLOG WITH (NOLOCK) WHERE OPERATIONTYPE = 1")
         last = cur.fetchone()["d"]
+        try:
+            cur.execute(SQL_RCPT, p)
+            rcpt = {int(r["loc"]): float(r["rev"] or 0) for r in cur.fetchall()}
+        except Exception:
+            rcpt = {}
         cur.execute(SQL_ART, p)
         arts = cur.fetchall()
         sus = []
@@ -109,7 +119,8 @@ def _region(region: str, a: date, b: date, okset: set[int]) -> tuple[list[dict],
             per_loc = {int(r["loc"]): (float(r["rev"] or 0), float(r["cost"] or 0)) for r in cur.fetchall()}
     out = []
     for r in rows:
-        rev, cogs = float(r["rev"] or 0), float(r["cogs"] or 0)
+        rev_log, cogs = float(r["rev"] or 0), float(r["cogs"] or 0)
+        rev = rcpt.get(int(r["loc"]), rev_log) or rev_log
         if rev < 10:
             continue
         dl, rv, br = float(r["deliv"] or 0), float(r["revdiff"] or 0), float(r["brak"] or 0)
@@ -118,7 +129,7 @@ def _region(region: str, a: date, b: date, okset: set[int]) -> tuple[list[dict],
         out.append({"region": rn, "loc": int(r["loc"]), "store": (r["name"] or "").strip(),
                     "rev": round(rev, 2), "cogs": round(cogs, 2), "margin": round(rev - cogs, 2),
                     "margin_pct": round((rev - cogs) / rev * 100, 1), "deliv": round(dl, 2), "revdiff": round(rv, 2),
-                    "brak": round(br, 2),
+                    "brak": round(br, 2), "rev_movements": round(rev_log, 2),
                     "profit": round(rev - cogs + rv + br, 2), "profit_net": round((rev - cogs + rv + br) / VAT, 2),
                     # без артикулите със съмнителни доставни цени
                     "sus_rev": round(sr, 2), "rev_clean": round(cr, 2), "cogs_clean": round(cc, 2),
