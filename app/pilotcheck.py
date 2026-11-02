@@ -149,7 +149,12 @@ def check(db: Session) -> dict:
         # 5) фантомна наличност (наша сметка): Мистрал показва стока, а продажбите мълчат -> поръчано като 0; да се преброи
         try:
             from . import ownstock
-            ph = [x for x in ownstock.compute(db, sid)["items"].values() if x["phantom"]]
+            items = ownstock.compute(db, sid)["items"].values()
+            stuck = [x for x in items if x.get("stuck")]
+            if stuck:
+                st["warn"].append(f"{len(stuck)} доставени, но не се продават (провери рафта/касата): "
+                                  + "; ".join(f"{x['name']} (Мистрал {x['mistral']:g}, посл. продажба {x['last_sale']}, доставка {x['last_delivery']})" for x in stuck[:6]))
+            ph = [x for x in items if x["phantom"]]
             if ph:
                 st["warn"].append(f"{len(ph)} фантомна наличност (да се преброят, заявени като 0): "
                                   + "; ".join(f"{x['name']} (Мистрал {x['mistral']:g}, посл. продажба {x['last_sale']})" for x in ph[:6]))

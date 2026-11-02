@@ -141,7 +141,16 @@ def compute(db: Session, store_id: int, fresh: bool = False) -> dict:
         # скорошно броене (до 7 дни, с намерено > 0) бие тишината
         stock_now = it["own"] if it["own"] is not None else it["mistral"]
         days = sorted(sdays.get(code, []))
-        if per_day >= PHANTOM_MIN_PER_DAY and silence is not None and stock_now > 0 and len(days) >= 4 and code not in counted7:
+        # доставено СЛЕД последната продажба и пак не се продава -> не е празен рафт (стоката е дошла);
+        # не поръчваме още, а сигнализираме: рафт/витрина/каса (Надежда, Хайнекен кен: 02.11)
+        delivered_after = code in lastd and last_sale is not None and lastd[code] > last_sale
+        if delivered_after and per_day >= PHANTOM_MIN_PER_DAY and silence is not None and silence >= 5:
+            it["flag"] = "📦"
+            it["why"] = (f"доставено на {lastd[code]:%d.%m} след последната продажба ({last_sale:%d.%m}), "
+                         f"а от {silence:.0f} дни не се продава - провери рафта/хладилника и касата")
+            it["stuck"] = True
+        if (not delivered_after and per_day >= PHANTOM_MIN_PER_DAY and silence is not None and stock_now > 0
+                and len(days) >= 4 and code not in counted7):
             gaps = [(b - a).days for a, b in zip(days, days[1:])]
             typical = max(gaps) if gaps else 1
             need = max(5.0, 2.0 * typical)
