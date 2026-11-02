@@ -210,6 +210,16 @@ def _loop():
                     _state["ownstock_snap"] = r_
         except Exception as e:
             _state["ownstock_snap"] = f"{type(e).__name__}: {e}"[:300]
+        try:   # главната база изостава ли за някой магазин (на 30 мин)
+            _ml = _state.get("mainchk_last")
+            if _ml is None or datetime.now(timezone.utc) - _ml >= timedelta(minutes=30):
+                _state["mainchk_last"] = datetime.now(timezone.utc)
+                from .db import SessionLocal as _SL3
+                from . import mainchk as _mc
+                with _SL3() as _db3:
+                    _state["mainchk_result"] = (_mc.alert_if_lagging(_db3) or "ok")[:300]
+        except Exception as e:
+            _state["mainchk_result"] = f"{type(e).__name__}: {e}"[:300]
         now = datetime.now(SOFIA)
         if HOURS[0] <= now.hour < HOURS[1]:
             last = _state["last_run"]

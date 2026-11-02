@@ -51,6 +51,10 @@ def _ndk_goods(db: Session, sids: list[int], since) -> dict:
     return out
 
 
+# втората вълна: Ани продължава да поръчва (решение на Димо 02.11) - нашата е за сравнение
+ANI_KEEPS = {1, 14, 26, 27}
+
+
 def check(db: Session) -> dict:
     from . import pilot, service
     now = datetime.now(TZ)
@@ -99,7 +103,9 @@ def check(db: Session) -> dict:
                                  {"s": sid, "a": y0, "b": start}).all()
                 ani = {r[0] for r in ani}
                 am = len(ani & set(got))
-                if ani and am > match:
+                if ani and am > match and sid in ANI_KEEPS:
+                    st["info"].append(f"заявката е на Ани ({am} от {len(got)} реда са нейните) - нашата е само за сравнение")
+                elif ani and am > match:
                     st["stop"].append(f"вчера е дошла заявката на АНИ ({am} от {len(got)} реда съвпадат с нейната, с нашата само {match})"
                                       " - към НДК не е отишла нашата")
                 else:
@@ -162,13 +168,23 @@ def check(db: Session) -> dict:
             db.rollback()
     ok = [s for s in out if not s["stop"] and not s["warn"]]
     return {"at": now.strftime("%d.%m %H:%M"), "stores": out, "ok": len(ok), "stop": sum(1 for s in out if s["stop"]),
-            "warn": sum(1 for s in out if s["warn"] and not s["stop"]), "goods_error": gerr, "text": _text(out, now) + _inv_text(db)}
+            "warn": sum(1 for s in out if s["warn"] and not s["stop"]), "goods_error": gerr, "text": _text(out, now) + _inv_text(db) + _main_text(db)}
 
 
 def _inv_text(db: Session) -> str:
     try:
         from . import ndkinv
         t = ndkinv.text_report(db, 2)
+        return ("\n\n" + t) if t else ""
+    except Exception:
+        db.rollback()
+        return ""
+
+
+def _main_text(db: Session) -> str:
+    try:
+        from . import mainchk
+        t = mainchk.text_report(db)
         return ("\n\n" + t) if t else ""
     except Exception:
         db.rollback()

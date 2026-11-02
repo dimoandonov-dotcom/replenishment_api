@@ -723,6 +723,13 @@ def ui_pilot_check(db: Session = Depends(get_db)):
     return pilotcheck.check(db)
 
 
+@router.get("/ui/mainchk")
+def ui_mainchk(db: Session = Depends(get_db)):
+    """Главна база: изоставане по магазини и Мистрал срещу ревизия + движения."""
+    from . import mainchk
+    return {"lag": mainchk.lag(db), "diffs": mainchk.diffs(db), "text": mainchk.text_report(db)}
+
+
 @router.get("/ui/orders/{store_id}/delivery-status")
 def ui_delivery_status(store_id: int, db: Session = Depends(get_db)):
     """Дошла ли е вчерашната доставка от НДК (за Ани в „Заявки по магазин“)."""
