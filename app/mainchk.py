@@ -15,8 +15,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 TZ = ZoneInfo("Europe/Sofia")
-LAG_MIN = 60          # поне час тишина (след изоставането на нашето копие)
-LAG_EXPECTED = 10     # и поне 10 очаквани продажби за това време
+LAG_MIN = 90          # поне час и половина тишина (след изоставането на нашето копие)
+LAG_EXPECTED = 30     # и поне 30 очаквани реда в касата за това време
 DIFF_MIN = 6          # разлика в бройки за списъка „главна ≠ цел“
 AMB = {17729, 17730, 6884}   # амбалаж и „стока бр“ - не са за заявки
 
@@ -60,7 +60,8 @@ def diffs(db: Session, day=None) -> dict:
         FROM ownstock_snap o JOIN stores s ON s.id = o.store_id
         LEFT JOIN articles a ON a.sku = CAST(o.mc AS text)
         WHERE o.day = :d AND o.own IS NOT NULL AND o.mistral IS NOT NULL
-          AND ABS(o.mistral - o.own) >= :m"""), {"d": day, "m": DIFF_MIN}).all()
+          AND ABS(o.mistral - o.own) >= :m
+          AND CAST(o.mc AS text) NOT IN (SELECT sku FROM sklad_source WHERE source = 'sklad')"""), {"d": day, "m": DIFF_MIN}).all()
     items = [{"store": r.store, "mc": r.mc, "name": r.art or str(r.mc), "mistral": float(r.mistral),
               "target": float(r.own), "diff": float(r.mistral) - float(r.own), "flag": r.flag or ""}
              for r in rows if r.mc not in AMB]
@@ -102,7 +103,7 @@ def alert_if_lagging(db: Session) -> str | None:
         return None
     from . import telegram
     msg = "🛰 Главната база не получава продажби от:\n" + "\n".join(
-        f"• {s['store']}: последна {s['last_sale']}, тишина {s['silence_min']} мин (очаквани ~{int(s['expected'])})"
+        f"• {s['store']}: последна {s['last_sale']}, тишина {s['silence_min']} мин (обикновено ~{int(s['expected'])} реда в касата)"
         for s in new) + "\nЗаявката за тях се смята със стари данни - провери връзката/касата на обекта."
     if telegram.send_to(db, "dimo", msg):
         for s in new:
