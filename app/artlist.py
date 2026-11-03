@@ -117,7 +117,7 @@ def verdict(stock: float | None, in_order: float, series: list[float], h: float,
 # разчитане на текста от Viber
 # ---------------------------------------------------------------------------
 
-UNIT = r"(?:к\.?|k\.?|каса|каси|кашона?|стека?|стек\.|бр\.?|броя)"
+UNIT = r"(?:к\.?|k\.?|каса|каси|кашона?|стека?|стек\.|ст\.?|бр\.?|броя)"
 QTY_RE = re.compile(r"([-–:]\s*|\s|^)(?:по\s*)?(\d+)\s*(" + UNIT + r")?\s*(\(\s*-?\d+\s*\)?)?\s*$", re.I)
 
 
@@ -203,7 +203,7 @@ def parse(db: Session, store_id: int, text: str) -> list[dict]:
             continue
         # код
         code = None
-        mc = re.match(r"^(\d{3,6})\b", name)
+        mc = re.match(r"^(\d{3,6})\b", name) or re.match(r"^[^\d]*?\s(\d{4,6})$", name)   # „добавям 1645“
         if mc and int(mc.group(1)) not in SIZE_WORDS:
             code = mc.group(1)
         words = [w for w in re.split(r"[\s\-–/]+", name) if w]
@@ -255,7 +255,7 @@ def parse(db: Session, store_id: int, text: str) -> list[dict]:
         pieces = None
         if qty is not None:
             pk = max(int(art.pack_size or 1), 1) if art else 1
-            pieces = qty * pk if unit and (unit[0] in "кk" or unit.startswith("стек")) else qty
+            pieces = qty * pk if unit and (unit[0] in "кk" or unit.startswith("ст")) else qty
         row = {"text": chunk, "sku": art.sku if art else None, "name": (art.name or art.supplier_name) if art else None,
                "add": pieces, "alt": alt, "art_id": art.id if art else None, "pack": max(int(art.pack_size or 1), 1) if art else 1,
                "_near": [art] + near if art and near else [], "_qty": qty, "_unit": unit}
@@ -296,7 +296,7 @@ def check_list(db: Session, store_id: int, text: str) -> dict:
                 r["alt"] = [r["name"]] + [x for x in r["alt"] if x != (best.name or best.supplier_name)]
                 pk = max(int(best.pack_size or 1), 1)
                 r.update(sku=best.sku, name=best.name or best.supplier_name, art_id=best.id, pack=pk)
-                if r.get("_qty") is not None and r.get("_unit") and (r["_unit"][0] in "кk" or r["_unit"].startswith("стек")):
+                if r.get("_qty") is not None and r.get("_unit") and (r["_unit"][0] in "кk" or r["_unit"].startswith("ст")):
                     r["add"] = r["_qty"] * pk
         r.pop("_qty", None); r.pop("_unit", None)
     for r in rows:
