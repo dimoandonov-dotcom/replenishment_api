@@ -218,10 +218,11 @@ def parse(db: Session, store_id: int, text: str) -> list[dict]:
             ctx, ctx_size = [], None
         else:
             size, rest = _q_size(words)
+            has_can = any(w.lower().strip(".") == "кен" for w in rest)
             letters = [w for w in rest if re.search(r"[а-яa-z]{2,}", w.lower()) and w.lower().strip(".") not in ("кен", "мл", "л")]
             pick = None
             if letters:
-                sz, sw = (size, 1.0) if size is not None else (ctx_size, 0.4)   # „б. лимон“ след „швепс 1,250 …“
+                sz, sw = (size, 1.0) if size is not None else ((None, 0) if has_can else (ctx_size, 0.4))   # „б. лимон“ след „швепс 1,250 …“
                 ranked = sorted(((_score(rest, sz, a, sw), a) for a in arts), key=lambda x: -x[0])
                 if ranked and ranked[0][0] > 0:
                     nm = (ranked[0][1].name or "").upper()
@@ -239,7 +240,12 @@ def parse(db: Session, store_id: int, text: str) -> list[dict]:
             if pick:
                 ranked, qw = pick
                 score, art = ranked[0]
-                near = [a for s_, a in ranked[1:4] if s_ > 0 and s_ >= score - 0.6]
+                # без размер („бургаско кен“) - ако има почти равни, после избира най-продаваният;
+                # само сред същата марка и само ако размерът не е наследен от предния ред
+                words_ = [w.strip(".").upper()[:5] for w in letters if len(w.strip(".")) >= 3]
+                near = ([a for s_, a in ranked[1:4] if s_ > 0 and s_ >= score - 0.6
+                         and all(w in (a.name or "").upper() for w in words_)]
+                        if size is None and (has_can or ctx_size is None or qw is not rest) else [])
                 alt = [a.name or a.supplier_name for s_, a in ranked[1:3] if s_ > 0 and s_ >= score - 1.0]
                 nm = (art.name or art.supplier_name or "").upper()
                 keep = [w for w in ctx if len(w.strip(".")) >= 3 and w.strip(".").upper()[:5] in nm]   # „кола“ + „зиро“
