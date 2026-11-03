@@ -97,5 +97,19 @@ def check(db: Session, store_id: int, q: str) -> dict:
                      "manual": bool(s and not s.auto_adjust), "stock": sq, "per_day": round(ad, 2), "pack": pk,
                      "planogram": a.id in plano, "in_order": ok, "qty": ln.ordered_quantity if ln is not None else 0,
                      "why": why})
+    # стига ли до доставката на следващата заявка - и при силен ден
+    try:
+        from . import artlist
+        h, deliv = artlist.horizon(db, store_id)
+        ser = artlist.daily_sales(db, store_id, [int(r["sku"]) for r in rows if r["sku"].isdigit()])
+        by_sku = {a.sku: a for a in arts}
+        for r in rows:
+            if not r["planogram"] or r["stock"] is None or not r["sku"].isdigit():
+                continue
+            v = artlist.verdict(r["stock"], float(r["qty"] or 0), ser.get(int(r["sku"]), [0.0] * 14), h, deliv,
+                                0.0, max(int(by_sku[r["sku"]].pack_size or 1), 1))
+            r["cover"], r["level"] = v["text"], v["level"]
+    except Exception:
+        db.rollback()
     rows.sort(key=lambda r: (not r["planogram"], r["name"]))
     return {"store": st.name if st else "", "rows": rows}

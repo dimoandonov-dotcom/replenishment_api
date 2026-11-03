@@ -472,6 +472,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <input id="oFind" type="search" placeholder="🔎 Търси в заявката (код или име)" style="min-width:200px;border:2px solid #2F7DD1">
     <span id="oFindMsg" class="note" style="font-size:13px"></span>
     <input id="acQ" placeholder="🔍 Провери артикул (код или име) — мин/макс и защо го няма" style="min-width:260px;flex:1">
+    <button id="alBtn" title="Постави списъка, който магазинът иска да добави (от Viber) - стига ли до следващата доставка">📋 Списък от магазина</button>
     <button id="osBtn" title="Наша наличност: ревизия + доставки − продажби, срещу Мистрал">🧮 Наличност</button>
     <span class="msg" id="ordMsg"></span>
   </div>
@@ -1170,6 +1171,7 @@ async function initOrders() {
     window.location.href = "viber://chats";
   };
   let acT; $("acQ").oninput = () => { clearTimeout(acT); acT = setTimeout(acCheck, 450); };
+  if ($("alBtn")) $("alBtn").onclick = alOpen;
   $("acQ").onkeydown = e => { if (e.key === "Enter") { clearTimeout(acT); acCheck(); } };
   $("prevStore").onclick = () => step(-1);
   $("nextStore").onclick = () => step(1);
@@ -2593,8 +2595,42 @@ async function acCheck() {
         <span>Мин <b>${r.min == null ? "—" : fmtN(r.min)}</b></span><span>Макс <b>${r.max == null ? "—" : fmtN(r.max)}</b></span>
         <span>Наличност <b class="${r.stock != null && r.min != null && r.stock < r.min ? "low" : ""}">${r.stock == null ? "—" : fmtN(r.stock)}</b></span>
         <span>Продава <b>${fmtN(r.per_day)}</b>/ден</span><span>Опаковка <b>${r.pack}</b> бр.</span></div>
-      <div style="font-size:13.5px;${r.in_order ? "color:#15803D;font-weight:600" : ""}">${esc(r.why)}</div></div>`).join("")
+      <div style="font-size:13.5px;${r.in_order ? "color:#15803D;font-weight:600" : ""}">${esc(r.why)}</div>
+      ${r.cover ? `<div style="font-size:13.5px;margin-top:4px">${esc(r.cover)}</div>` : ""}</div>`).join("")
       : `<div class="note" style="margin-top:6px">${esc(d.msg || "Няма намерени артикули")}</div>`}</div>`;
+}
+
+/* ---------- списък от магазина ---------- */
+function alOpen() {
+  const p = $("acPanel");
+  p.innerHTML = `<div class="tile" style="margin:10px 0;padding:14px">
+    <div style="display:flex;justify-content:space-between;gap:8px"><div class="l">📋 Какво иска да добави магазинът — ${esc($("storeSel").selectedOptions[0]?.text || "")}</div>
+      <button class="mini" onclick="$('acPanel').innerHTML=''">✕</button></div>
+    <div class="note" style="margin:6px 0">Постави съобщението от Viber както е (напр. „хайнекен кен-2стека, кола 1л-12бр, 1604-24бр“ или „кола 0,500 - 12 (33)“). За всеки ред: стига ли наличността до следващата доставка и колко ще се натрупа, ако се добави.</div>
+    <textarea id="alText" rows="6" style="width:100%;box-sizing:border-box;font-size:14px" placeholder="постави тук…"></textarea>
+    <div style="margin-top:8px"><button id="alGo" style="background:#2563EB;color:#fff">Провери списъка</button> <span id="alMsg" class="note"></span></div>
+    <div id="alOut"></div></div>`;
+  $("alGo").onclick = alRun;
+  $("alText").focus();
+}
+async function alRun() {
+  const text = ($("alText").value || "").trim();
+  if (!text) return;
+  $("alMsg").textContent = "Проверявам…"; $("alOut").innerHTML = "";
+  const d = await api("/ui/article-check/list", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ store_id: +$("storeSel").value, text }) }).catch(e => ({ rows: [], err: e.message }));
+  if (d.err) { $("alMsg").textContent = d.err; return; }
+  const s = d.summary || {};
+  $("alMsg").innerHTML = `Следваща доставка, която още можем да променим: <b>${esc(d.delivery || "")}</b> · 🔴 ${s.red || 0} няма да стигнат · 🟠 ${s.amber || 0} на ръба · 🟢 ${s.ok || 0} стигат${d.piles ? ` · ⚠️ ${d.piles} ще се натрупат (над 10 дни)` : ""}`;
+  const col = { red: "#FEE2E2", amber: "#FEF3C7", ok: "#ECFDF5", "?": "#F3F4F6" };
+  $("alOut").innerHTML = d.rows.map(r => `<div style="border-radius:10px;padding:10px 12px;margin:8px 0;background:${col[r.level] || "#fff"};color:#111">
+      <div style="font-size:12px;opacity:.7">„${esc(r.text)}“</div>
+      <div><b>${esc(r.sku || "?")}</b> · <b>${esc(r.name || "не намерих")}</b>${r.alt && r.alt.length ? ` <span style="font-size:12px;opacity:.7">(или: ${esc(r.alt.join(" / "))})</span>` : ""}</div>
+      ${r.sku ? `<div style="display:flex;flex-wrap:wrap;gap:4px 16px;margin:4px 0;font-size:13px">
+        <span>Има <b>${r.stock == null ? "—" : fmtN(r.stock)}</b></span><span>Продава <b>${fmtN(r.avg || 0)}</b>/ден</span>
+        <span>Силен ден <b>${fmtN(r.peak || 0)}</b></span><span>В нашата заявка <b>${r.in_order || 0}</b></span>
+        <span>Искат <b>${r.add == null ? "—" : "+" + r.add}</b></span></div>` : ""}
+      <div style="font-size:13.5px">${esc(r.why || "")}</div></div>`).join("");
 }
 
 /* ---------- поръчки от клиенти ---------- */

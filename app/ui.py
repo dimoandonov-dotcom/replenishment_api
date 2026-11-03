@@ -943,6 +943,18 @@ def article_no_order(sku: str, payload: NoOrderIn, request: Request, db: Session
     return {"sku": a.sku, "no_order": a.no_order, "by": who, "in_planogram_stores": plano}
 
 
+class ArtListIn(BaseModel):
+    store_id: int
+    text: str
+
+
+@router.post("/ui/article-check/list")
+def ui_article_check_list(payload: ArtListIn, db: Session = Depends(get_db)):
+    """Списъкът на магазина (Viber текст): стига ли до следващата доставка и колко ще се натрупа."""
+    from . import artlist
+    return artlist.check_list(db, payload.store_id, payload.text[:6000])
+
+
 @router.get("/ui/article-check")
 def ui_article_check(store_id: int, q: str, db: Session = Depends(get_db)):
     """Защо артикулът е/не е в заявката: мин/макс, наличност, продажби, причина."""
