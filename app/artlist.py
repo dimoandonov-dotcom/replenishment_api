@@ -156,7 +156,7 @@ def _q_size(words: list[str]) -> tuple[float | None, list[str]]:
 
 
 def _score(qwords: list[str], qsize: float | None, art: m.Article, sw: float = 1.0) -> float:
-    name = (art.supplier_name or art.name or "").upper()
+    name = (art.name or art.supplier_name or "").upper()
     nwords = re.findall(r"[А-ЯA-Z0-9%]+", name)
     sc = 0.0
     for w in qwords:
@@ -224,7 +224,7 @@ def parse(db: Session, store_id: int, text: str) -> list[dict]:
                 sz, sw = (size, 1.0) if size is not None else (ctx_size, 0.4)   # „б. лимон“ след „швепс 1,250 …“
                 ranked = sorted(((_score(rest, sz, a, sw), a) for a in arts), key=lambda x: -x[0])
                 if ranked and ranked[0][0] > 0:
-                    nm = (ranked[0][1].supplier_name or ranked[0][1].name or "").upper()
+                    nm = (ranked[0][1].name or "").upper()
                     if any(len(w.strip(".")) >= 3 and w.strip(".").upper()[:5] in nm for w in letters):
                         pick = (ranked, rest)
             if pick is None and ctx:
@@ -240,8 +240,8 @@ def parse(db: Session, store_id: int, text: str) -> list[dict]:
                 ranked, qw = pick
                 score, art = ranked[0]
                 near = [a for s_, a in ranked[1:4] if s_ > 0 and s_ >= score - 0.6]
-                alt = [a.supplier_name or a.name for s_, a in ranked[1:3] if s_ > 0 and s_ >= score - 1.0]
-                nm = (art.supplier_name or art.name or "").upper()
+                alt = [a.name or a.supplier_name for s_, a in ranked[1:3] if s_ > 0 and s_ >= score - 1.0]
+                nm = (art.name or art.supplier_name or "").upper()
                 keep = [w for w in ctx if len(w.strip(".")) >= 3 and w.strip(".").upper()[:5] in nm]   # „кола“ + „зиро“
                 ctx = keep + [w for w in qw if re.search(r"[а-яa-z]{2,}", w.lower()) and w not in keep]
                 if size is not None:
@@ -250,7 +250,7 @@ def parse(db: Session, store_id: int, text: str) -> list[dict]:
         if qty is not None:
             pk = max(int(art.pack_size or 1), 1) if art else 1
             pieces = qty * pk if unit and (unit[0] in "кk" or unit.startswith("стек")) else qty
-        row = {"text": chunk, "sku": art.sku if art else None, "name": (art.supplier_name or art.name) if art else None,
+        row = {"text": chunk, "sku": art.sku if art else None, "name": (art.name or art.supplier_name) if art else None,
                "add": pieces, "alt": alt, "art_id": art.id if art else None, "pack": max(int(art.pack_size or 1), 1) if art else 1,
                "_near": [art] + near if art and near else [], "_qty": qty, "_unit": unit}
         if art is None and qty is None:
@@ -287,9 +287,9 @@ def check_list(db: Session, store_id: int, text: str) -> dict:
         if len(near) > 1:
             best = max(near, key=lambda a: sum(ser.get(int(a.sku), [0])) if a.sku.isdigit() else 0)
             if best.sku != r["sku"]:
-                r["alt"] = [r["name"]] + [x for x in r["alt"] if x != (best.supplier_name or best.name)]
+                r["alt"] = [r["name"]] + [x for x in r["alt"] if x != (best.name or best.supplier_name)]
                 pk = max(int(best.pack_size or 1), 1)
-                r.update(sku=best.sku, name=best.supplier_name or best.name, art_id=best.id, pack=pk)
+                r.update(sku=best.sku, name=best.name or best.supplier_name, art_id=best.id, pack=pk)
                 if r.get("_qty") is not None and r.get("_unit") and (r["_unit"][0] in "кk" or r["_unit"].startswith("стек")):
                     r["add"] = r["_qty"] * pk
         r.pop("_qty", None); r.pop("_unit", None)
