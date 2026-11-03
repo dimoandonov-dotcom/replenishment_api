@@ -28,14 +28,21 @@ def lag(db: Session) -> dict:
     with mistral.use("varna"), mistral.connect() as conn:
         cur = conn.cursor()
         cur.execute("""
-            SELECT l.ID AS loc, l.NAME AS name, MAX(q.OPERATIONDATE) AS last_sale,
-                   SUM(CASE WHEN q.OPERATIONDATE < CONVERT(date, GETDATE())
-                             AND DATEPART(hour, q.OPERATIONDATE) BETWEEN 7 AND 22 THEN 1 ELSE 0 END) AS n7,
-                   GETDATE() AS now
+            SELECT l.ID AS loc, l.NAME AS name, MAX(q.OPERATIONDATE) AS last_sale, GETDATE() AS now
             FROM MATERIALQTYLOG q WITH (NOLOCK) JOIN LOCATION l ON l.ID = q.LOCATIONID
             WHERE q.OPERATIONTYPE = 1 AND q.OPERATIONDATE >= DATEADD(day, -7, CONVERT(date, GETDATE()))
             GROUP BY l.ID, l.NAME""")
         rows = cur.fetchall()
+        # колко реда в касата обикновено има във всеки час от денонощието (последните 7 цели дни)
+        cur.execute("""
+            SELECT LOCATIONID AS loc, DATEPART(hour, OPERATIONDATE) AS h, COUNT(*) AS n
+            FROM MATERIALQTYLOG WITH (NOLOCK)
+            WHERE OPERATIONTYPE = 1 AND OPERATIONDATE >= DATEADD(day, -7, CONVERT(date, GETDATE()))
+              AND OPERATIONDATE < CONVERT(date, GETDATE())
+            GROUP BY LOCATIONID, DATEPART(hour, OPERATIONDATE)""")
+        hourly: dict = {}
+        for r in cur.fetchall():
+            hourly.setdefault(r["loc"], [0.0] * 24)[r["h"]] = r["n"] / 7 / 60   # на минута
     if not rows:
         return {"copy_lag_min": None, "stores": []}
     now = rows[0]["now"]
@@ -44,9 +51,15 @@ def lag(db: Session) -> dict:
     out = []
     for r in rows:
         silence = int((newest - r["last_sale"]).total_seconds() // 60)
-        rate = (r["n7"] or 0) / (7 * 16 * 60)
-        exp = round(rate * silence, 1)
-        bad = silence >= LAG_MIN and exp >= LAG_EXPECTED and 7 <= now.hour <= 22
+        rate = hourly.get(r["loc"], [0.0] * 24)
+        # очаквано за самия прозорец на тишината - нощем магазинът може да е затворен
+        exp, t = 0.0, r["last_sale"]
+        while t < newest:
+            step = min(newest, (t + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0))
+            exp += rate[t.hour] * (step - t).total_seconds() / 60
+            t = step
+        exp = round(exp, 1)
+        bad = silence >= LAG_MIN and exp >= LAG_EXPECTED
         out.append({"loc": r["loc"], "store": r["name"], "last_sale": r["last_sale"].strftime("%d.%m %H:%M"),
                     "silence_min": silence, "expected": exp, "lagging": bad})
     out.sort(key=lambda x: -x["expected"] if x["lagging"] else x["silence_min"] * -0.001)
