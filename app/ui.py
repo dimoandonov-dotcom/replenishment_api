@@ -2027,12 +2027,36 @@ def ui_ndkmail_attachment(uid: str, name: str):
                     headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fn}"})
 
 
+_reparse_state: dict = {}
+
+
 @router.post("/ui/ndkinv/reparse")
-def ui_ndkinv_reparse(days: int = 14, db: Session = Depends(get_db)):
-    from . import ndkinv
-    r = ndkinv.reparse(db, days)
-    r["check"] = ndkinv.check_pending(db)
-    return r
+def ui_ndkinv_reparse(days: int = 14):
+    """Повторно разчитане на PDF-ите във фонов режим (дълго - стотици писма)."""
+    import threading
+    from .db import SessionLocal
+
+    def _job():
+        from . import ndkinv
+        _reparse_state.clear(); _reparse_state["running"] = True
+        try:
+            with SessionLocal() as db:
+                r = ndkinv.reparse(db, days)
+                r["check"] = ndkinv.check_pending(db)
+                _reparse_state.update(r)
+        except Exception as e:
+            _reparse_state["error"] = f"{type(e).__name__}: {e}"[:300]
+        _reparse_state["running"] = False
+
+    if _reparse_state.get("running"):
+        return {"started": False, "state": _reparse_state}
+    threading.Thread(target=_job, daemon=True).start()
+    return {"started": True}
+
+
+@router.get("/ui/ndkinv/reparse")
+def ui_ndkinv_reparse_state():
+    return _reparse_state
 
 
 @router.post("/ui/ndkinv/run")
