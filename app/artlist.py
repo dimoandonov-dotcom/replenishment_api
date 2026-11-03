@@ -78,10 +78,34 @@ def _n(x) -> str:
     return (f"{x:g}" if float(x) == int(x) else f"{x:.1f}").replace(".", ",")
 
 
+def promo_info(db: Session) -> dict:
+    """article_id -> (начало, край, коефициент) за промоциите, които вървят днес."""
+    from . import promo as _promo
+    today = datetime.now(SOFIA).date()
+    out = {}
+    try:
+        fac = _promo.active(db, today)
+        for aid, periods in _promo.promo_days(db).items():
+            for s_, e_ in periods:
+                if s_ <= today <= e_:
+                    out[aid] = (s_, e_, float(fac.get(aid, 1.0)))
+    except Exception:
+        db.rollback()
+    return out
+
+
 def verdict(stock: float | None, in_order: float, series: list[float], h: float, deliv: date | None,
-            add: float = 0.0, pack: int = 1) -> dict:
+            add: float = 0.0, pack: int = 1, promo: tuple | None = None) -> dict:
     avg = sum(series) / len(series) if series else 0.0
     peak = max(series) if series else 0.0
+    promo_note = ""
+    if promo:
+        s_, e_, f_ = promo
+        days_in = min((datetime.now(SOFIA).date() - s_).days, len(series))
+        since = sum(series[:days_in]) / days_in if days_in >= 1 else 0.0       # series[0] = вчера
+        avg = max(avg * max(f_, 1.0), since)
+        peak = max(peak, max(series[:days_in]) if days_in >= 1 else 0.0)
+        promo_note = f" 🏷 Промоция до {e_.strftime('%d.%m')} - сметнато с {_n(round(avg, 1))}/ден."
     dn = f"{WD[deliv.weekday()]} {deliv.strftime('%d.%m')}" if deliv else "следващата доставка"
     if stock is None:
         return {"level": "?", "text": "Няма данни за наличността."}
@@ -104,6 +128,8 @@ def verdict(stock: float | None, in_order: float, series: list[float], h: float,
     else:
         out.update(level="ok", text=f"🟢 Стига до {dn}: има {_n(have)}, нужни ~{_n(round(need))}"
                                     f" (при силен ден ~{_n(round(need_peak))}).")
+    out["text"] += promo_note
+    out["avg"] = round(avg, 2)
     if add and avg > 0:
         days = (have + add) / avg
         out["after_days"] = round(days, 1)
@@ -288,6 +314,7 @@ def check_list(db: Session, store_id: int, text: str) -> dict:
     codes = {int(r["sku"]) for r in rows if r["sku"] and r["sku"].isdigit()}
     codes |= {int(a.sku) for r in rows for a in r.get("_near", []) if a.sku.isdigit()}
     ser = daily_sales(db, store_id, sorted(codes))
+    pinfo = promo_info(db)
     for r in rows:                      # „бургаско кен“ без размер -> този, който се продава най-много
         near = r.pop("_near", [])
         if len(near) > 1:
@@ -306,7 +333,7 @@ def check_list(db: Session, store_id: int, text: str) -> dict:
         ln = lines.get(r["art_id"])
         r["in_order"] = int(ln.ordered_quantity) if ln is not None else 0
         v = verdict(stock.get(r["art_id"]), r["in_order"], ser.get(int(r["sku"]), [0.0] * 14), h, deliv,
-                    float(r["add"] or 0), r["pack"])
+                    float(r["add"] or 0), r["pack"], pinfo.get(r["art_id"]))
         r.update(level=v["level"], why=v["text"], stock=stock.get(r["art_id"]), avg=v.get("avg"), peak=v.get("peak"),
                  need=v.get("need"), rec=v.get("rec"), after_days=v.get("after_days"))
         r.pop("art_id", None)

@@ -103,11 +103,12 @@ def check(db: Session, store_id: int, q: str) -> dict:
         h, deliv = artlist.horizon(db, store_id)
         ser = artlist.daily_sales(db, store_id, [int(r["sku"]) for r in rows if r["sku"].isdigit()])
         by_sku = {a.sku: a for a in arts}
+        pinfo = artlist.promo_info(db)
         for r in rows:
             if not r["planogram"] or r["stock"] is None or not r["sku"].isdigit():
                 continue
             v = artlist.verdict(r["stock"], float(r["qty"] or 0), ser.get(int(r["sku"]), [0.0] * 14), h, deliv,
-                                0.0, max(int(by_sku[r["sku"]].pack_size or 1), 1))
+                                0.0, max(int(by_sku[r["sku"]].pack_size or 1), 1), pinfo.get(by_sku[r["sku"]].id))
             r["cover"], r["level"] = v["text"], v["level"]
     except Exception:
         db.rollback()
