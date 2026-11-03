@@ -2027,6 +2027,14 @@ def ui_ndkmail_attachment(uid: str, name: str):
                     headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fn}"})
 
 
+@router.post("/ui/ndkinv/reparse")
+def ui_ndkinv_reparse(days: int = 14, db: Session = Depends(get_db)):
+    from . import ndkinv
+    r = ndkinv.reparse(db, days)
+    r["check"] = ndkinv.check_pending(db)
+    return r
+
+
 @router.post("/ui/ndkinv/run")
 def ui_ndkinv_run(db: Session = Depends(get_db)):
     """Нови фактури от пощата + сравнение с осчетоводеното в Мистрал."""

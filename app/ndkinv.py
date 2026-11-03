@@ -58,7 +58,15 @@ def parse_pdf(data: bytes) -> dict:
                 head = page.extract_text() or ""
             for tb in page.extract_tables() or []:
                 for row in tb:
-                    if not row or len(row) < 7:
+                    if not row:
+                        continue
+                    # на 2-ра+ страница таблицата понякога има празна колона отпред/отзад
+                    row = list(row)
+                    while row and not (row[0] or "").strip() and len(row) > 7 and (row[1] or "").strip().isdigit():
+                        row = row[1:]
+                    while row and row[-1] in (None, ""):
+                        row = row[:-1]
+                    if len(row) < 7:
                         continue
                     no = (row[0] or "").strip()
                     if not no.isdigit():
@@ -377,6 +385,31 @@ def check_pending(db: Session, max_age_days: int = 14) -> dict:
                     "df": json.dumps(diffs, ensure_ascii=False), "s": st, "n": num})
     db.commit()
     return {"checked": checked, "booked": booked_n, "differs": differs}
+
+
+def reparse(db: Session, days: int = 14) -> dict:
+    """Чете наново PDF-ите от пощата (след поправка в разчитането) и ги пуска за ново сравнение."""
+    from . import ndkmail
+    ensure(db)
+    rows = db.execute(text("""SELECT num, mail_uid, n_lines FROM ndk_invoices
+                              WHERE mail_uid IS NOT NULL AND inv_date >= :d"""),
+                      {"d": date.today() - timedelta(days=days)}).all()
+    changed, failed = [], 0
+    for num, uid, nl in rows:
+        try:
+            fn, data = ndkmail.fetch_attachment(uid, ".pdf")
+            inv = parse_pdf(data)
+        except Exception:
+            failed += 1
+            continue
+        if not inv["lines"] or len(inv["lines"]) == nl:
+            continue
+        db.execute(text("""UPDATE ndk_invoices SET lines = CAST(:l AS jsonb), n_lines = :nl, total = :t,
+                           status = CASE WHEN status IN ('ok','differs') THEN 'pending' ELSE status END WHERE num = :n"""),
+                   {"l": json.dumps(inv["lines"], ensure_ascii=False), "nl": len(inv["lines"]), "t": inv["total"], "n": num})
+        changed.append(f"{num}: {nl} -> {len(inv['lines'])}")
+    db.commit()
+    return {"checked": len(rows), "changed": len(changed), "failed": failed, "examples": changed[:20]}
 
 
 def run(db: Session) -> dict:
