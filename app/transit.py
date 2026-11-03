@@ -105,10 +105,24 @@ def in_transit(db: Session, now: datetime | None = None) -> dict[tuple[int, int]
     for (sid, aid), d in delivered.items():
         if last_inv.get(sid) is None or d > last_inv[sid]:
             last_inv[sid] = d
+    # е-фактурите на НДК знаят датата на доставка: фактура с доставка след заявката, вече осчетоводена,
+    # значи заявката е дошла - дори OCR да я е осчетоводил още предната вечер (дата на документа = деня на заявката)
+    ndk_deliv = {}
+    try:
+        from sqlalchemy import text as _t
+        for sid_, d_ in db.execute(_t("""SELECT store_id, MAX(delivery_date) FROM ndk_invoices
+                                          WHERE booked_at IS NOT NULL AND store_id IS NOT NULL AND delivery_date >= :d
+                                          GROUP BY store_id"""), {"d": since.date()}).all():
+            ndk_deliv[sid_] = d_
+    except Exception:
+        db.rollback()
     out = {}
     for (sid, aid), p in pending.items():
         li = last_inv.get(sid)
         if li is not None and li >= p["day"] + timedelta(days=1):
             continue                                                  # магазинът е доставен - фактурата е в Мистрал
+        nd = ndk_deliv.get(sid)
+        if nd is not None and nd >= p["day"] + timedelta(days=1):
+            continue                                                  # е-фактурата за доставката е осчетоводена
         out[(sid, aid)] = {"qty": p["qty"], "ordered": p["day"].strftime("%d.%m")}
     return out
