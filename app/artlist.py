@@ -99,6 +99,11 @@ def verdict(stock: float | None, in_order: float, series: list[float], h: float,
     avg = sum(series) / len(series) if series else 0.0
     peak = max(series) if series else 0.0
     promo_note = ""
+    if len(series) >= 3:
+        recent = sum(series[:3]) / 3                     # последните 3 дни - промоция извън брошурата, ново място и т.н.
+        if recent > avg * 1.3 and recent >= 0.5:
+            promo_note = f" 📈 Последните 3 дни продава повече ({_n(round(recent, 1))}/ден) - сметнато с тях."
+            avg = recent
     if promo:
         s_, e_, f_ = promo
         days_in = min((datetime.now(SOFIA).date() - s_).days, len(series))
