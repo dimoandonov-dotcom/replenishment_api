@@ -461,7 +461,7 @@ def order_xlsx(db: Session, order_id: int, side: str) -> tuple[str, bytes] | Non
     rows = [(l.sku, l.name or "", l.store_qty if side == "store" else l.api_qty)
             for l in ls if (l.store_qty if side == "store" else l.api_qty) > 0]
     store = db.get(m.Store, o.store_id) if o.store_id else None
-    base = order_filename(store)[:-5] if store else o.store_raw
+    base = order_filename(store, False)[:-5] if store else o.store_raw
     when = o.received_at.astimezone(SOFIA).strftime("%d.%m %H.%M")
     tag = "магазин" if side == "store" else "MinMaxAI"
     return f"{base} {when} {tag}.xlsx", _write_workbook(rows)

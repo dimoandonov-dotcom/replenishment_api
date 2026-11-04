@@ -36,12 +36,19 @@ def _short_store_name(name: str) -> str:
     return n.upper()
 
 
-def order_filename(store: m.Store) -> str:
+def order_filename(store: m.Store, day=None) -> str:
+    """„ЧАТАЛДЖА 04.11.2026.xlsx“ - магазин + дата на заявката (day=False - без дата)."""
     base = _short_store_name(store.name)
     if store.address:
         base = f"{base}-{store.address.strip().upper()}"
     base = re.sub(r'[\\/:*?"<>|]', "-", base)
-    return f"{base}.xlsx"
+    if day is False:
+        return f"{base}.xlsx"
+    if day is None:
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo as _Z
+        day = _dt.now(_Z("Europe/Sofia")).date()
+    return f"{base} {day.strftime('%d.%m.%Y')}.xlsx"
 
 
 def _write_workbook(rows) -> bytes:
@@ -90,7 +97,8 @@ def export_order(db: Session, order_id: int) -> tuple[str, bytes]:
     if order is None:
         raise ValueError(f"Няма заявка с id {order_id}")
     store = db.get(m.Store, order.store_id)
-    return order_filename(store), build_order_workbook(db, order)
+    from zoneinfo import ZoneInfo as _Z
+    return order_filename(store, order.created_at.astimezone(_Z("Europe/Sofia")).date()), build_order_workbook(db, order)
 
 
 def export_orders_zip(
@@ -115,7 +123,8 @@ def export_orders_zip(
             if not order.lines:
                 continue
             store = db.get(m.Store, order.store_id)
-            name = order_filename(store)
+            from zoneinfo import ZoneInfo as _Z
+            name = order_filename(store, order.created_at.astimezone(_Z("Europe/Sofia")).date())
             if name in used:
                 used[name] += 1
                 stem = name[:-5]
