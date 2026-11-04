@@ -331,6 +331,8 @@ def score(db: Session, days: int = 30) -> dict:
     sid_by_loc = {l: s for s, l in locs.items()}
     stores: dict = {}
     for r in revs:
+        if int(r["mc"]) in (17729, 17730, 6884):        # амбалаж и „стока бр“ - не са стока за заявки
+            continue
         sid = sid_by_loc.get(r["loc"])
         cand = [x for x in by.get((sid, int(r["mc"])), []) if x[8].astimezone(TZ).replace(tzinfo=None) < r["d"]]
         if not cand:
@@ -351,7 +353,7 @@ def score(db: Session, days: int = 30) -> dict:
         st["err_mistral"] += em
         win = "ours" if eo + 0.01 < em else "mistral" if em + 0.01 < eo else "tie"
         st[win] += 1
-        if len(st["examples"]) < 15:
+        if len(st["examples"]) < 15 or (win != "ours" and sum(1 for e in st["examples"] if e["win"] != "ours") < 8):
             st["examples"].append({"mc": int(r["mc"]), "rev": r["d"].strftime("%d.%m"), "found": found, "mistral": exp_m,
                                    "ours": round(exp_o, 2), "win": win, "flag": sn[6], "why": sn[7]})
     tot = {k: sum(s[k] for s in stores.values()) for k in ("counted", "differ", "ours", "mistral", "tie")}
