@@ -2623,14 +2623,47 @@ async function alRun() {
   const s = d.summary || {};
   $("alMsg").innerHTML = `Следваща доставка, която още можем да променим: <b>${esc(d.delivery || "")}</b> · 🔴 ${s.red || 0} няма да стигнат · 🟠 ${s.amber || 0} на ръба · 🟢 ${s.ok || 0} стигат${d.piles ? ` · ⚠️ ${d.piles} ще се натрупат (над 10 дни)` : ""}`;
   const col = { red: "#FEE2E2", amber: "#FEF3C7", ok: "#ECFDF5", "?": "#F3F4F6" };
-  $("alOut").innerHTML = d.rows.map(r => `<div style="border-radius:10px;padding:10px 12px;margin:8px 0;background:${col[r.level] || "#fff"};color:#111">
+  ALS.rows = d.rows;
+  const recN = d.rows.filter(r => r.sku && (r.level === "red" || r.level === "amber") && r.rec > 0).length;
+  $("alOut").innerHTML = (recN ? `<div style="margin:8px 0"><button id="alAddRec" style="background:#16A34A;color:#fff">➕ Добави препоръчаното за 🔴/🟠 (${recN} арт.)</button></div>` : "")
+   + d.rows.map((r, i) => `<div id="alC${i}" style="border-radius:10px;padding:10px 12px;margin:8px 0;background:${col[r.level] || "#fff"};color:#111">
       <div style="font-size:12px;opacity:.7">„${esc(r.text)}“</div>
       <div><b>${esc(r.sku || "?")}</b> · <b>${esc(r.name || "не намерих")}</b>${r.alt && r.alt.length ? ` <span style="font-size:12px;opacity:.7">(или: ${esc(r.alt.join(" / "))})</span>` : ""}</div>
       ${r.sku ? `<div style="display:flex;flex-wrap:wrap;gap:4px 16px;margin:4px 0;font-size:13px">
         <span>Има <b>${r.stock == null ? "—" : fmtN(r.stock)}</b></span><span>Продава <b>${fmtN(r.avg || 0)}</b>/ден</span>
-        <span>Силен ден <b>${fmtN(r.peak || 0)}</b></span><span>В нашата заявка <b>${r.in_order || 0}</b></span>
+        <span>Силен ден <b>${fmtN(r.peak || 0)}</b></span><span>В нашата заявка <b id="alIn${i}">${r.in_order || 0}</b></span>
         <span>Искат <b>${r.add == null ? "—" : "+" + r.add}</b></span></div>` : ""}
-      <div style="font-size:13.5px">${esc(r.why || "")}</div></div>`).join("");
+      <div style="font-size:13.5px">${esc(r.why || "")}</div>
+      ${r.sku ? `<div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap">
+        <span style="font-size:13px">Добави</span>
+        <input id="alQ${i}" type="number" min="0" step="${r.pack || 1}" value="${r.rec > 0 ? r.rec : (r.add || r.pack || 1)}" style="width:80px">
+        <span style="font-size:12px;opacity:.7">бр. (опаковка ${r.pack || 1})</span>
+        <button class="mini" data-aladd="${i}" style="background:#2563EB;color:#fff">➕ Добави в заявката</button>
+        <span id="alOk${i}" style="font-size:13px"></span></div>` : ""}</div>`).join("");
+  document.querySelectorAll("[data-aladd]").forEach(b => b.onclick = () => alAdd([+b.dataset.aladd]));
+  if ($("alAddRec")) $("alAddRec").onclick = () => {
+    const idx = ALS.rows.map((r, i) => (r.sku && (r.level === "red" || r.level === "amber") && r.rec > 0) ? i : -1).filter(i => i >= 0);
+    idx.forEach(i => { $("alQ" + i).value = ALS.rows[i].rec; });
+    alAdd(idx);
+  };
+}
+const ALS = { rows: [] };
+async function alAdd(idx) {
+  const sid = +$("storeSel").value;
+  const ch = [];
+  for (const i of idx) {
+    const r = ALS.rows[i], add = Math.max(0, parseInt($("alQ" + i).value || "0", 10));
+    if (!r || !r.sku || !add) continue;
+    ch.push({ i, sku: r.sku, qty: (r.in_order || 0) + add, old: r.in_order || 0, reason: `от списъка на магазина: +${add}` });
+  }
+  if (!ch.length) return;
+  ch.forEach(c => { $("alOk" + c.i).textContent = "…"; });
+  const res = await api(`/ui/orders/${sid}/edit`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(ch.map(({ i, ...c }) => c)) }).catch(e => ({ err: e.message }));
+  if (res.err) { ch.forEach(c => { $("alOk" + c.i).textContent = "⛔ " + res.err; }); return; }
+  ch.forEach(c => { ALS.rows[c.i].in_order = c.qty; $("alIn" + c.i).textContent = c.qty;
+    $("alOk" + c.i).innerHTML = `<b style="color:#15803D">✅ в заявката: ${c.qty} бр.</b>`; });
+  try { loadOrder(); } catch (e) {}
 }
 
 /* ---------- поръчки от клиенти ---------- */

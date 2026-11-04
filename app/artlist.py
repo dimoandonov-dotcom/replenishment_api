@@ -158,6 +158,11 @@ def _split(text: str) -> list[str]:
     # „2л.-12бр пиринско кен-12бр“ - след количество с мярка започва нов ред
     t = re.sub(r"(\d\s*(?:бр\.?|к\.|к\b|стека?|каси|каса|кашона?))\s+(?=[^\d\s(,;])", "\\1\n", t, flags=re.I)
     t = re.sub(r":\s+(?=[^\d\s])", "\n", t)                                # „…в наличното: капи…“
+    # ред от нашата заявка: „26244 ▸ КОКА КОЛА … 330МЛ   12“ -> „26244-12“
+    t = re.sub(r"(?m)^\s*(\d{3,6})\s*▸?\s*[^\n]*?\s(\d+)\s*$", r"\1-\2", t)
+    t = re.sub(r"-{4,}", "\n", t)
+    t = re.sub(r"([-–]\s*\d+\s*(?:к\.?|бр\.?|ст\.?|стека?|каса)?)\s*,\s*", "\\1\n", t, flags=re.I)   # „тъмно кен - 8, 1 л. - 12“
+    t = re.sub(r"(?<=[а-яА-Я])\.(?=\d)", " ", t)                                 # „СПЕЦ.2Л“ -> „СПЕЦ 2Л“
     parts = re.split(r"(?<=\))\s*,?\s*|,\s+(?=[^\d\s\-–])|;|\n|\s{2,}|\t", t)
     return [p.strip(" ,.;") for p in parts if p and p.strip(" ,.;")]
 
@@ -259,10 +264,12 @@ def parse(db: Session, store_id: int, text: str) -> list[dict]:
                     nm = (ranked[0][1].name or "").upper()
                     if any(len(w.strip(".")) >= 3 and w.strip(".").upper()[:5] in nm for w in letters):
                         pick = (ranked, rest)
-            if pick is None and ctx:
-                qw = ctx + [w for w in rest if w not in ctx]                    # „зиро 1 л.“ след „кола …“
+            if ctx:
+                qw = ctx + [w for w in rest if w not in ctx]                    # „зиро 1 л.“ след „кола …“, „тъмно кен“ след „старопрамен“
                 ranked = sorted(((_score(qw, size, a), a) for a in arts), key=lambda x: -x[0])
-                if ranked and ranked[0][0] > 0:
+                ctop = (ranked[0][1].name or "").upper() if ranked else ""
+                own_ok = all(w.strip(".").upper()[:5] in ctop for w in letters if len(w.strip(".")) >= 3)
+                if ranked and ranked[0][0] > 0 and (pick is None or (own_ok and ranked[0][0] > pick[0][0][0] + 0.5)):
                     pick = (ranked, qw)
             if pick is None and letters:
                 ranked = sorted(((_score(rest, size, a), a) for a in arts), key=lambda x: -x[0])
