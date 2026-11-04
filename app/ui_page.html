@@ -479,9 +479,10 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <div id="coPanel"></div><div id="acPanel"></div><div id="oePanel"></div><div id="osPanel"></div>
   <div class="bar" id="oeAdd" style="margin-top:4px">
     <span class="note">➕ Добави артикул в заявката:</span>
-    <input id="oeSku" placeholder="код" inputmode="numeric" style="width:90px">
+    <input id="oeSku" placeholder="код (или „код бр“)" style="width:150px" autocomplete="off">
     <input id="oeQty" type="number" min="1" step="1" placeholder="бр." style="width:70px">
     <button id="oeAddBtn" class="go">Добави</button>
+    <span id="oeHint" class="note" style="font-size:13px"></span>
   </div>
   <div id="dlvStatus" style="margin:6px 0;font-size:14px"></div>
   <div class="totals" id="ordTotals"></div>
@@ -1183,6 +1184,20 @@ async function initOrders() {
   $("oxAll").onclick = () => document.querySelectorAll("#ordBody td.ox").forEach(td => { if (td.textContent.includes("▸")) td.click(); });
   $("undoOrder").onclick = () => { qedits = {}; edits = {}; loadOrder(); };
   $("oeBtn").onclick = toggleOrderEdits;
+  // клавиатура: код + Enter -> бройки; бройки + Enter -> добавя и връща в кода; „1528 12“ + Enter -> направо
+  $("oeSku").onkeydown = async e => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const m = $("oeSku").value.trim().match(/^(\d{3,6})[\s*xх×,;-]+(\d+)$/i);
+    if (m) { $("oeSku").value = m[1]; $("oeQty").value = m[2]; $("oeAddBtn").click(); return; }
+    if ($("oeSku").value.trim()) { $("oeQty").focus(); $("oeQty").select(); }
+  };
+  $("oeSku").oninput = async () => {
+    const k = $("oeSku").value.trim().split(/\s+/)[0];
+    const a = k.length >= 3 ? (await arts())[k] : null;
+    $("oeHint").textContent = a ? `${a.name}${a.pack_size > 1 ? " · опаковка " + a.pack_size : ""}` : "";
+  };
+  $("oeQty").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); $("oeAddBtn").click(); } };
   $("oeAddBtn").onclick = async () => {
     const sku = $("oeSku").value.trim(), q = parseInt($("oeQty").value);
     if (!sku || !(q > 0)) { msg("ordMsg", "Въведи код и бройка", false); return; }
@@ -1191,8 +1206,10 @@ async function initOrders() {
     try {
       const r = await api(`/ui/orders/${$("storeSel").value}/edit`, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify([{ sku, qty: q, old: 0, reason: $("oeWhy").value.trim() || "добавен ръчно" }]) });
-      $("oeSku").value = ""; $("oeQty").value = "";
+      $("oeSku").value = ""; $("oeQty").value = ""; $("oeHint").textContent = `✅ ${a.name} × ${q}`;
+      $("oeSku").focus();
       await loadOrder(); msg("ordMsg", `Добавен „${a.name}“ × ${q}${r.told_dimo ? " · Димо е уведомен" : ""}`);
+      $("oeSku").focus();
     } catch (e) { msg("ordMsg", e.message, false); }
   };
   if (pendingStore) { $("storeSel").value = pendingStore; pendingStore = null; }
@@ -2641,6 +2658,8 @@ async function alRun() {
         <button class="mini" data-aladd="${i}" style="background:#2563EB;color:#fff">➕ Добави в заявката</button>
         <span id="alOk${i}" style="font-size:13px"></span></div>` : ""}</div>`).join("");
   document.querySelectorAll("[data-aladd]").forEach(b => b.onclick = () => alAdd([+b.dataset.aladd]));
+  ALS.rows.forEach((r, i) => { const q = $("alQ" + i); if (q) q.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); alAdd([i]);
+    const nx = ALS.rows.findIndex((x, j) => j > i && $("alQ" + j)); if (nx >= 0) { $("alQ" + nx).focus(); $("alQ" + nx).select(); } } }; });
   if ($("alAddRec")) $("alAddRec").onclick = () => {
     const idx = ALS.rows.map((r, i) => (r.sku && (r.level === "red" || r.level === "amber") && r.rec > 0) ? i : -1).filter(i => i >= 0);
     idx.forEach(i => { $("alQ" + i).value = ALS.rows[i].rec; });
