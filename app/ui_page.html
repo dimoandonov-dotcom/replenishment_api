@@ -1781,7 +1781,13 @@ async function exportTable(table, title) {
     if (!res.ok) throw new Error(await res.text());
     const blob = await res.blob(); const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); const dt = new Date(), dd = String(dt.getDate()).padStart(2, "0") + "." + String(dt.getMonth() + 1).padStart(2, "0") + "." + dt.getFullYear();
-    a.download = `${title} ${dd}.xlsx`.replace(/[\\/:*?"<>|]/g, " ");
+    // заявката по магазин: файлът е с името на магазина и датата („ЧАТАЛДЖА 04.11.2026.xlsx“)
+    let base = title;
+    if (table.querySelector("#ordBody") && $("storeSel")) {
+      const sn = ($("storeSel").selectedOptions[0]?.text || title).replace(/^\s*(м-н|магазин|супермаркет)\s+/i, "").trim();
+      base = sn.toUpperCase();
+    }
+    a.download = `${base} ${dd}.xlsx`.replace(/[\\/:*?"<>|]/g, " ");
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     toast(`Свалено: ${rows.length} реда`);
   } catch (e) { toast("Експортът не мина: " + e.message, false); }
