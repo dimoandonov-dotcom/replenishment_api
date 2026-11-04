@@ -9,6 +9,7 @@
 Така сравнението е честно - един и същ момент, една и съща наличност.
 """
 from __future__ import annotations
+import re
 from zoneinfo import ZoneInfo
 
 from datetime import date, datetime, timedelta, timezone
@@ -62,7 +63,8 @@ def record(db: Session, store_raw: str, lines: list[dict], raw_text: str | None,
            source: str = "anindk", made_at: datetime | None = None) -> dict:
     """lines: [{sku, name, qty}] - заявката на магазина в бройки.
     made_at - кога Ани е направила заявката (при закъсняло копие от опашката)."""
-    store_id = resolve_store(db, store_raw)
+    # „Чаталджа-… 04.11.2026“ (файл, свален с датата) -> без датата
+    store_id = resolve_store(db, re.sub(r"\s+\d{1,2}\.\d{1,2}(\.\d{2,4})?(\s.*)?$", "", store_raw.strip()) or store_raw)
     stock_at = _fresh_stock(db, store_id)
     order = m.ManualOrder(store_id=store_id, store_raw=store_raw.strip(),
                           raw_text=(raw_text or "")[:20000] or None,
