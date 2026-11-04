@@ -4,7 +4,7 @@
 Учи се от:
   1) реалните продажби от Мистрал (последни 14 дни) - формулата на офиса;
   2) изчерпване: наличност <= 0 при артикул, който се продава -> +20%;
-  3) заявките на Ани - САМО когато продажбите потвърждават, че е права:
+  3) заявките на Ани и ръчните добавки в нашата заявка - САМО когато продажбите потвърждават:
      поръчала е поне 2 пъти, когато ние не бихме, И наличността в тези
      моменти е била под минимума, който продажбите показват.
 
@@ -168,6 +168,16 @@ def run(db: Session, apply: bool = True) -> dict:
         if aid is not None:
             ani[(sid, aid)].append(float(st) if st is not None else None)
 
+    # ръчни добавки в заявката (панел / „Списък от магазина“): дни, в които е добавяно над нашето
+    edits = defaultdict(set)  # (store, article) -> {дни}
+    try:
+        from sqlalchemy import text as _t
+        for sid, aid, d in db.execute(_t("""SELECT store_id, article_id, day FROM order_edits
+                                             WHERE day >= :d AND new_qty > old_qty"""), {"d": since}).all():
+            edits[(sid, aid)].add(d)
+    except Exception:
+        db.rollback()
+
     recent = set(db.execute(
         select(m.SettingsLog.store_id, m.SettingsLog.article_id)
         .where(m.SettingsLog.source == "learning",
@@ -232,6 +242,16 @@ def run(db: Session, apply: bool = True) -> dict:
                     signals.append({"store": store.name, "sku": a.sku,
                                     "name": a.supplier_name or a.name, "times": len(hits),
                                     "sold_14d": sold})
+            ed = edits.get((store.id, aid), set())
+            if len(ed) >= ANI_MIN_TIMES and not reason.startswith("Ани"):
+                old_min = float(s.min_stock) if s else 0
+                if mn_t > old_min:          # продажбите показват по-висок минимум - добавките са били нужни
+                    reason = (f"добавян ръчно в заявката {len(ed)} дни и продажбите го потвърждават "
+                              f"({sold:g} бр./14 дни)")
+                    urgent = True
+                else:
+                    signals.append({"store": store.name, "sku": a.sku, "name": a.supplier_name or a.name,
+                                    "times": len(ed), "sold_14d": sold, "source": "ръчни добавки"})
             capped = _capped(a.name) or _capped(a.supplier_name or "")
             if capped and mx_t > 3:
                 mn_t, mx_t = min(mn_t, 3), 3
@@ -241,7 +261,7 @@ def run(db: Session, apply: bool = True) -> dict:
             else:
                 # веднъж седмично на позиция - и за свършване; само потвърден
                 # сигнал от Ани може по-често
-                if (store.id, aid) in recent and not reason.startswith("Ани"):
+                if (store.id, aid) in recent and not (reason.startswith("Ани") or reason.startswith("добавян ръчно")):
                     continue
                 om, oM = float(s.min_stock), float(s.max_stock)
                 # мъртва зона: дребни разлики не се пипат (без шум всяка нощ)
