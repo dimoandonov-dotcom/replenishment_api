@@ -56,6 +56,18 @@ def compute(db: Session, store_id: int, fresh: bool = False) -> dict:
             return out
         out["loc"] = loc
         cl = ",".join(map(str, codes))
+        # снимките за скокове на Мистрал без движение (Хрис изравнява главната с обекта директно, без документ)
+        snaps: dict = {}
+        try:
+            _snap_ensure(db)
+            for mc_, at_, mi_, raw_, own_ in db.execute(text("""SELECT mc, at, mistral, raw, own FROM ownstock_snap
+                    WHERE store_id = :s AND at >= now() - interval '50 days' ORDER BY at"""), {"s": store_id}).all():
+                if raw_ is not None:
+                    snaps.setdefault(int(mc_), []).append((at_, float(mi_ or 0), float(raw_), False))
+                elif own_ is not None:          # стари снимки: own включва корекциите по фактури - махат се по-долу
+                    snaps.setdefault(int(mc_), []).append((at_, float(mi_ or 0), float(own_), True))
+        except Exception:
+            db.rollback()
         # 1) последна завършена ревизия на всеки артикул (преброено количество)
         cur.execute(f"""SELECT x.MATERIALCODE AS code, x.QTYFOUND AS found, x.DATEINVENTORY AS d, x.INVENTORYNUM AS num, x.PARTNER AS partner
             FROM (SELECT c.MATERIALCODE, c.QTYFOUND, i.DATEINVENTORY, i.INVENTORYNUM, i.PARTNER,
@@ -133,10 +145,23 @@ def compute(db: Session, store_id: int, fresh: bool = False) -> dict:
             dl = mv.get(2, 0.0)
             sl = -mv.get(1, 0.0)
             other = sum(q for t, q in mv.items() if t not in (1, 2))
-            own = float(b["found"] or 0) + dl - sl + other + it["ndk_fix"]
+            raw = float(b["found"] or 0) + dl - sl + other
+            # скок = промяна в Мистрал, която не е минала като движение (между снимките след ревизията и до сега)
+            seq = []
+            for at_, mi_, rw_, old_ in snaps.get(code, []):
+                if at_.astimezone(TZ).replace(tzinfo=None) <= t0:
+                    continue
+                if old_:
+                    _a = at_.astimezone(TZ).replace(tzinfo=None)
+                    rw_ -= sum(f["delta"] for f in fx if f["at"] and f["at"].replace(tzinfo=None) <= _a)
+                seq.append((mi_, rw_))
+            seq.append((it["mistral"], raw))
+            jump = sum((b2[0] - a2[0]) - (b2[1] - a2[1]) for a2, b2 in zip(seq, seq[1:]))
+            jump = round(jump, 2) if abs(jump) >= 1 else 0.0
+            own = raw + jump + it["ndk_fix"]
             it.update({"base": float(b["found"] or 0), "base_date": b["d"].strftime("%d.%m"),
                        "base_ndk": bool((b["partner"] or "").strip()), "deliveries": dl, "sales": sl, "other": other,
-                       "own": round(own, 2)})
+                       "own": round(own, 2), "raw": round(raw, 2), "jump": jump})
         # фантом: продава се редовно, но мълчи много по-дълго от обичайната си пауза, а има „стока“;
         # скорошно броене (до 7 дни, с намерено > 0) бие тишината
         stock_now = it["own"] if it["own"] is not None else it["mistral"]
@@ -179,6 +204,7 @@ def compute(db: Session, store_id: int, fresh: bool = False) -> dict:
                 it["why"] = (f"ревизия {it['base_date']}: {it['base']:g} + доставки {it['deliveries']:g} - продажби {it['sales']:g}"
                              + (f" {it['other']:+g}" if it["other"] else "")
                              + (f" {it['ndk_fix']:+g} по фактура {', '.join(it['ndk_fix_docs'])}" if it["ndk_fix"] else "")
+                             + (f" {it['jump']:+g} изравняване в Мистрал без документ" if it.get("jump") else "")
                              + f" = {own:g}, Мистрал {it['mistral']:g}")
         out["items"][str(code)] = it
     _cache[store_id] = (now, out)
@@ -257,6 +283,7 @@ def _snap_ensure(db: Session):
     global _snap_ok
     if not _snap_ok:
         db.execute(text(SNAP_SCHEMA))
+        db.execute(text("ALTER TABLE ownstock_snap ADD COLUMN IF NOT EXISTS raw NUMERIC(12,2)"))
         db.commit()
         _snap_ok = True
 
@@ -280,10 +307,10 @@ def snapshot(db: Session, all_stores: bool = False) -> dict:
             continue
         for sku, it in d["items"].items():
             ours = it["effective"] if (it["phantom"] or it.get("ndk_fix") or it["own"] is not None) else it["mistral"]
-            db.execute(text("""INSERT INTO ownstock_snap(day, store_id, mc, mistral, own, eff, phantom, flag, why)
-                               VALUES (:d,:s,:m,:mi,:o,:e,:p,:f,:w)
-                               ON CONFLICT (day, store_id, mc) DO UPDATE SET mistral=:mi, own=:o, eff=:e, phantom=:p, flag=:f, why=:w, at=now()"""),
-                       {"d": today, "s": sid, "m": int(sku), "mi": it["mistral"], "o": it["own"], "e": ours,
+            db.execute(text("""INSERT INTO ownstock_snap(day, store_id, mc, mistral, own, eff, phantom, flag, why, raw)
+                               VALUES (:d,:s,:m,:mi,:o,:e,:p,:f,:w,:r)
+                               ON CONFLICT (day, store_id, mc) DO UPDATE SET mistral=:mi, own=:o, eff=:e, phantom=:p, flag=:f, why=:w, raw=:r, at=now()"""),
+                       {"d": today, "s": sid, "m": int(sku), "mi": it["mistral"], "o": it["own"], "e": ours, "r": it.get("raw"),
                         "p": bool(it["phantom"]), "f": it.get("flag") or "", "w": (it.get("why") or "")[:300]})
             n += 1
         db.commit()
