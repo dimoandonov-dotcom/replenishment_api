@@ -338,6 +338,10 @@ def score(db: Session, days: int = 30) -> dict:
         if not cand:
             continue
         sn = max(cand, key=lambda x: x[8])
+        # скокове в Мистрал без движение (изравняване на главната с обекта): Δмистрал - Δнаша между снимките
+        cs = sorted(cand, key=lambda x: x[8])
+        jump = sum((float(b[3] or 0) - float(a[3] or 0)) - (float(b[4] or 0) - float(a[4] or 0))
+                   for a, b in zip(cs, cs[1:]) if a[4] is not None and b[4] is not None)
         exp_m = float(r["exp"] or 0)
         gap = float(sn[4] or 0) - float(sn[3] or 0)      # наша - Мистрал към снимката
         exp_o = max(exp_m + gap, 0.0)                    # (фантом: снимката казва 0 -> gap = -Мистрал)
@@ -353,12 +357,20 @@ def score(db: Session, days: int = 30) -> dict:
         st["err_mistral"] += em
         win = "ours" if eo + 0.01 < em else "mistral" if em + 0.01 < eo else "tie"
         st[win] += 1
+        if abs(jump) >= 0.5:                              # проба: какво ако приемем скока на Мистрал
+            ea = abs(max(exp_o + jump, 0.0) - found)
+            st.setdefault("jump_n", 0); st["jump_n"] = st["jump_n"] + 1
+            st["err_jump_alt"] = st.get("err_jump_alt", 0.0) + ea
+            st["err_jump_ours"] = st.get("err_jump_ours", 0.0) + eo
+            st["err_jump_mistral"] = st.get("err_jump_mistral", 0.0) + em
         if len(st["examples"]) < 15 or (win != "ours" and sum(1 for e in st["examples"] if e["win"] != "ours") < 8):
             st["examples"].append({"mc": int(r["mc"]), "rev": r["d"].strftime("%d.%m"), "found": found, "mistral": exp_m,
                                    "ours": round(exp_o, 2), "win": win, "flag": sn[6], "why": sn[7]})
     tot = {k: sum(s[k] for s in stores.values()) for k in ("counted", "differ", "ours", "mistral", "tie")}
     tot["err_ours"] = round(sum(s["err_ours"] for s in stores.values()), 1)
     tot["err_mistral"] = round(sum(s["err_mistral"] for s in stores.values()), 1)
+    for k in ("jump_n", "err_jump_alt", "err_jump_ours", "err_jump_mistral"):
+        tot[k] = round(sum(s.get(k, 0) for s in stores.values()), 1)
     nm = {}
     try:
         from . import ndkinv
