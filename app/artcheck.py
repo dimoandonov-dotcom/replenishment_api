@@ -47,7 +47,7 @@ def check(db: Session, store_id: int, q: str) -> dict:
     avg = service.load_avg_daily_sales(db, store_id)
     today = datetime.now(SOFIA).date()
     try:
-        res = service.calculate_for_store(db, store_id, today, None, False)
+        res = service.calculate_with_transit(db, store_id, today, None, False)
         lines = {ln.article_id: ln for ln in res.lines}
     except Exception:
         db.rollback()

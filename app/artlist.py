@@ -320,7 +320,7 @@ def check_list(db: Session, store_id: int, text: str) -> dict:
     stock = service.latest_stock_map(db, store_id)
     today = datetime.now(SOFIA).date()
     try:
-        res = service.calculate_for_store(db, store_id, today, None, False)
+        res = service.calculate_with_transit(db, store_id, today, None, False)
         lines = {ln.article_id: ln for ln in res.lines}
     except Exception:
         db.rollback()
