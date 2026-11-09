@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import select, func
+from sqlalchemy import text, select, func
 from sqlalchemy.orm import Session
 
 from . import models as m
@@ -203,6 +203,16 @@ def load_avg_daily_sales(
     last = max(d for v in daily.values() for d in v)
     first = min(d for v in daily.values() for d in v)
     pdays = _promo.promo_days(db)
+    # дни без наличност (снимка <= 0): продажбите тогава са 0 не защото няма търсене, а защото няма стока -
+    # не се броят, иначе свършилата стока сваля средното и поръчваме още по-малко (Надежда, 09.11)
+    oos = _dd(set)
+    try:
+        for aid_, d_ in db.execute(text("""SELECT article_id, (captured_at AT TIME ZONE 'Europe/Sofia')::date
+                                           FROM stock_snapshots WHERE store_id = :s AND quantity <= 0 AND captured_at >= :d
+                                           GROUP BY 1, 2"""), {"s": store_id, "d": since}).all():
+            oos[aid_].add(d_)
+    except Exception:
+        db.rollback()
     out = {}
     for aid, dq in daily.items():
         ended = [(s, e) for s, e in pdays.get(aid, []) if e <= today and e >= since]
@@ -215,11 +225,18 @@ def load_avg_daily_sales(
             if len(days) >= 5:
                 out[(store_id, aid)] = max(sum(dq.get(d, 0.0) for d in days), 0.0) / len(days)
                 continue
-        a14 = max(sum(q for d, q in dq.items() if d >= today - _td(days=14)), 0.0) / 14.0
+        od = oos.get(aid, set())
+        win14 = [today - _td(days=k) for k in range(1, 15)]
+        ok14 = [d for d in win14 if not (d in od and dq.get(d, 0.0) <= 0)]   # без дните на нула без продажби
+        if len(ok14) < 5:
+            ok14 = win14
+        a14 = max(sum(dq.get(d, 0.0) for d in ok14) + dq.get(today, 0.0) * 0, 0.0) / len(ok14)
         if a14 >= 1.0:
-            a7 = max(sum(q for d, q in dq.items() if last - _td(days=6) <= d <= last), 0.0) / 7.0
-            if a7 < a14:
-                a14 = max(a7, a14 * 0.75)
+            win7 = [d for d in ok14 if d >= last - _td(days=6)]
+            if len(win7) >= 3:
+                a7 = max(sum(dq.get(d, 0.0) for d in win7), 0.0) / len(win7)
+                if a7 < a14:
+                    a14 = max(a7, a14 * 0.75)
         out[(store_id, aid)] = a14
     return out
 def calculate_for_store(
