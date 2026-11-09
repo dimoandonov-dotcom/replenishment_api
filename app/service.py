@@ -231,12 +231,18 @@ def load_avg_daily_sales(
         if len(ok14) < 5:
             ok14 = win14
         a14 = max(sum(dq.get(d, 0.0) for d in ok14) + dq.get(today, 0.0) * 0, 0.0) / len(ok14)
-        if a14 >= 1.0:
-            win7 = [d for d in ok14 if d >= last - _td(days=6)]
-            if len(win7) >= 3:
-                a7 = max(sum(dq.get(d, 0.0) for d in win7), 0.0) / len(win7)
-                if a7 < a14:
-                    a14 = max(a7, a14 * 0.75)
+        win7 = [d for d in ok14 if d >= last - _td(days=6)]
+        if len(win7) >= 3:
+            a7 = max(sum(dq.get(d, 0.0) for d in win7), 0.0) / len(win7)
+            if a7 > a14:
+                a14 = a7                                  # продажбите растат - веднага по последната седмица
+            elif a14 >= 1.0 and a7 < a14:
+                a14 = max(a7, a14 * 0.75)
+            win3 = [d for d in ok14 if d >= last - _td(days=2)]
+            if len(win3) >= 2:
+                a3 = sum(dq.get(d, 0.0) for d in win3) / len(win3)
+                if a3 >= 1.0 and a3 > a14 * 1.5:
+                    a14 = (a14 + a3) / 2                  # рязък скок последните дни (промо, време)
         out[(store_id, aid)] = a14
     return out
 def calculate_for_store(

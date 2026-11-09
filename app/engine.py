@@ -141,6 +141,18 @@ def needs_reorder(
     return current_stock < min_stock
 
 
+# Безалкохолни, вода, сокове - пълнят витрината/хладилника: не трябва да остават празни (Димо, 09.11)
+_DISPLAY_WORDS = ("КОЛА", "ФАНТА", "СПРАЙТ", "ШВЕПС", "ФЮЗ", "КАПИ", "БАНКЯ", "ВОДА", "СОК", "ЧАЙ",
+                  "ЛИМОНАДА", "ДЕВИН", "ГОРНА БАНЯ", "РОСА", "КИНЛИ", "ПРИСУН", "ХЕПИ", "ЕНЕРДЖИ", "ТОНИК")
+
+
+def is_display(name: str) -> bool:
+    n = (name or "").upper()
+    if any(w in n for w in ("БИРА", "ВОДКА", "РАКИЯ", "ВИНО", "УИСКИ", "ДЖИН", "МЕНТА", "МАСТИКА", "РОМ ", "САЙДЕР", "БРЕНДИ")):
+        return False
+    return any(w in n for w in _DISPLAY_WORDS)
+
+
 # Колко дни продажби трябва да покрива наличността, за да НЕ поръчваме цяла
 # опаковка заради малка нужда (≈ до следващата доставка + резерв).
 MIN_PACK_COVER_DAYS = 2.0
@@ -188,12 +200,20 @@ def calculate_line(
     ):
         return None
 
-    if avg_daily_sales and avg_daily_sales > 0 and current_stock >= avg_daily_sales * (SKIP_COVER_DAYS + extra_days):
+    # долна граница след доставката: не стоим на 0-1 бр. (Димо, 09.11) - поне минимума;
+    # безалкохолните пълнят витрината - поне една опаковка
+    floor_stock = 0.0
+    if avg_daily_sales and avg_daily_sales > 0:
+        floor_stock = min(float(setting.min_stock or 0), float(max_target))
+        if is_display(setting.name):
+            floor_stock = max(floor_stock, float(min(setting.pack_size, max_target)))
+    if (avg_daily_sales and avg_daily_sales > 0 and current_stock >= avg_daily_sales * (SKIP_COVER_DAYS + extra_days)
+            and current_stock >= floor_stock):
         return None   # стига за 2+ дни, а доставка има всеки ден
 
     if avg_daily_sales and avg_daily_sales > 0:
-        # таван: до ORDER_COVER_DAYS (+ дни без доставка) продажби, не до макса
-        cap = max(math.ceil(avg_daily_sales * (ORDER_COVER_DAYS + extra_days)), 1)
+        # таван: до ORDER_COVER_DAYS (+ дни без доставка) продажби, не до макса - но не под долната граница
+        cap = max(math.ceil(avg_daily_sales * (ORDER_COVER_DAYS + extra_days)), 1, math.ceil(floor_stock))
         if cover_trigger and cap > max_target:
             # над минимума, но няма да стигне до следващата доставка -> до нужното за дните
             max_target = float(cap)
@@ -455,10 +475,8 @@ def generate_order_lines(
                 lead = (dw - wd) % 7 or 7
                 gap = next((k for k in range(1, 8) if ((dw - 1 + k) % 7) + 1 in deliv), 1)
                 cover_extra = max(gap - 1, 0) + lead
-                if gap > 1:
-                    # след дни без доставка следващата доставка идва рано сутрин -
-                    # без буфер за самия ден на доставката (напр. четвъртък: петък-неделя, не и понеделник)
-                    cover_extra -= 1
+                # след дни без доставка (четвъртък -> понеделник) се покрива и денят на доставката:
+                # стоката идва през деня, а сутринта рафтът не трябва да е празен (Димо, 09.11)
             else:
                 gap = next((k for k in range(1, 8) if ((wd - 1 + k) % 7) + 1 in deliv), 1)
                 cover_extra = max(gap - 1, 0)
@@ -504,7 +522,9 @@ def generate_order_lines(
 
         adr_ = avg_daily_sales.get((s.store_id, s.article_id), 0.0)
         # над минимума, но наличността няма да стигне до следващата доставка (напр. уикенд без доставка)
-        cover_trigger = (s.max_stock > 0 and adr_ > 0 and current < adr_ * (SKIP_COVER_DAYS + cover_extra)
+        cover_trigger = (s.max_stock > 0 and adr_ > 0
+                         and (current < adr_ * (SKIP_COVER_DAYS + cover_extra)
+                              or (is_display(s.name) and current < min(s.pack_size, s.max_stock)))
                          and not needs_reorder(current, s.min_stock, mode, effective_max))
         if not cover_trigger and not needs_reorder(current, s.min_stock, mode, effective_max):
             result.skipped_above_min += 1
