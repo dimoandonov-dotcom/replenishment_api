@@ -80,6 +80,38 @@ def check(db: Session) -> dict:
         prev_po = next((p for p in pos if p.created_at.astimezone(TZ).date() < today), None)
         st = {"store_id": sid, "store": stores.get(sid, sid), "stop": [], "warn": [], "info": []}
         out.append(st)
+        got = goods.get(sid, {})
+        # 1) последната ни заявка (вчера, или четвъртък при петък без заявка) - дошла ли е и чия
+        pend = {}
+        if prev_po is not None and (today - prev_po.created_at.astimezone(TZ).date()).days <= 3:
+            pday = prev_po.created_at.astimezone(TZ).date()
+            pname = "вчерашната" if pday == today - timedelta(days=1) else f"заявката ни от {pday.strftime('%d.%m')}"
+            p0 = datetime.combine(pday, datetime.min.time(), TZ)
+            if pday != today - timedelta(days=1):
+                try:   # само фактурите след деня на заявката (напр. четвъртък -> петък)
+                    got = _ndk_goods(db, [sid], p0.replace(tzinfo=None)).get(sid, {})
+                except Exception:
+                    pass
+            yl = {arts[l.article_id].sku: l.ordered_quantity for l in prev_po.lines if l.ordered_quantity > 0 and l.article_id in arts}
+            if not got:
+                pend = yl
+                st["info"].append(f"{pname} ({len(yl)} реда) още НЕ е дошла - НДК няма фактура за стока")
+            else:
+                match = len(set(yl) & set(got))
+                ani = db.execute(text("""SELECT l.sku FROM manual_order_lines l JOIN manual_orders o ON o.id = l.order_id
+                                          WHERE o.store_id = :s AND l.store_qty > 0 AND o.received_at >= :a AND o.received_at < :b"""),
+                                 {"s": sid, "a": p0, "b": p0 + timedelta(days=1)}).all()
+                ani = {r[0] for r in ani}
+                am = len(ani & set(got))
+                miss = [arts[sku2id[k]].name for k in yl if k not in got and k in sku2id]
+                if ani and am > match and sid in ANI_KEEPS:
+                    st["info"].append(f"заявката е на Ани ({am} от {len(got)} реда са нейните) - нашата е само за сравнение")
+                elif (ani and am > match) or (len(yl) >= 3 and match * 2 < len(yl)):
+                    st["stop"].append(f"{pname}: към НДК не е отишла нашата - дошли са {match} от нашите {len(yl)} реда"
+                                      + (f" ({am} от {len(got)} съвпадат с тази на Ани)" if ani else "")
+                                      + (f"; не дойдоха: {', '.join(n[:28] for n in miss[:6])}" if miss else ""))
+                else:
+                    st["info"].append(f"{pname} е дошла: {match} от {len(yl)} реда")
         if today_po is None:
             st["warn"].append("днес няма заявка на MinMaxAI")
             continue
@@ -88,28 +120,6 @@ def check(db: Session) -> dict:
         st["made"] = today_po.created_at.astimezone(TZ).strftime("%H:%M")
         stock = service.latest_stock_map(db, sid)
         sales = service.load_avg_daily_sales(db, sid, 14)
-        got = goods.get(sid, {})
-        # 1) вчерашната заявка - дошла ли е и чия
-        pend = {}
-        if prev_po is not None and prev_po.created_at.astimezone(TZ).date() == today - timedelta(days=1):
-            yl = {arts[l.article_id].sku: l.ordered_quantity for l in prev_po.lines if l.ordered_quantity > 0 and l.article_id in arts}
-            if not got:
-                pend = yl
-                st["info"].append(f"вчерашната ни заявка ({len(yl)} реда) още НЕ е дошла - НДК няма фактура за стока")
-            else:
-                match = len(set(yl) & set(got))
-                ani = db.execute(text("""SELECT l.sku FROM manual_order_lines l JOIN manual_orders o ON o.id = l.order_id
-                                          WHERE o.store_id = :s AND l.store_qty > 0 AND o.received_at >= :a AND o.received_at < :b"""),
-                                 {"s": sid, "a": y0, "b": start}).all()
-                ani = {r[0] for r in ani}
-                am = len(ani & set(got))
-                if ani and am > match and sid in ANI_KEEPS:
-                    st["info"].append(f"заявката е на Ани ({am} от {len(got)} реда са нейните) - нашата е само за сравнение")
-                elif ani and am > match:
-                    st["stop"].append(f"вчера е дошла заявката на АНИ ({am} от {len(got)} реда съвпадат с нейната, с нашата само {match})"
-                                      " - към НДК не е отишла нашата")
-                else:
-                    st["info"].append(f"вчерашната ни заявка е дошла: {match} от {len(yl)} реда")
         # 2) редовете в днешната заявка
         dup, over, nosale = [], [], []
         for l in lines:
