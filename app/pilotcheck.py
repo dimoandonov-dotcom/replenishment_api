@@ -106,6 +106,8 @@ def check(db: Session) -> dict:
                 miss = [arts[sku2id[k]].name for k in yl if k not in got and k in sku2id]
                 if ani and am > match and sid in ANI_KEEPS:
                     st["info"].append(f"заявката е на Ани ({am} от {len(got)} реда са нейните) - нашата е само за сравнение")
+                elif sid in ANI_KEEPS and len(yl) >= 3 and match * 2 < len(yl):
+                    st["info"].append(f"{pname}: дошли са {match} от нашите {len(yl)} реда - поръчва Ани, нашата е за сравнение")
                 elif (ani and am > match) or (len(yl) >= 3 and match * 2 < len(yl)):
                     st["stop"].append(f"{pname}: към НДК не е отишла нашата - дошли са {match} от нашите {len(yl)} реда"
                                       + (f" ({am} от {len(got)} съвпадат с тази на Ани)" if ani else "")
