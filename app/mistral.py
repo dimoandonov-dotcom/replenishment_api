@@ -55,9 +55,19 @@ TABLES = ["MATERIAL", "LOCATION", "PARTNER", "PRICELIST", "PRICELISTNAME",
           "STORAGEPARTNER", "UOM", "BARCODE"]
 
 
-def connect(region: str | None = None, database: str | None = None):
-    """region="varna" - MSSQL_*; region="sofia" - SOFIA_MSSQL_* (магазините в София). По подразбиране - текущият."""
-    region = region or current()
+# Входът в SQL сървъра на Мистрал отнема 5-12 сек. (10.11), а самата заявка - 0.1 сек.
+# Затова връзките се пазят и се ползват отново, вместо всеки път нов вход.
+import queue as _queue
+import threading as _threading
+import time as _time
+
+_POOL: dict = {}
+_POOL_LOCK = _threading.Lock()
+POOL_IDLE_SEC = 240      # по-дълго неизползвана връзка се затваря (сървърът може да я е прекъснал)
+POOL_MAX = 6
+
+
+def _raw_connect(region: str, database: str | None):
     p = "SOFIA_MSSQL_" if region == "sofia" else "MSSQL_"
     return pymssql.connect(
         server=os.getenv(p + "HOST", ""),
@@ -67,6 +77,82 @@ def connect(region: str | None = None, database: str | None = None):
         database=database or os.getenv(p + "DB", "MistralAnalytics"),
         login_timeout=15, timeout=120, charset="UTF-8", as_dict=True,
     )
+
+
+class _Pooled:
+    """Обвивка: `with connect() as conn` и conn.close() връщат връзката в пула, вместо да я затварят."""
+
+    def __init__(self, key, conn):
+        self._key, self._conn, self._bad = key, conn, False
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, et, ev, tb):
+        if et is not None:
+            self._bad = True
+        self.close()
+        return False
+
+    def close(self):
+        c, self._conn = self._conn, None
+        if c is None:
+            return
+        if self._bad:
+            try:
+                c.close()
+            except Exception:
+                pass
+            return
+        try:
+            c.rollback()
+        except Exception:
+            try:
+                c.close()
+            except Exception:
+                pass
+            return
+        q = _POOL.setdefault(self._key, _queue.LifoQueue())
+        if q.qsize() >= POOL_MAX:
+            try:
+                c.close()
+            except Exception:
+                pass
+        else:
+            q.put((_time.time(), c))
+
+
+def connect(region: str | None = None, database: str | None = None):
+    """region="varna" - MSSQL_*; region="sofia" - SOFIA_MSSQL_* (магазините в София). По подразбиране - текущият."""
+    region = region or current()
+    key = (region, database)
+    with _POOL_LOCK:
+        q = _POOL.setdefault(key, _queue.LifoQueue())
+    while True:
+        try:
+            at, c = q.get_nowait()
+        except _queue.Empty:
+            break
+        if _time.time() - at > POOL_IDLE_SEC:
+            try:
+                c.close()
+            except Exception:
+                pass
+            continue
+        try:
+            cur = c.cursor()
+            cur.execute("SELECT 1 AS ok")
+            cur.fetchall()
+            return _Pooled(key, c)
+        except Exception:
+            try:
+                c.close()
+            except Exception:
+                pass
+    return _Pooled(key, _raw_connect(region, database))
 
 
 def freshness(region: str = "sofia") -> dict:
