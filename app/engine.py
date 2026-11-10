@@ -229,6 +229,8 @@ def calculate_line(
     # САМО ако стоката ще свърши до следващата доставка - иначе трупаме запас
     # (напр. 6 бр. при продажби 1 бр. на 2 седмици = 3 месеца запас).
     below_min = current_stock < setting.min_stock
+    # ръчно заключен минимум: човекът е решил, че тук рафтът трябва да е пълен (напр. тъмно 500 в Надежда)
+    manual_floor = not getattr(setting, "auto_adjust", True)
     force = below_min or cover_trigger or current_stock <= 0
     if force and avg_daily_sales is not None:
         if current_stock <= 0:
@@ -248,7 +250,8 @@ def calculate_line(
         # бавен артикул, който се поръчва само на цели опаковки: ако една опаковка стига
         # за повече от MAX_PACK_COVER_DAYS дни - не се поръчва автоматично (решава човек)
         if (force and current_stock > 0 and avg_daily_sales > 0 and setting.pack_size > 1
-                and setting.pack_size / avg_daily_sales > MAX_PACK_COVER_DAYS):
+                and setting.pack_size / avg_daily_sales > MAX_PACK_COVER_DAYS
+                and not (manual_floor and current_stock < floor_stock)):
             force = False
     ordered = round_up_to_pack(
         suggested, setting.pack_size, force_min_pack=force
@@ -260,6 +263,8 @@ def calculate_line(
         before_cap = ordered
         # ако без доставка наличността няма да стигне до следващата - поне една опаковка остава
         floor_q = pk if (current_stock < avg_daily_sales * (extra_days + 1) or current_stock < floor_stock) else 0
+        if manual_floor and current_stock < floor_stock:
+            floor_q = ordered      # ръчно заключен минимум (Димо) - под него се поръчва без таван на дните
         while ordered > floor_q and (current_stock + ordered) / avg_daily_sales > MAX_STOCK_DAYS:
             ordered -= pk
         if ordered <= 0:
