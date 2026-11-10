@@ -19,6 +19,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS order_edits (id BIGSERIAL PRIMARY KEY, day DATE, store_id INT, article_id INT, sku TEXT,
   old_qty INT, new_qty INT, by_user TEXT, reason TEXT, at TIMESTAMPTZ DEFAULT now());
 CREATE INDEX IF NOT EXISTS order_edits_day ON order_edits(day, store_id);
+CREATE TABLE IF NOT EXISTS order_downloads (id BIGSERIAL PRIMARY KEY, day DATE, store_id INT, kind TEXT, at TIMESTAMPTZ DEFAULT now());
+CREATE INDEX IF NOT EXISTS order_downloads_day ON order_downloads(day, store_id);
 """
 _ok = False
 
@@ -138,3 +140,82 @@ def listing(db: Session, days: int = 7, store_id: int | None = None) -> list[dic
     rows = db.execute(text(q), {"d": date.today() - timedelta(days=days), "s": store_id}).all()
     return [{"at": r[0].astimezone(SOFIA).strftime("%d.%m %H:%M"), "day": r[1].strftime("%d.%m"), "store_id": r[2], "store": r[3],
              "sku": r[4], "name": r[5], "old": r[6], "new": r[7], "by": r[8], "reason": r[9]} for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# „Само добавките“: промените след като офисът е свалил заявката (Димо, 10.11)
+# ---------------------------------------------------------------------------
+
+def log_download(db: Session, store_id: int, day: date, kind: str = "full") -> None:
+    """Всяко сваляне на заявката (full) или на добавките (additions) - оттам се знае какво е изпратено."""
+    try:
+        ensure(db)
+        db.execute(text("INSERT INTO order_downloads(day, store_id, kind) VALUES (:d,:s,:k)"),
+                   {"d": day, "s": store_id, "k": kind})
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
+def additions(db: Session, store_id: int, day: date) -> dict:
+    """Нетната промяна по артикул след последното изпращане: първото сваляне на заявката за деня,
+    или последното сваляне на добавките, ако има такова по-късно."""
+    ensure(db)
+    first_full = db.execute(text("SELECT MIN(at) FROM order_downloads WHERE day=:d AND store_id=:s AND kind='full'"),
+                            {"d": day, "s": store_id}).scalar()
+    last_add = db.execute(text("SELECT MAX(at) FROM order_downloads WHERE day=:d AND store_id=:s AND kind='additions'"),
+                          {"d": day, "s": store_id}).scalar()
+    if first_full is None:
+        return {"cutoff": None, "rows": [], "n_files": 0}
+    cutoff = max(first_full, last_add) if last_add else first_full
+    n_files = db.execute(text("SELECT COUNT(*) FROM order_downloads WHERE day=:d AND store_id=:s AND kind='additions'"),
+                         {"d": day, "s": store_id}).scalar() or 0
+    rows = db.execute(text("""SELECT e.article_id, e.sku, a.name, a.supplier_name, e.old_qty, e.new_qty, e.by_user, e.reason
+        FROM order_edits e LEFT JOIN articles a ON a.id = e.article_id
+        WHERE e.day=:d AND e.store_id=:s AND e.at > :c ORDER BY e.at, e.id"""), {"d": day, "s": store_id, "c": cutoff}).all()
+    by: dict = {}
+    for r in rows:
+        x = by.get(r.article_id)
+        if x is None:
+            by[r.article_id] = x = {"sku": r.sku, "name": r.name or r.sku, "ndk_name": (r.supplier_name or r.name or r.sku).strip(),
+                                    "before": int(r.old_qty or 0), "reasons": []}
+        x["after"] = int(r.new_qty or 0)
+        if r.reason:
+            x["reasons"].append(r.reason)
+    out = []
+    for x in by.values():
+        x["delta"] = x["after"] - x["before"]
+        if x["delta"] != 0:
+            x["reason"] = "; ".join(dict.fromkeys(x.pop("reasons")))
+            out.append(x)
+        else:
+            x.pop("reasons")
+    out.sort(key=lambda x: (x["delta"] < 0, x["name"]))
+    return {"cutoff": cutoff.astimezone(SOFIA).strftime("%H:%M"), "rows": out, "n_files": int(n_files)}
+
+
+def additions_xlsx(rows: list[dict]) -> bytes:
+    """Лист 1 - добавките по бланката на НДК (само плюсовете); лист 2 - намаленията (за обаждане на НДК)."""
+    import openpyxl
+    from io import BytesIO
+    from .exports import HEADERS, UNIT_LABEL
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet 1"
+    ws.append(HEADERS)
+    for x in rows:
+        if x["delta"] > 0:
+            ws.append([int(x["sku"]) if str(x["sku"]).isdigit() else x["sku"], x["ndk_name"], UNIT_LABEL, x["delta"]])
+    for col, w in {"A": 12, "B": 55, "C": 8, "D": 8}.items():
+        ws.column_dimensions[col].width = w
+    neg = [x for x in rows if x["delta"] < 0]
+    if neg:
+        w2 = wb.create_sheet("Намаления")
+        w2.append(["ArtNomer", "Artikul", "Беше", "Става", "Промяна", "Причина"])
+        for x in neg:
+            w2.append([x["sku"], x["name"], x["before"], x["after"], x["delta"], x.get("reason") or ""])
+        w2.column_dimensions["B"].width = 50
+        w2.column_dimensions["F"].width = 50
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

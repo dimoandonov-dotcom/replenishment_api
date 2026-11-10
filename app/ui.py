@@ -401,6 +401,8 @@ def export_preview(
     res = service.calculate_with_transit(db, store_id, d, None, respect_schedule)
     content = exports_svc.build_workbook_from_lines(res.lines, db)
     filename = exports_svc.order_filename(store, d)   # магазин + дата на заявката
+    from . import orderedits
+    orderedits.log_download(db, store_id, d, "full")
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument."
@@ -1889,11 +1891,42 @@ class ExportSheet(BaseModel):
 class ExportIn(BaseModel):
     filename: str = "Справка"
     sheets: list[ExportSheet]
+    order_store_id: int | None = None     # таблицата на заявката по магазин - сваляне за изпращане
+
+
+@router.get("/orders/{store_id}/additions/export")
+def export_additions(store_id: int, day: date | None = None, db: Session = Depends(get_db)):
+    """Само промените след като заявката е свалена/изпратена - за допълнителна заявка към НДК."""
+    from urllib.parse import quote
+    from . import orderedits
+    store = db.get(m.Store, store_id)
+    if not store:
+        raise HTTPException(404, f"Няма магазин с id {store_id}")
+    d = day or datetime.now(_SOFIA).date()
+    r = orderedits.additions(db, store_id, d)
+    if r["cutoff"] is None:
+        raise HTTPException(409, "Заявката за днес още не е сваляна - свали цялата заявка (в нея вече са и добавките).")
+    if not r["rows"]:
+        raise HTTPException(409, f"Няма промени след {r['cutoff']} - няма какво да се изпраща.")
+    fn = exports_svc.order_filename(store, d)[:-5] + " добавка" + (f" {r['n_files'] + 1}" if r["n_files"] else "") + ".xlsx"
+    content = orderedits.additions_xlsx(r["rows"])
+    orderedits.log_download(db, store_id, d, "additions")
+    return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(fn)}"})
+
+
+@router.get("/orders/{store_id}/additions")
+def list_additions(store_id: int, day: date | None = None, db: Session = Depends(get_db)):
+    from . import orderedits
+    return orderedits.additions(db, store_id, day or datetime.now(_SOFIA).date())
 
 
 @router.post("/ui/export-xlsx")
-def ui_export_xlsx(payload: ExportIn):
+def ui_export_xlsx(payload: ExportIn, db: Session = Depends(get_db)):
     """Таблицата, която е на екрана -> .xlsx (Arial, заглавен ред, автофилтър, замразен ред)."""
+    if payload.order_store_id:
+        from . import orderedits
+        orderedits.log_download(db, payload.order_store_id, datetime.now(_SOFIA).date(), "full")
     import re
     from io import BytesIO
     from urllib.parse import quote

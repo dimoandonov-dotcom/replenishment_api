@@ -464,6 +464,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <button id="nextStore" aria-label="Следващ магазин">&rarr;</button>
     <button class="go" id="reloadOrder">Преизчисли</button>
     <button class="warm" id="xlsOrder">Свали Excel</button>
+    <button class="warm" id="xlsAdd" title="Само промените след като заявката е свалена - за допълнителна заявка към НДК">➕ Само добавките</button>
     <button id="viberOrder" style="background:#7360F2;color:#fff" title="Изпрати заявката на магазина във Viber">📤 Viber</button>
     <button id="ndkDir" title="Смени папката, в която се записват Excel-ите">📁 Папка НДК</button>
     <button id="oxAll">Покажи всички графики</button>
@@ -1178,6 +1179,8 @@ async function initOrders() {
   $("nextStore").onclick = () => step(1);
   $("reloadOrder").onclick = () => loadOrder();
   $("xlsOrder").onclick = () => downloadNdk(`/orders/preview/${$("storeSel").value}/export`).catch(e => msg("ordMsg", e.message, false));
+  $("xlsAdd").onclick = () => downloadNdk(`/orders/${$("storeSel").value}/additions/export`)
+    .catch(e => { const t = (e.message || "").replace(/^\d+\s*/, ""); let d = t; try { d = JSON.parse(t).detail || t; } catch (_) {} toast(d, false); });
   $("ndkDir").onclick = () => ndkFolder(true).then(h => h && toast(`Папка за Excel-ите: „${h.name}“`));
   if (!window.showDirectoryPicker) $("ndkDir").style.display = "none";
   $("saveOrder").onclick = saveOrder;
@@ -1777,7 +1780,8 @@ async function exportTable(table, title) {
   if (!rows.length) { toast("Таблицата е празна", false); return; }
   try {
     const res = await fetch("/ui/export-xlsx", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename: title, sheets: [{ name: title.slice(0, 31), columns, rows }] }) });
+      body: JSON.stringify({ filename: title, sheets: [{ name: title.slice(0, 31), columns, rows }],
+        order_store_id: (table.querySelector("#ordBody") && $("storeSel")) ? Number($("storeSel").value) || null : null }) });
     if (!res.ok) throw new Error(await res.text());
     const blob = await res.blob(); const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); const dt = new Date(), dd = String(dt.getDate()).padStart(2, "0") + "." + String(dt.getMonth() + 1).padStart(2, "0") + "." + dt.getFullYear();

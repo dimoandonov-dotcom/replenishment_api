@@ -683,6 +683,13 @@ def export_order_file(order_id: int, db: Session = Depends(get_db)):
         filename, content = exports_svc.export_order(db, order_id)
     except ValueError as e:
         raise HTTPException(404, str(e))
+    try:
+        from . import orderedits
+        from zoneinfo import ZoneInfo as _Z
+        _po = db.get(m.PurchaseOrder, order_id)
+        orderedits.log_download(db, _po.store_id, _po.created_at.astimezone(_Z("Europe/Sofia")).date(), "full")
+    except Exception:
+        db.rollback()
     return _attachment(
         filename, content,
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
