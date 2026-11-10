@@ -23,6 +23,8 @@ from . import models as m
 
 TZ = ZoneInfo("Europe/Sofia")
 BASE_MAX_DAYS = 45          # ревизия, по-стара от това, не е основа
+FAST_PER_DAY = 2.0          # бърз артикул: от 2 бр./ден нагоре
+FAST_SILENCE_DAYS = 3.0     # ... и 3 дни без продажба -> вероятно е 0 (Димо, 10.11)
 PHANTOM_MIN_PER_DAY = 1.0   # под 1/ден тишината не доказва нищо (ревизия 29.10: при 0.4-0.8/ден стоката си беше там)
 _cache: dict[int, tuple[float, dict]] = {}
 CACHE_SEC = 600
@@ -184,6 +186,13 @@ def compute(db: Session, store_id: int, fresh: bool = False) -> dict:
                 it["flag"] = "🕳"
                 it["why"] = (f"продава {per_day:.1f}/ден (обичайна пауза до {typical} дни), а няма продажба от {silence:.0f} дни "
                              f"при „наличност“ {stock_now:g} - вероятно е 0")
+        # бърз артикул (2+/ден): 3 дни тишина стигат (Надежда 10.11: Бургаско 500 - 24 в Мистрал, 5 дни без продажба)
+        if (not it["phantom"] and not delivered_after and per_day >= FAST_PER_DAY and silence is not None
+                and silence >= FAST_SILENCE_DAYS and stock_now > 0 and code not in counted7):
+            it["phantom"] = True
+            it["flag"] = "🕳"
+            it["why"] = (f"бърз артикул - продава {per_day:.1f}/ден, а няма продажба от {silence:.0f} дни "
+                         f"при „наличност“ {stock_now:g} - вероятно е 0")
         it["counted_recently"] = counted7[code].strftime("%d.%m") if code in counted7 else None
         if it["phantom"]:
             it["effective"] = 0.0

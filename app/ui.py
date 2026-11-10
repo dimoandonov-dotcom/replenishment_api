@@ -427,6 +427,39 @@ def mistral_q(sql: str, region: str = "varna"):
         return [{k: (v if isinstance(v, (int, float, str)) or v is None else str(v)) for k, v in r.items()} for r in cur.fetchmany(500)]
 
 
+@router.get("/ui/mistral/ping")
+def mistral_ping(region: str = "varna"):
+    """Колко време отнема всяка стъпка до Мистрал (за бавно АПИ)."""
+    import os, socket, time as _t
+    from . import mistral
+    p = "SOFIA_MSSQL_" if region == "sofia" else "MSSQL_"
+    host, port = os.getenv(p + "HOST", ""), int(os.getenv(p + "PORT", "1433"))
+    out = {}
+    t = _t.time()
+    try:
+        socket.getaddrinfo(host, port)
+        out["dns_s"] = round(_t.time() - t, 2)
+    except Exception as e:
+        out["dns_err"] = type(e).__name__
+    t = _t.time()
+    try:
+        socket.create_connection((host, port), timeout=20).close()
+        out["tcp_s"] = round(_t.time() - t, 2)
+    except Exception as e:
+        out["tcp_err"] = f"{type(e).__name__}: {e}"[:120]
+    t = _t.time()
+    try:
+        conn = mistral.connect(region)
+        out["login_s"] = round(_t.time() - t, 2)
+        t = _t.time()
+        cur = conn.cursor(); cur.execute("SELECT 1 AS a"); cur.fetchall()
+        out["query_s"] = round(_t.time() - t, 2)
+        conn.close()
+    except Exception as e:
+        out["sql_err"] = f"{type(e).__name__}: {e}"[:160]
+    return out
+
+
 @router.get("/ui/mistral/freshness")
 def mistral_freshness(region: str = "sofia"):
     from . import mistral
