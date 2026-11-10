@@ -241,6 +241,10 @@ def calculate_line(
             force = current_stock < avg_daily_sales * (extra_days + 1 + 0.5)
         else:
             force = current_stock < avg_daily_sales * (MIN_PACK_COVER_DAYS + extra_days)
+        # под долната граница (минимума) - цяла опаковка, иначе рафтът/хладилникът стои на 1-2 бр.
+        # (Надежда 10.11: Младо пиво 2 при мин 7, Каменица 2л 1 при мин 4 - не се поръчваха заради опаковката)
+        if not force and current_stock < floor_stock:
+            force = True
         # бавен артикул, който се поръчва само на цели опаковки: ако една опаковка стига
         # за повече от MAX_PACK_COVER_DAYS дни - не се поръчва автоматично (решава човек)
         if (force and current_stock > 0 and avg_daily_sales > 0 and setting.pack_size > 1
@@ -255,7 +259,7 @@ def calculate_line(
         pk = max(int(setting.pack_size or 1), 1)
         before_cap = ordered
         # ако без доставка наличността няма да стигне до следващата - поне една опаковка остава
-        floor_q = pk if current_stock < avg_daily_sales * (extra_days + 1) else 0
+        floor_q = pk if (current_stock < avg_daily_sales * (extra_days + 1) or current_stock < floor_stock) else 0
         while ordered > floor_q and (current_stock + ordered) / avg_daily_sales > MAX_STOCK_DAYS:
             ordered -= pk
         if ordered <= 0:
