@@ -260,6 +260,9 @@ def calculate_line(
     ordered = round_up_to_pack(
         suggested, setting.pack_size, force_min_pack=force
     )
+    # дни без доставка: половин опаковка и нагоре се закръгля нагоре - по-добре 1 стек отгоре, отколкото празно
+    if extra_days >= STRONG_COVER_EXTRA and setting.pack_size > 1 and suggested - ordered >= setting.pack_size * 0.5:
+        ordered += setting.pack_size
     # таван на запаса: след доставката наличността да не стига за повече от MAX_STOCK_DAYS дни
     # (цели опаковки на бавни артикули). Изключение: свършил е -> поне една опаковка, рафтът да не е празен.
     if ordered > 0 and avg_daily_sales and avg_daily_sales > 0 and current_stock > 0:
