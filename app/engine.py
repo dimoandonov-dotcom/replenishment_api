@@ -171,6 +171,8 @@ MAX_PACK_COVER_DAYS = 21.0
 MAX_STOCK_DAYS = float(_os_e.getenv("MAX_STOCK_DAYS", "14"))
 # от колко дни покритие нататък (доставката + дните без доставка) се смята по силните дни
 STRONG_COVER_EXTRA = 2
+STRONG_MIN_ADR = 3.0      # само артикули от 3 бр./ден нагоре (при бавните 3-те „силни“ дни са случайност)
+STRONG_MAX_RATIO = 1.6    # силните дни - най-много 1,6 пъти средното
 
 
 def calculate_line(
@@ -216,7 +218,7 @@ def calculate_line(
     if avg_daily_sales and avg_daily_sales > 0:
         # таван: до ORDER_COVER_DAYS (+ дни без доставка) продажби, не до макса - но не под долната граница
         cap = max(math.ceil(avg_daily_sales * (ORDER_COVER_DAYS + extra_days)), 1, math.ceil(floor_stock))
-        if cover_trigger and cap > max_target:
+        if (cover_trigger or extra_days >= STRONG_COVER_EXTRA) and cap > max_target:
             # над минимума, но няма да стигне до следващата доставка -> до нужното за дните
             max_target = float(cap)
             notes = ((notes + " · ") if notes else "") + f"няма да стигне до следващата доставка — до {ORDER_COVER_DAYS + extra_days:g} дни продажби"
@@ -534,11 +536,13 @@ def generate_order_lines(
 
         adr_ = avg_daily_sales.get((s.store_id, s.article_id), 0.0)
         # заявката покрива дни без доставка (уикенд, Надежда чт -> пн): по силните дни, не по средното (Димо, 13.11)
-        if cover_extra >= STRONG_COVER_EXTRA and strong_daily_sales and adr_ >= 1.0:
-            st_ = strong_daily_sales.get((s.store_id, s.article_id), 0.0)
+        # дните до следващата доставка - по силните дни, резервът - по средното; само за бързите артикули
+        if cover_extra >= STRONG_COVER_EXTRA and strong_daily_sales and adr_ >= STRONG_MIN_ADR:
+            st_ = min(strong_daily_sales.get((s.store_id, s.article_id), 0.0), adr_ * STRONG_MAX_RATIO)
             if st_ > adr_:
+                eq_ = (st_ * (cover_extra + 1) + adr_ * (ORDER_COVER_DAYS - 1)) / (ORDER_COVER_DAYS + cover_extra)
                 notes = ((notes + " · ") if notes else "") + f"дни без доставка - по силните дни {st_:.1f}/ден (средно {adr_:.1f})"
-                adr_ = st_
+                adr_ = eq_
         # над минимума, но наличността няма да стигне до следващата доставка (напр. уикенд без доставка)
         cover_trigger = (s.max_stock > 0 and adr_ > 0
                          and (current < adr_ * (SKIP_COVER_DAYS + cover_extra)
