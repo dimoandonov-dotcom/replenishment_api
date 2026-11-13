@@ -169,6 +169,8 @@ ORDER_COVER_DAYS = 2.0
 MAX_PACK_COVER_DAYS = 21.0
 # Наличност след доставката: най-много за толкова дни продажби (+ дните без доставка)
 MAX_STOCK_DAYS = float(_os_e.getenv("MAX_STOCK_DAYS", "14"))
+# от колко дни покритие нататък (доставката + дните без доставка) се смята по силните дни
+STRONG_COVER_EXTRA = 2
 
 
 def calculate_line(
@@ -426,6 +428,7 @@ def generate_order_lines(
     schedules: dict[tuple[int, int], list[ScheduleEntry]] | None = None,
     closures: list[ClosurePeriod] | None = None,
     avg_daily_sales: dict[tuple[int, int], float] | None = None,
+    strong_daily_sales: dict[tuple[int, int], float] | None = None,
     mode: str = "below_min",
     weekend_buffer: bool = True,
 ) -> ReplenishmentResult:
@@ -530,6 +533,12 @@ def generate_order_lines(
                     )
 
         adr_ = avg_daily_sales.get((s.store_id, s.article_id), 0.0)
+        # заявката покрива дни без доставка (уикенд, Надежда чт -> пн): по силните дни, не по средното (Димо, 13.11)
+        if cover_extra >= STRONG_COVER_EXTRA and strong_daily_sales and adr_ >= 1.0:
+            st_ = strong_daily_sales.get((s.store_id, s.article_id), 0.0)
+            if st_ > adr_:
+                notes = ((notes + " · ") if notes else "") + f"дни без доставка - по силните дни {st_:.1f}/ден (средно {adr_:.1f})"
+                adr_ = st_
         # над минимума, но наличността няма да стигне до следващата доставка (напр. уикенд без доставка)
         cover_trigger = (s.max_stock > 0 and adr_ > 0
                          and (current < adr_ * (SKIP_COVER_DAYS + cover_extra)
@@ -546,7 +555,7 @@ def generate_order_lines(
             closure_adjustment=adjustment,
             notes=notes,
             mode=mode,
-            avg_daily_sales=avg_daily_sales.get((s.store_id, s.article_id), 0.0),
+            avg_daily_sales=adr_,
             extra_days=cover_extra,
             cover_trigger=cover_trigger,
         )

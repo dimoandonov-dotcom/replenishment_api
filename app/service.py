@@ -199,7 +199,7 @@ def load_avg_daily_sales(
     ).all():
         daily[aid][day] = float(q or 0)
     if not daily:
-        return {}
+        return _Sales()
     last = max(d for v in daily.values() for d in v)
     first = min(d for v in daily.values() for d in v)
     pdays = _promo.promo_days(db)
@@ -213,7 +213,7 @@ def load_avg_daily_sales(
             oos[aid_].add(d_)
     except Exception:
         db.rollback()
-    out = {}
+    out = _Sales()
     for aid, dq in daily.items():
         ended = [(s, e) for s, e in pdays.get(aid, []) if e <= today and e >= since]
         def _promo_day(d):
@@ -244,7 +244,21 @@ def load_avg_daily_sales(
                 if a3 >= 1.0 and a3 > a14 * 1.5:
                     a14 = (a14 + a3) / 2                  # рязък скок последните дни (промо, време)
         out[(store_id, aid)] = a14
+        # силни дни: средното на 3-те най-силни дни от последните 14 (с наличност) - за уикенда/дните без доставка
+        # (Надежда 12.11: средно 4,2/ден, а в четвъртък 9 - поръча 6 бр. Пиринско 2,3л и остана празно до понеделник)
+        vals = sorted((dq.get(d, 0.0) for d in ok14), reverse=True)[:3]
+        if vals and a14 > 0:
+            out.strong[(store_id, aid)] = min(sum(vals) / len(vals), a14 * 2)
     return out
+
+
+class _Sales(dict):
+    """Средни продажби + .strong - силните дни (за заявките, които покриват дни без доставка)."""
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.strong = {}
+
+
 def calculate_for_store(
     db: Session,
     store_id: int,
@@ -343,6 +357,7 @@ def calculate_for_store(
                 schedules=schedules,
                 closures=closures,
                 avg_daily_sales=avg_sales,
+                strong_daily_sales=getattr(avg_sales, "strong", None),
                 mode=mode,
                 weekend_buffer=wknd,
             )
