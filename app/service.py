@@ -178,6 +178,9 @@ def load_closures(db: Session) -> list[ClosurePeriod]:
     ]
 
 
+EMPTY_SHELF_MIN_ADR = 2.0   # от 2 бр./ден нагоре ден без продажба = празен рафт
+
+
 def load_avg_daily_sales(
     db: Session, store_id: int, days: int = 30
 ) -> dict[tuple[int, int], float]:
@@ -203,6 +206,7 @@ def load_avg_daily_sales(
     last = max(d for v in daily.values() for d in v)
     first = min(d for v in daily.values() for d in v)
     pdays = _promo.promo_days(db)
+    open_days = {d for v in daily.values() for d, q in v.items() if q > 0}   # дни, в които магазинът е продавал
     # дни без наличност (снимка <= 0): продажбите тогава са 0 не защото няма търсене, а защото няма стока -
     # не се броят, иначе свършилата стока сваля средното и поръчваме още по-малко (Надежда, 09.11)
     oos = _dd(set)
@@ -230,6 +234,13 @@ def load_avg_daily_sales(
         ok14 = [d for d in win14 if not (d in od and dq.get(d, 0.0) <= 0)]   # без дните на нула без продажби
         if len(ok14) < 5:
             ok14 = win14
+        # празна витрина, а Мистрал показва наличност: бърз артикул (2+/ден) с ден без нито една продажба,
+        # докато магазинът работи - почти сигурно го няма на рафта; този ден не сваля средното (Димо, 13.11)
+        pre_ = sum(dq.get(d, 0.0) for d in ok14) / len(ok14)
+        if pre_ >= EMPTY_SHELF_MIN_ADR:
+            okb = [d for d in ok14 if dq.get(d, 0.0) > 0 or d not in open_days]
+            if len(okb) >= 7:
+                ok14 = okb
         a14 = max(sum(dq.get(d, 0.0) for d in ok14) + dq.get(today, 0.0) * 0, 0.0) / len(ok14)
         win7 = [d for d in ok14 if d >= last - _td(days=6)]
         if len(win7) >= 3:
