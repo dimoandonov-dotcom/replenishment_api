@@ -57,6 +57,7 @@ def _capped(name: str) -> bool:
     return bool(wine or hard)
 
 
+FAST_PER_DAY = 2.0   # от 2 бр./ден: дни без продажба при работещ магазин = празен рафт
 VERY_SLOW = 0.15   # под 0.15 бр./ден (по-малко от 2 бр. за 14 дни): само 1 бройка на рафта
 
 
@@ -129,6 +130,8 @@ def run(db: Session, apply: bool = True) -> dict:
     from . import promo as _promo
     pdays = _promo.promo_days(db)
     sales = defaultdict(float)
+    daily = defaultdict(dict)          # (магазин, артикул) -> {ден: бройки} извън промото
+    open_days = defaultdict(set)       # магазин -> дни, в които е продавал нещо (работил е)
     promo_sales = defaultdict(float)   # продажбите в промо дните (за нови позиции без друга история)
     for sid, aid, d, q in db.execute(
         select(m.SalesHistory.store_id, m.SalesHistory.article_id, m.SalesHistory.sale_date,
@@ -136,10 +139,13 @@ def run(db: Session, apply: bool = True) -> dict:
         .where(m.SalesHistory.sale_date >= since)
         .group_by(m.SalesHistory.store_id, m.SalesHistory.article_id, m.SalesHistory.sale_date)
     ).all():
+        if float(q or 0) > 0:
+            open_days[sid].add(d)
         if aid in pdays and any(a <= d <= b for a, b in pdays[aid]):
             promo_sales[(sid, aid)] += float(q or 0)
             continue
         sales[(sid, aid)] += float(q or 0)
+        daily[(sid, aid)][d] = float(q or 0)
     for aid, periods in pdays.items():
         promo_n = sum(1 for i in range(DAYS) if any(a <= since + timedelta(days=i) <= b for a, b in periods))
         if 0 < promo_n < DAYS:
@@ -196,6 +202,14 @@ def run(db: Session, apply: bool = True) -> dict:
             select(m.StoreArticleSetting).where(m.StoreArticleSetting.store_id == store.id)
         ).scalars().all()}
         stock = service.latest_stock_map(db, store.id)
+        # най-дългата пауза между доставките (Надежда: петък -> понеделник = 3 дни)
+        try:
+            deliv = {e.delivery_weekday for ents in service.load_schedules(db, store.id).values() for e in ents
+                     if e.delivery_weekday}
+        except Exception:
+            db.rollback()
+            deliv = set()
+        max_gap = max((next((k for k in range(1, 8) if ((w - 1 + k) % 7) + 1 in deliv), 1) for w in deliv), default=1)
 
         for aid in plano:
             a = arts.get(aid)
@@ -218,9 +232,33 @@ def run(db: Session, apply: bool = True) -> dict:
             if s is None and sold <= 0:
                 continue  # никога непродаван и без настройка - не го пускаме
 
+            # бърз артикул: дните без продажба, докато магазинът работи, са празен рафт (а Мистрал показва
+            # наличност) - не свалят продажбите; иначе празната витрина сваля мин/макс и пак остава празна
+            # (Надежда, Пиринско 2,3л: 14/22 при реални ~6/ден, Димо 16.11)
+            dq = daily.get((store.id, aid), {})
+            sdp_real, strong = sold / DAYS, 0.0
+            if sold / DAYS >= FAST_PER_DAY and dq:
+                od = open_days.get(store.id, set())
+                ok = [since + timedelta(days=i) for i in range(DAYS)]
+                ok = [d for d in ok if dq.get(d, 0.0) > 0 or d not in od]
+                if len(ok) >= 7:
+                    sdp_real = sum(dq.get(d, 0.0) for d in ok) / len(ok)
+                    sold = sdp_real * DAYS
+                top = sorted(dq.values(), reverse=True)[:3]
+                strong = min(sum(top) / len(top), sdp_real * 1.6) if top else 0.0
             cls, mn_t, mx_t = formula(sold)
             reason = f"продажби {sold:g} бр./14 дни, клас {cls}"
             urgent = False
+            # най-дългата пауза без доставка трябва да се покрие: макс >= силните дни x (пауза + 1 ден),
+            # мин >= средното x паузата
+            if strong > 0 and max_gap >= 2:
+                g_max, g_min = math.ceil(strong * (max_gap + 1)), math.ceil(sdp_real * max_gap)
+                if g_max > mx_t or g_min > mn_t:
+                    mx_t, mn_t = max(mx_t, g_max), max(mn_t, g_min)
+                    reason = (f"продава {sdp_real:.1f}/ден (силни дни {strong:.1f}), {max_gap} дни без доставка "
+                              f"-> мин {mn_t}, макс {mx_t}")
+                    if s is not None and (mx_t > float(s.max_stock) or mn_t > float(s.min_stock)):
+                        urgent = True
             if s is not None and float(s.max_stock) == 0:
                 reason = f"пуснат отново: продава {sold:g} бр./14 дни, клас {cls}"
                 urgent = True
@@ -261,7 +299,8 @@ def run(db: Session, apply: bool = True) -> dict:
             else:
                 # веднъж седмично на позиция - и за свършване; само потвърден
                 # сигнал от Ани може по-често
-                if (store.id, aid) in recent and not (reason.startswith("Ани") or reason.startswith("добавян ръчно")):
+                if (store.id, aid) in recent and not (reason.startswith("Ани") or reason.startswith("добавян ръчно")
+                                                       or (urgent and "без доставка" in reason)):
                     continue
                 om, oM = float(s.min_stock), float(s.max_stock)
                 # мъртва зона: дребни разлики не се пипат (без шум всяка нощ)
