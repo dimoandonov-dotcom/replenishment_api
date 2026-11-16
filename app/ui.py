@@ -877,9 +877,16 @@ def ui_compare_delete(order_id: int, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.post("/learning/run")
-def learning_run(apply: bool = True, db: Session = Depends(get_db)):
-    """Нощното учене (вика се от cron в 02:30). apply=false = само преглед."""
+def learning_run(apply: bool = True, store_id: int | None = None, sku: str | None = None,
+                 db: Session = Depends(get_db)):
+    """Нощното учене (вика се от cron в 02:30). apply=false = само преглед;
+    store_id/sku (само с apply=false) - какво би направило за точно тези позиции."""
     from . import learning
+    if not apply and (store_id or sku):
+        r = learning.run(db, False, full=True)
+        r["sample"] = [c for c in r.pop("all", []) if (not store_id or c["store_id"] == store_id)
+                       and (not sku or c["sku"] == sku)]
+        return r
     return learning.run(db, apply)
 
 

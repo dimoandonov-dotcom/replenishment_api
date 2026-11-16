@@ -76,7 +76,7 @@ def _step(old: float, target: float) -> float:
     return old + max(-lim, min(lim, target - old))
 
 
-def run(db: Session, apply: bool = True) -> dict:
+def run(db: Session, apply: bool = True, full: bool = False) -> dict:
     started = datetime.now(timezone.utc)
     notes = []
     # 1) свежи данни + нощни задачи - само при истинското учене (apply=True);
@@ -347,6 +347,7 @@ def run(db: Session, apply: bool = True) -> dict:
         "changes": len(changes), "counts": dict(counts),
         "ani_unconfirmed": signals[:200], "notes": notes,
         "sample": changes[:50],
+        **({"all": changes} if full else {}),
     }
 
 
