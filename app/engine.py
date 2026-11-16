@@ -171,6 +171,10 @@ MAX_PACK_COVER_DAYS = 21.0
 MAX_STOCK_DAYS = float(_os_e.getenv("MAX_STOCK_DAYS", "14"))
 # от колко дни покритие нататък (доставката + дните без доставка) се смята по силните дни
 STRONG_COVER_EXTRA = 2
+# обекти, в които зареждането за уикенда се разделя на 2 доставки (четвъртък и петък)
+PRELOAD_STORES = {int(x) for x in _os_e.getenv("PRELOAD_STORES", "26").split(",") if x.strip()}
+PRELOAD_DAYS = 1.5        # колко дни от уикенда поема заявката в сряда
+PRELOAD_MIN_ADR = 2.0     # само бързите артикули
 STRONG_MIN_ADR = 3.0      # само артикули от 3 бр./ден нагоре (при бавните 3-те „силни“ дни са случайност)
 STRONG_MAX_RATIO = 1.6    # силните дни - най-много 1,6 пъти средното
 
@@ -497,6 +501,16 @@ def generate_order_lines(
             else:
                 gap = next((k for k in range(1, 8) if ((wd - 1 + k) % 7) + 1 in deliv), 1)
                 cover_extra = max(gap - 1, 0)
+        # разделено зареждане за уикенда (Възраждане, 16.11): заявката ПРЕДИ последната за седмицата
+        # (сряда -> доставка четвъртък) поема част от уикенда, за да не дойде всичко наведнъж в петък
+        preload = False
+        if s.store_id in PRELOAD_STORES and deliv and sched_today is not None and sched_today.delivery_weekday:
+            dw_ = sched_today.delivery_weekday
+            g1 = next((k for k in range(1, 8) if ((dw_ - 1 + k) % 7) + 1 in deliv), 1)
+            if g1 == 1:
+                dw2 = (dw_ % 7) + 1
+                g2 = next((k for k in range(1, 8) if ((dw2 - 1 + k) % 7) + 1 in deliv), 1)
+                preload = g2 >= 3
         # 1) явен период на затваряне (Коледа/Великден) - приоритетен
         # буфер
         if sched_today and closures:
@@ -539,6 +553,9 @@ def generate_order_lines(
 
         adr_ = avg_daily_sales.get((s.store_id, s.article_id), 0.0)
         # заявката покрива дни без доставка (уикенд, Надежда чт -> пн): по силните дни, не по средното (Димо, 13.11)
+        if preload and adr_ >= PRELOAD_MIN_ADR:
+            cover_extra = cover_extra + PRELOAD_DAYS
+            notes = ((notes + " · ") if notes else "") + f"зареждане за уикенда на 2 пъти (+{PRELOAD_DAYS:g} дни)"
         # дните до следващата доставка - по силните дни, резервът - по средното; само за бързите артикули
         if cover_extra >= STRONG_COVER_EXTRA and strong_daily_sales and adr_ >= STRONG_MIN_ADR:
             st_ = min(strong_daily_sales.get((s.store_id, s.article_id), 0.0), adr_ * STRONG_MAX_RATIO)
