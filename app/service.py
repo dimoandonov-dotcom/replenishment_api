@@ -430,21 +430,49 @@ def calculate_for_store(
         if promo_ids and any(ln.article_id in promo_ids for ln in combined.lines):
             import math as _m
             import os as _os
+            from datetime import timedelta as _td2
             up = float(_os.getenv("BROCHURE_MAX_UP", "0.20"))
             base = calculate_for_store(db, store_id, order_date, supplier_id, respect_schedule,
                                        stock_override, run_id, _no_promo=True)
             bq = {ln.article_id: ln.ordered_quantity for ln in base.lines}
+            # след първите BROCHURE_LEARN_DAYS дни на брошурата: таванът = реално измереното вдигане
+            # на продажбите в ТОЗИ магазин (брошура / нормално), най-много x3 (Димо, 16.11)
+            meas = {}
+            try:
+                from sqlalchemy import text as _tx
+                learn_d = int(_os.getenv("BROCHURE_LEARN_DAYS", "2"))
+                base_avg = load_avg_daily_sales(db, store_id)        # нормалните продажби (без брошурните дни)
+                for aid_, st_ in db.execute(_tx("""SELECT i.article_id, MAX(p.start_day) FROM promotion_items i
+                        JOIN promotions p ON p.id = i.promo_id WHERE :d BETWEEN p.start_day AND p.end_day
+                          AND i.article_id = ANY(:a) GROUP BY i.article_id"""),
+                        {"d": _pday, "a": list(promo_ids)}).all():
+                    until_ = order_date - _td2(days=1)
+                    nd_ = (until_ - st_).days + 1
+                    if nd_ < learn_d:
+                        continue
+                    q_ = db.execute(select(func.coalesce(func.sum(m.SalesHistory.quantity_sold), 0)).where(
+                        m.SalesHistory.store_id == store_id, m.SalesHistory.article_id == aid_,
+                        m.SalesHistory.sale_date >= st_, m.SalesHistory.sale_date <= until_)).scalar()
+                    b_ = base_avg.get((store_id, aid_), 0.0)
+                    if b_ > 0 and q_:
+                        meas[aid_] = min(float(q_) / nd_ / b_, 3.0)
+            except Exception:
+                db.rollback()
+                meas = {}
             for ln in list(combined.lines):
                 if ln.article_id not in promo_ids:
                     continue
                 b = int(bq.get(ln.article_id, 0))
                 pk = max(int(ln.pack_size or 1), 1)
-                cap = max(b, (_m.floor(b * (1 + up) / pk)) * pk)
+                up_ = max(up, meas.get(ln.article_id, 1.0) - 1.0)
+                cap = max(b, (_m.floor(b * (1 + up_) / pk)) * pk)
+                if up_ > up and ln.ordered_quantity <= cap and ln.ordered_quantity > b:
+                    ln.notes = (ln.notes or "") + f" · брошура: продава x{1 + up_:.1f} в този магазин"
                 if ln.ordered_quantity > cap:
                     if cap <= 0:
                         combined.lines.remove(ln)
                         continue
-                    ln.notes = (ln.notes or "") + f" · брошура: до +{up * 100:.0f}% над нормалната ({ln.ordered_quantity}→{cap})"
+                    ln.notes = (ln.notes or "") + f" · брошура: до +{up_ * 100:.0f}% над нормалната ({ln.ordered_quantity}→{cap})"
                     ln.ordered_quantity = cap
     except Exception:
         db.rollback()
