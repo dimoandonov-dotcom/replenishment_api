@@ -171,6 +171,7 @@ MAX_PACK_COVER_DAYS = 21.0
 MAX_STOCK_DAYS = float(_os_e.getenv("MAX_STOCK_DAYS", "14"))
 # от колко дни покритие нататък (доставката + дните без доставка) се смята по силните дни
 STRONG_COVER_EXTRA = 2
+DISPLAY_DAYS = 2          # витрина (безалкохолни, вода): поне 2 дни продажби на рафта, най-много 1 стек
 # обекти, в които зареждането за уикенда се разделя на 2 доставки (четвъртък и петък)
 PRELOAD_STORES = {int(x) for x in _os_e.getenv("PRELOAD_STORES", "26").split(",") if x.strip()}
 PRELOAD_DAYS = 1.5        # колко дни от уикенда поема заявката в сряда
@@ -213,8 +214,11 @@ def calculate_line(
     floor_stock = 0.0
     if avg_daily_sales and avg_daily_sales > 0:
         floor_stock = min(float(setting.min_stock or 0), float(max_target))
-        if is_display(setting.name):
-            floor_stock = max(floor_stock, float(min(setting.pack_size, max_target)))
+        if is_display(setting.name) and avg_daily_sales:
+            # витрината: запас за DISPLAY_DAYS дни продажби, най-много един стек
+            # (Божур 17.11: Кола кен 21 бр. при 4/ден - старото правило „цял стек“ поръча още 24)
+            disp = min(float(setting.pack_size), math.ceil(avg_daily_sales * DISPLAY_DAYS))
+            floor_stock = max(floor_stock, float(min(disp, max_target)))
     if (avg_daily_sales and avg_daily_sales > 0 and current_stock >= avg_daily_sales * (SKIP_COVER_DAYS + extra_days)
             and current_stock >= floor_stock):
         return None   # стига за 2+ дни, а доставка има всеки ден
@@ -566,7 +570,8 @@ def generate_order_lines(
         # над минимума, но наличността няма да стигне до следващата доставка (напр. уикенд без доставка)
         cover_trigger = (s.max_stock > 0 and adr_ > 0
                          and (current < adr_ * (SKIP_COVER_DAYS + cover_extra)
-                              or (is_display(s.name) and current < min(s.pack_size, s.max_stock)))
+                              or (is_display(s.name) and current < min(s.pack_size, s.max_stock,
+                                                                       math.ceil(adr_ * DISPLAY_DAYS))))
                          and not needs_reorder(current, s.min_stock, mode, effective_max))
         if not cover_trigger and not needs_reorder(current, s.min_stock, mode, effective_max):
             result.skipped_above_min += 1

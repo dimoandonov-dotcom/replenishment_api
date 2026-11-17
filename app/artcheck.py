@@ -52,6 +52,11 @@ def check(db: Session, store_id: int, q: str) -> dict:
     except Exception:
         db.rollback()
         lines = {}
+    try:
+        returned = service.returned_to_supplier(db, store_id)
+    except Exception:
+        db.rollback()
+        returned = set()
     in_review = set(db.execute(select(m.SettingsReviewQueue.article_id).where(
         m.SettingsReviewQueue.store_id == store_id, m.SettingsReviewQueue.resolved.is_(False),
         m.SettingsReviewQueue.article_id.in_(ids))).scalars())
@@ -76,6 +81,9 @@ def check(db: Session, store_id: int, q: str) -> dict:
             ok, why = False, "❗ Няма мин/макс за този магазин — не е в асортимента му. Задай мин/макс от „Асортимент и цени“."
         elif mx == 0:
             ok, why = False, "⏸ Мин/макс е 0–0 (спрян, защото не се е продавал). Вдигни мин/макс, ако трябва да се зарежда."
+        elif a.id in returned and ad < service.RETURN_MAX_ADR and ln is None:
+            ok, why = False, ("↩ Връщан на доставчика през последните 30 дни и се продава бавно — "
+                              "не се поръчва автоматично (магазинът не го иска).")
         elif ln is not None:
             ok, why = True, f"✅ Влиза в заявката: {ln.ordered_quantity} бр." + (f" ({ln.notes})" if ln.notes else "")
         elif sq is None:

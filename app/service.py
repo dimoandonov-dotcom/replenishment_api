@@ -178,6 +178,35 @@ def load_closures(db: Session) -> list[ClosurePeriod]:
     ]
 
 
+RETURN_DAYS = 30
+RETURN_MAX_ADR = 1.0
+_ret_cache: dict = {}
+
+
+def returned_to_supplier(db: Session, store_id: int) -> set[int]:
+    """Артикули, върнати на доставчика (доставка с минус в Мистрал) в този магазин за последните 30 дни.
+    Кеш за 1 час - заявката се смята няколко пъти."""
+    import time as _tm
+    hit = _ret_cache.get(store_id)
+    if hit and _tm.time() - hit[0] < 3600:
+        return hit[1]
+    from . import mistral
+    from .anomalies import _loc_map
+    out: set[int] = set()
+    with mistral.use("varna"), mistral.connect() as conn:
+        cur = conn.cursor()
+        loc = next((l for l, s_ in _loc_map(db, cur).items() if s_ == store_id), None)
+        if loc is not None:
+            cur.execute(f"""SELECT DISTINCT MATERIALCODE AS c FROM MATERIALQTYLOG WITH (NOLOCK)
+                            WHERE LOCATIONID = {int(loc)} AND OPERATIONTYPE = 2 AND QTY < 0
+                              AND OPERATIONDATE >= DATEADD(day, -{RETURN_DAYS}, GETDATE())""")
+            codes = {str(int(r["c"])) for r in cur.fetchall()}
+            if codes:
+                out = set(db.execute(select(m.Article.id).where(m.Article.sku.in_(codes))).scalars())
+    _ret_cache[store_id] = (_tm.time(), out)
+    return out
+
+
 EMPTY_SHELF_MIN_ADR = 2.0   # от 2 бр./ден нагоре ден без продажба = празен рафт
 
 
@@ -383,6 +412,16 @@ def calculate_for_store(
 
     if combined is None:
         combined = generate_order_lines([], stock, order_date)
+    # върнато на доставчика през последните 30 дни и се продава бавно (под 1/ден) -> не се поръчва само:
+    # магазинът не го иска, а върнатото прави наличността на минус (Странджа, Каменица 1л - 17.11)
+    try:
+        ret = returned_to_supplier(db, store_id)
+        if ret:
+            for ln in list(combined.lines):
+                if ln.article_id in ret and avg_sales.get((store_id, ln.article_id), 0.0) < RETURN_MAX_ADR:
+                    combined.lines.remove(ln)
+    except Exception:
+        db.rollback()
     # последен ден на брошурата: зареждане за STOCKUP_DAYS дни по продажбите в брошурата (докато е отстъпката)
     su = {}
     try:

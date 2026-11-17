@@ -184,6 +184,25 @@ def run(db: Session, apply: bool = True, full: bool = False) -> dict:
     except Exception:
         db.rollback()
 
+    # ръчно махане/намаляване в заявката (магазинът не го иска): дни с намаление спрямо нашето
+    cuts = defaultdict(set)
+    try:
+        from sqlalchemy import text as _t2
+        for sid, aid, d in db.execute(_t2("""SELECT store_id, article_id, day FROM order_edits
+                                              WHERE day >= :d AND new_qty < old_qty"""), {"d": since}).all():
+            cuts[(sid, aid)].add(d)
+    except Exception:
+        db.rollback()
+    # свършвал ли е (снимка <= 0) през последните 7 дни - тогава махането е било грешка и не се учи
+    oos7 = set()
+    try:
+        from sqlalchemy import text as _t3
+        for sid, aid in db.execute(_t3("""SELECT DISTINCT store_id, article_id FROM stock_snapshots
+                                          WHERE quantity <= 0 AND captured_at >= now() - interval '7 days'""")).all():
+            oos7.add((sid, aid))
+    except Exception:
+        db.rollback()
+
     recent = set(db.execute(
         select(m.SettingsLog.store_id, m.SettingsLog.article_id)
         .where(m.SettingsLog.source == "learning",
@@ -290,6 +309,16 @@ def run(db: Session, apply: bool = True, full: bool = False) -> dict:
                 else:
                     signals.append({"store": store.name, "sku": a.sku, "name": a.supplier_name or a.name,
                                     "times": len(ed), "sold_14d": sold, "source": "ръчни добавки"})
+            # магазинът го маха поне 2 дни за 14 и стоката не е свършвала -> праговете слизат (стъпка 30%)
+            ct = cuts.get((store.id, aid), set())
+            if (s is not None and len(ct) >= ANI_MIN_TIMES and len(ed) == 0 and (store.id, aid) not in oos7
+                    and not urgent):
+                lo_min = max(0.0, math.floor(float(s.min_stock) * (1 - MAX_STEP)))
+                lo_max = max(lo_min, math.floor(float(s.max_stock) * (1 - MAX_STEP)))
+                if lo_max < mx_t or lo_min < mn_t:
+                    mn_t, mx_t = min(mn_t, lo_min), min(mx_t, lo_max)
+                    reason = (f"махан ръчно от магазина {len(ct)} дни за 14 и не е свършвал "
+                              f"-> мин {mn_t:g}, макс {mx_t:g}")
             capped = _capped(a.name) or _capped(a.supplier_name or "")
             if capped and mx_t > 3:
                 mn_t, mx_t = min(mn_t, 3), 3
@@ -300,6 +329,7 @@ def run(db: Session, apply: bool = True, full: bool = False) -> dict:
                 # веднъж седмично на позиция - и за свършване; само потвърден
                 # сигнал от Ани може по-често
                 if (store.id, aid) in recent and not (reason.startswith("Ани") or reason.startswith("добавян ръчно")
+                                                       or reason.startswith("махан ръчно")
                                                        or (urgent and "без доставка" in reason)):
                     continue
                 om, oM = float(s.min_stock), float(s.max_stock)
