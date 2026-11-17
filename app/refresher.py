@@ -169,6 +169,12 @@ def _dispatch_check():
                 _state["dispatch_day"] = loc.date()          # днес вече е пусната (ръчно или от cron)
                 return
             if mistral.configured():
+                # продажбите от последните дни наново: нощното теглене в 02:30 изпуска продажби, които
+                # стигат до главната база по-късно (Надежда 16.11: Шуменско 500 - 7 бр. липсваха -> не се поръча)
+                try:
+                    mistral.sync_sales(db, 3)
+                except Exception:
+                    db.rollback()
                 mistral.sync_stock(db)                        # свежа наличност - с днешните фактури
             run = service.run_dispatch(db, loc.date(), None, None, True)
             _state["dispatch_day"] = loc.date()
