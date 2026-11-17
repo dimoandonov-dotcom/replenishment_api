@@ -4,6 +4,8 @@
 Промяната важи за заявката за деня: и за прегледа/Excel, и за вече пуснатата заявка (09:30).
 """
 from __future__ import annotations
+
+import re
 from zoneinfo import ZoneInfo
 
 from datetime import date, datetime, timedelta, timezone
@@ -99,6 +101,15 @@ def save(db: Session, store_id: int, day: date, changes: list[dict], user: str |
         q = max(0, int(c["qty"]))
         old = pol[a.id].ordered_quantity if a.id in pol else c.get("old")
         old = int(old) if old is not None else 0
+        # „от списъка на магазина: +N“ се добавя към заявката ОТПРЕДИ списъка, не към текущата:
+        # повторно натискане на същия списък не трупа (Дубровник 17.11: Корона 6→30→54→78)
+        mt = re.match(r"от списъка на магазина: \+(\d+)", (c.get("reason") or "").strip())
+        if mt:
+            base = db.execute(text("""SELECT old_qty FROM order_edits WHERE day=:d AND store_id=:s AND article_id=:a
+                                        AND reason LIKE 'от списъка на магазина:%' ORDER BY at, id LIMIT 1"""),
+                              {"d": day, "s": store_id, "a": a.id}).scalar()
+            if base is not None:
+                q = int(base) + int(mt.group(1))
         if q == old:
             continue
         reason = (c.get("reason") or "").strip()[:200] or None
