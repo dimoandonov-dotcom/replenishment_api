@@ -158,7 +158,11 @@ def compute(db: Session, store_id: int, fresh: bool = False) -> dict:
                     rw_ -= sum(f["delta"] for f in fx if f["at"] and f["at"].replace(tzinfo=None) <= _a)
                 seq.append((mi_, rw_))
             seq.append((it["mistral"], raw))
-            jump = sum((b2[0] - a2[0]) - (b2[1] - a2[1]) for a2, b2 in zip(seq, seq[1:]))
+            # Сумата по двойките снимки се съкращава до (Мистрал - документи) сега минус същото в първата снимка
+            # след ревизията. Разлика в първата снимка (снимка, направена докато доставка е влизала) се броеше
+            # като „изравняване“ (Младост 18.11: Кола 300 - документи 30 = Мистрал 30, а показваше +12).
+            # Изравняване без документ = колкото Мистрал СЕГА се разминава с ревизия + движения.
+            jump = it["mistral"] - raw
             jump = round(jump, 2) if abs(jump) >= 1 else 0.0
             own = raw + jump + it["ndk_fix"]
             it.update({"base": float(b["found"] or 0), "base_date": b["d"].strftime("%d.%m"),
