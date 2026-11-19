@@ -85,9 +85,16 @@ def build(db: Session, store_id: int) -> dict:
 
     # какво ще поръча заявката в 09:30 (предварително - по последните синхронизирани наличности)
     order = {}
+    order_days = {x.order_weekday for x in db.execute(select(m.StoreSupplierSchedule).where(
+        m.StoreSupplierSchedule.store_id == store_id, m.StoreSupplierSchedule.supplier_id == 1)).scalars()}
+    has_order = not order_days or today.isoweekday() in order_days
     try:
+        if not has_order:
+            raise LookupError("днес няма заявка")
         res = service.calculate_with_transit(db, store_id, today, None, False)
         order = {ln.article_id: (ln.ordered_quantity, ln.notes or "") for ln in res.lines}
+    except LookupError:
+        pass
     except Exception as e:  # noqa: BLE001
         db.rollback()
         print("morning preview:", type(e).__name__, e)
@@ -136,6 +143,8 @@ def build(db: Session, store_id: int) -> dict:
                 row["why"] += " · не се поръчва: не се е продавал 14 дни"
             elif adr < 0.3 and q > 0:
                 row["why"] += f" · бавен (1 бр. за ~{1 / adr:.0f} дни) - поръчва се, когато свърши"
+            elif not has_order:
+                row["why"] += " · днес няма заявка към НДК - добави ръчно, ако е спешно"
             else:
                 row["why"] += " · заявката НЕ го поръчва - провери"
         if adr >= FAST_ADR:
@@ -147,12 +156,14 @@ def build(db: Session, store_id: int) -> dict:
     low.sort(key=lambda r: (-r["adr"], r["stock"]))
     problems = [r for r in fast if r["flag"] != "🟢"] + [r for r in low if r["adr"] >= 0.3 and not r["order"] and r not in fast]
     return {"store": st.name, "at": now.strftime("%d.%m %H:%M"), "next_delivery": nd.strftime("%d.%m") + " " + WD[nd.weekday()],
-            "days_to_delivery": days_to, "articles": len(sett), "fast": fast, "low": low, "problems": len(problems)}
+            "days_to_delivery": days_to, "articles": len(sett), "has_order": has_order, "fast": fast, "low": low, "problems": len(problems)}
 
 
 def text(rep: dict) -> str:
     out = [f"📦 {rep['store']} — наличности {rep['at']}",
-           f"Следваща доставка: {rep['next_delivery']} (трябват {rep['days_to_delivery']} дни продажби)"]
+           f"Следваща доставка: {rep['next_delivery']} (трябват {rep['days_to_delivery']} дни продажби)",
+           "Заявката в 09:30 е предварителна (по наличностите от нощта)." if rep["has_order"]
+           else "Днес няма заявка към НДК."]
     f = rep["fast"]
     bad = [r for r in f if r["flag"] != "🟢"]
     out.append("")
