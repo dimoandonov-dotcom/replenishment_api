@@ -180,6 +180,8 @@ PRELOAD_MIN_ADR = 2.0     # само бързите артикули
 # се държи резерв за една голяма покупка (Надежда, Димо 19.11)
 PEAK_STORES = {int(x) for x in _os_e.getenv("PEAK_STORES", "46").split(",") if x.strip()}
 PEAK_MIN_ADR = 1.0        # само бързите артикули (1+ бр./ден)
+# само тези артикули (Димо 19.11: Пиринско 2,3л и Шуменско 2,2л); празно = всички бързи
+PEAK_SKUS = {x.strip() for x in _os_e.getenv("PEAK_SKUS", "6712,8233").split(",") if x.strip()}
 PEAK_MAX_DAYS = 4.0       # резервът - най-много толкова дни средни продажби и най-много 1 опаковка
 STRONG_MIN_ADR = 3.0      # само артикули от 3 бр./ден нагоре (при бавните 3-те „силни“ дни са случайност)
 STRONG_MAX_RATIO = 1.6    # силните дни - най-много 1,6 пъти средното
@@ -580,7 +582,8 @@ def generate_order_lines(
                 adr_ = eq_
         # пикови покупки (Надежда): резерв за една голяма покупка над нуждата до следващата доставка
         peak_buf = 0.0
-        if s.store_id in PEAK_STORES and peak_daily_sales and adr_ >= PEAK_MIN_ADR and s.max_stock > 0:
+        if (s.store_id in PEAK_STORES and peak_daily_sales and adr_ >= PEAK_MIN_ADR and s.max_stock > 0
+                and (not PEAK_SKUS or str(s.sku) in PEAK_SKUS)):
             pk_ = peak_daily_sales.get((s.store_id, s.article_id), 0.0)
             peak_buf = float(min(pk_, max(int(s.pack_size or 1), 1), math.ceil(adr_ * PEAK_MAX_DAYS)))
             if peak_buf <= adr_:
