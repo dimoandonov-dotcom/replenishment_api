@@ -119,7 +119,8 @@ def build(db: Session, store_id: int) -> dict:
             row["why"] = f"на ръба: трябват ~{math.ceil(need)} до доставката ({WD[nd.weekday()]}), силен ден може да го изчисти"
         else:
             row["flag"] = "🟢"
-            row["why"] = f"стига за ~{row['cover_days']:g} дни"
+            row["why"] = (f"стига за ~{row['cover_days']:g} дни" if row["cover_days"] is not None
+                          else "не се е продавал 14 дни")
         if oq:
             row["why"] += f" · заявката поръчва {oq:g}"
         elif row["flag"] in ("🔴", "🟠", "🕳") or q < LOW_STOCK:
