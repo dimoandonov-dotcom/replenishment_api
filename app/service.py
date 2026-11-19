@@ -289,6 +289,8 @@ def load_avg_daily_sales(
         vals = sorted((dq.get(d, 0.0) for d in ok14), reverse=True)[:3]
         if vals and a14 > 0:
             out.strong[(store_id, aid)] = min(sum(vals) / len(vals), a14 * 2)
+            # най-голямата еднодневна покупка (Надежда 19.11: село, купуват наведнъж по 6-20 бр.)
+            out.peak[(store_id, aid)] = max(vals[0], 0.0)
     return out
 
 
@@ -297,6 +299,7 @@ class _Sales(dict):
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
         self.strong = {}
+        self.peak = {}
 
 
 def calculate_for_store(
@@ -398,6 +401,7 @@ def calculate_for_store(
                 closures=closures,
                 avg_daily_sales=avg_sales,
                 strong_daily_sales=getattr(avg_sales, "strong", None),
+                peak_daily_sales=getattr(avg_sales, "peak", None),
                 mode=mode,
                 weekend_buffer=wknd,
             )

@@ -176,6 +176,11 @@ DISPLAY_DAYS = 2          # витрина (безалкохолни, вода):
 PRELOAD_STORES = {int(x) for x in _os_e.getenv("PRELOAD_STORES", "26").split(",") if x.strip()}
 PRELOAD_DAYS = 1.5        # колко дни от уикенда поема заявката в сряда
 PRELOAD_MIN_ADR = 2.0     # само бързите артикули
+# обекти с пикови покупки (село - купуват наведнъж по каса): над нуждата до следващата доставка
+# се държи резерв за една голяма покупка (Надежда, Димо 19.11)
+PEAK_STORES = {int(x) for x in _os_e.getenv("PEAK_STORES", "46").split(",") if x.strip()}
+PEAK_MIN_ADR = 1.0        # само бързите артикули (1+ бр./ден)
+PEAK_MAX_DAYS = 4.0       # резервът - най-много толкова дни средни продажби и най-много 1 опаковка
 STRONG_MIN_ADR = 3.0      # само артикули от 3 бр./ден нагоре (при бавните 3-те „силни“ дни са случайност)
 STRONG_MAX_RATIO = 1.6    # силните дни - най-много 1,6 пъти средното
 
@@ -190,6 +195,7 @@ def calculate_line(
     avg_daily_sales: float | None = None,
     extra_days: int = 0,
     cover_trigger: bool = False,
+    peak_buffer: float = 0.0,
 ) -> OrderLine | None:
     """
     Изчислява един ред от заявка. Връща None, ако не се налага поръчка.
@@ -219,14 +225,18 @@ def calculate_line(
             # (Божур 17.11: Кола кен 21 бр. при 4/ден - старото правило „цял стек“ поръча още 24)
             disp = min(float(setting.pack_size), math.ceil(avg_daily_sales * DISPLAY_DAYS))
             floor_stock = max(floor_stock, float(min(disp, max_target)))
-    if (avg_daily_sales and avg_daily_sales > 0 and current_stock >= avg_daily_sales * (SKIP_COVER_DAYS + extra_days)
+        if peak_buffer > 0:
+            # резерв за пикова покупка: до следващата доставка + една голяма покупка
+            floor_stock = max(floor_stock, float(math.ceil(avg_daily_sales * (1 + extra_days) + peak_buffer)))
+    if (avg_daily_sales and avg_daily_sales > 0
+            and current_stock >= avg_daily_sales * (SKIP_COVER_DAYS + extra_days) + peak_buffer
             and current_stock >= floor_stock):
         return None   # стига за 2+ дни, а доставка има всеки ден
 
     if avg_daily_sales and avg_daily_sales > 0:
         # таван: до ORDER_COVER_DAYS (+ дни без доставка) продажби, не до макса - но не под долната граница
-        cap = max(math.ceil(avg_daily_sales * (ORDER_COVER_DAYS + extra_days)), 1, math.ceil(floor_stock))
-        if (cover_trigger or extra_days >= STRONG_COVER_EXTRA) and cap > max_target:
+        cap = max(math.ceil(avg_daily_sales * (ORDER_COVER_DAYS + extra_days) + peak_buffer), 1, math.ceil(floor_stock))
+        if (cover_trigger or extra_days >= STRONG_COVER_EXTRA or peak_buffer > 0) and cap > max_target:
             # над минимума, но няма да стигне до следващата доставка -> до нужното за дните
             max_target = float(cap)
             notes = ((notes + " · ") if notes else "") + f"няма да стигне до следващата доставка — до {ORDER_COVER_DAYS + extra_days:g} дни продажби"
@@ -442,6 +452,7 @@ def generate_order_lines(
     closures: list[ClosurePeriod] | None = None,
     avg_daily_sales: dict[tuple[int, int], float] | None = None,
     strong_daily_sales: dict[tuple[int, int], float] | None = None,
+    peak_daily_sales: dict[tuple[int, int], float] | None = None,
     mode: str = "below_min",
     weekend_buffer: bool = True,
 ) -> ReplenishmentResult:
@@ -567,9 +578,16 @@ def generate_order_lines(
                 eq_ = (st_ * (cover_extra + 1) + adr_ * (ORDER_COVER_DAYS - 1)) / (ORDER_COVER_DAYS + cover_extra)
                 notes = ((notes + " · ") if notes else "") + f"дни без доставка - по силните дни {st_:.1f}/ден (средно {adr_:.1f})"
                 adr_ = eq_
+        # пикови покупки (Надежда): резерв за една голяма покупка над нуждата до следващата доставка
+        peak_buf = 0.0
+        if s.store_id in PEAK_STORES and peak_daily_sales and adr_ >= PEAK_MIN_ADR and s.max_stock > 0:
+            pk_ = peak_daily_sales.get((s.store_id, s.article_id), 0.0)
+            peak_buf = float(min(pk_, max(int(s.pack_size or 1), 1), math.ceil(adr_ * PEAK_MAX_DAYS)))
+            if peak_buf <= adr_:
+                peak_buf = 0.0                     # няма истински пикове
         # над минимума, но наличността няма да стигне до следващата доставка (напр. уикенд без доставка)
         cover_trigger = (s.max_stock > 0 and adr_ > 0
-                         and (current < adr_ * (SKIP_COVER_DAYS + cover_extra)
+                         and (current < adr_ * (SKIP_COVER_DAYS + cover_extra) + peak_buf
                               or (is_display(s.name) and current < min(s.pack_size, s.max_stock,
                                                                        math.ceil(adr_ * DISPLAY_DAYS))))
                          and not needs_reorder(current, s.min_stock, mode, effective_max))
@@ -587,7 +605,11 @@ def generate_order_lines(
             avg_daily_sales=adr_,
             extra_days=cover_extra,
             cover_trigger=cover_trigger,
+            peak_buffer=peak_buf,
         )
+        if line:
+            if peak_buf > 0 and line.ordered_quantity > 0:
+                line.notes = ((line.notes + " · ") if line.notes else "") + f"резерв за пикова покупка {peak_buf:g} бр."
         if line:
             result.lines.append(line)
         else:
