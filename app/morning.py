@@ -139,7 +139,9 @@ def build(db: Session, store_id: int) -> dict:
     low.sort(key=lambda r: (-r["adr"], r["stock"]))
     problems = [r for r in fast if r["flag"] != "🟢"] + [r for r in low if r["adr"] > 0 and not r["order"] and r not in fast]
     return {"store": st.name, "at": now.strftime("%d.%m %H:%M"), "next_delivery": nd.strftime("%d.%m") + " " + WD[nd.weekday()],
-            "days_to_delivery": days_to, "fast": fast, "low": low, "problems": len(problems)}
+            "days_to_delivery": days_to, "dbg": {"sett": len(sett), "codes": len(code2aid), "stock": len(stock),
+            "sales": len(sales), "locs": locs, "sample": [str(k) for k in list(next(iter(sales.values()), {}))[:3]]},
+            "fast": fast, "low": low, "problems": len(problems)}
 
 
 def text(rep: dict) -> str:
