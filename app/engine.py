@@ -182,6 +182,8 @@ PEAK_STORES = {int(x) for x in _os_e.getenv("PEAK_STORES", "46").split(",") if x
 PEAK_MIN_ADR = 1.0        # само бързите артикули (1+ бр./ден)
 # само тези артикули (Димо 19.11: Пиринско 2,3л и Шуменско 2,2л); празно = всички бързи
 PEAK_SKUS = {x.strip() for x in _os_e.getenv("PEAK_SKUS", "6712,8233").split(",") if x.strip()}
+# рафт за тези артикули: 3 лица ~18 бр. - резервът е поне толкова (рафтът да е пълен до следващата доставка)
+PEAK_SHELF = float(_os_e.getenv("PEAK_SHELF", "18"))
 PEAK_MAX_DAYS = 4.0       # резервът - най-много толкова дни средни продажби и най-много 1 опаковка
 STRONG_MIN_ADR = 3.0      # само артикули от 3 бр./ден нагоре (при бавните 3-те „силни“ дни са случайност)
 STRONG_MAX_RATIO = 1.6    # силните дни - най-много 1,6 пъти средното
@@ -588,6 +590,8 @@ def generate_order_lines(
             peak_buf = float(min(pk_, max(int(s.pack_size or 1), 1), math.ceil(adr_ * PEAK_MAX_DAYS)))
             if peak_buf <= adr_:
                 peak_buf = 0.0                     # няма истински пикове
+            if PEAK_SKUS and str(s.sku) in PEAK_SKUS:
+                peak_buf = max(peak_buf, PEAK_SHELF)   # пълен рафт (3 лица) + продажбите до доставката
         # над минимума, но наличността няма да стигне до следващата доставка (напр. уикенд без доставка)
         cover_trigger = (s.max_stock > 0 and adr_ > 0
                          and (current < adr_ * (SKIP_COVER_DAYS + cover_extra) + peak_buf
@@ -612,7 +616,7 @@ def generate_order_lines(
         )
         if line:
             if peak_buf > 0 and line.ordered_quantity > 0:
-                line.notes = ((line.notes + " · ") if line.notes else "") + f"резерв за пикова покупка {peak_buf:g} бр."
+                line.notes = ((line.notes + " · ") if line.notes else "") + f"пълен рафт/пикова покупка: резерв {peak_buf:g} бр. над продажбите до доставката"
         if line:
             result.lines.append(line)
         else:
