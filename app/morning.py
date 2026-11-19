@@ -167,7 +167,14 @@ def text(rep: dict) -> str:
 
 @router.get("/ui/morning/{store_id}")
 def morning(store_id: int, fmt: str = "json", db: Session = Depends(get_db)):
-    rep = build(db, store_id)
+    try:
+        rep = build(db, store_id)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        import traceback
+        db.rollback()
+        return PlainTextResponse("Грешка: " + "".join(traceback.format_exception(e))[-1500:], status_code=500)
     if fmt == "text":
         return PlainTextResponse(text(rep))
     rep["text"] = text(rep)
