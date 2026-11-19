@@ -85,7 +85,7 @@ def build(db: Session, store_id: int) -> dict:
 
     # какво ще поръча заявката в 09:30 (предварително - по последните синхронизирани наличности)
     order = {}
-    order_days = {x.order_weekday for x in db.execute(select(m.StoreSupplierSchedule).where(
+    order_days = {x.weekday for x in db.execute(select(m.StoreSupplierSchedule).where(
         m.StoreSupplierSchedule.store_id == store_id, m.StoreSupplierSchedule.supplier_id == 1)).scalars()}
     has_order = not order_days or today.isoweekday() in order_days
     try:
