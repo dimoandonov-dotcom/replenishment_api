@@ -111,7 +111,10 @@ def build(db: Session, store_id: int) -> dict:
                "silent_days": silent, "order": oq, "order_note": onote,
                "min": float(s.min_stock or 0), "max": float(s.max_stock or 0), "in_plano": aid in plano}
         # анализ
-        if adr >= FAST_ADR and q > 0 and silent >= 2:
+        sale_days = sum(1 for d in days14 if dq.get(d, 0.0) > 0)
+        row["sale_days"] = sale_days
+        # фантом: редовно продаван (поне 7 от 14 дни), а мълчи 3+ дни (покупките на каси не са фантом)
+        if adr >= FAST_ADR and q > 0 and silent >= 3 and sale_days >= 7:
             row["flag"] = "🕳"
             row["why"] = f"няма продажба от {silent} дни при {q:g} бр. в Мистрал - вероятно рафтът е празен"
         elif q < need:
@@ -131,6 +134,8 @@ def build(db: Session, store_id: int) -> dict:
                 row["why"] += " · НЕ се поръчва: няма „да“ в планограмата"
             elif adr <= 0:
                 row["why"] += " · не се поръчва: не се е продавал 14 дни"
+            elif adr < 0.3 and q > 0:
+                row["why"] += f" · бавен (1 бр. за ~{1 / adr:.0f} дни) - поръчва се, когато свърши"
             else:
                 row["why"] += " · заявката НЕ го поръчва - провери"
         if adr >= FAST_ADR:
@@ -140,7 +145,7 @@ def build(db: Session, store_id: int) -> dict:
     order_key = {"🕳": 0, "🔴": 1, "🟠": 2, "🟢": 3}
     fast.sort(key=lambda r: (order_key[r["flag"]], -r["adr"]))
     low.sort(key=lambda r: (-r["adr"], r["stock"]))
-    problems = [r for r in fast if r["flag"] != "🟢"] + [r for r in low if r["adr"] > 0 and not r["order"] and r not in fast]
+    problems = [r for r in fast if r["flag"] != "🟢"] + [r for r in low if r["adr"] >= 0.3 and not r["order"] and r not in fast]
     return {"store": st.name, "at": now.strftime("%d.%m %H:%M"), "next_delivery": nd.strftime("%d.%m") + " " + WD[nd.weekday()],
             "days_to_delivery": days_to, "articles": len(sett), "fast": fast, "low": low, "problems": len(problems)}
 
@@ -154,13 +159,17 @@ def text(rep: dict) -> str:
     out.append(f"⚡ БЪРЗИ АРТИКУЛИ (2+/ден): {len(f)} бр., проблемни {len(bad)}")
     for r in f:
         out.append(f"{r['flag']} {r['sku']} {r['name'][:34]} — {r['stock']:g} бр., {r['adr']:g}/ден · {r['why']}")
-    lo = rep["low"]
+    lo = [r for r in rep["low"] if r["adr"] > 0]
+    dead = [r for r in rep["low"] if r["adr"] <= 0]
     out.append("")
-    out.append(f"⬇️ ПОД 2 БР.: {len(lo)}")
+    out.append(f"⬇️ ПОД 2 БР. (с продажби): {len(lo)}")
     for r in lo:
         sold = f"{r['adr']:g}/ден" if r["adr"] > 0 else "без продажби 14 дни"
         out.append(f"• {r['sku']} {r['name'][:34]} — {r['stock']:g} бр., {sold} · "
                    + (f"заявката поръчва {r['order']:g}" if r["order"] else r["why"].split(" · ")[-1]))
+    if dead:
+        out.append(f"   + {len(dead)} под 2 бр. без продажби 14 дни (не се поръчват): "
+                   + ", ".join(f"{r['sku']} {r['name'][:18].strip()}" for r in dead))
     out.append("")
     if rep["problems"]:
         out.append(f"⚠️ За действие: {rep['problems']} артикула (🕳 провери рафта/склада, 🔴/🟠 без поръчка - добави).")
