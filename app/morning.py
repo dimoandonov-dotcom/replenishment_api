@@ -51,9 +51,12 @@ def build(db: Session, store_id: int) -> dict:
     days_to = max((nd - today).days, 1)          # стоката идва през деня -> до нея има толкова дни продажби
 
     sett = {s.article_id: s for s in db.execute(select(m.StoreArticleSetting).where(
-        m.StoreArticleSetting.store_id == store_id, m.StoreArticleSetting.supplier_id == 1)).scalars()}
+        m.StoreArticleSetting.store_id == store_id)).scalars()}
     plano = set(db.execute(select(m.Planogram.article_id).where(m.Planogram.store_id == store_id)).scalars())
     arts = {a.id: a for a in db.execute(select(m.Article).where(m.Article.id.in_(list(sett) or [0]))).scalars()}
+    # само НДК: доставчикът на настройката или на артикула
+    sett = {aid: s for aid, s in sett.items() if aid in arts
+            and (s.supplier_id or arts[aid].default_supplier_id) == 1}
     code2aid = {int(a.sku): aid for aid, a in arts.items() if (a.sku or "").isdigit()}
 
     stock, sales = {}, defaultdict(lambda: defaultdict(float))
@@ -139,9 +142,7 @@ def build(db: Session, store_id: int) -> dict:
     low.sort(key=lambda r: (-r["adr"], r["stock"]))
     problems = [r for r in fast if r["flag"] != "🟢"] + [r for r in low if r["adr"] > 0 and not r["order"] and r not in fast]
     return {"store": st.name, "at": now.strftime("%d.%m %H:%M"), "next_delivery": nd.strftime("%d.%m") + " " + WD[nd.weekday()],
-            "days_to_delivery": days_to, "dbg": {"sett": len(sett), "codes": len(code2aid), "stock": len(stock),
-            "sales": len(sales), "locs": locs, "sample": [str(k) for k in list(next(iter(sales.values()), {}))[:3]]},
-            "fast": fast, "low": low, "problems": len(problems)}
+            "days_to_delivery": days_to, "articles": len(sett), "fast": fast, "low": low, "problems": len(problems)}
 
 
 def text(rep: dict) -> str:
