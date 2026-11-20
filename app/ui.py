@@ -166,6 +166,19 @@ def users_upsert(payload: UserIn, request: Request, db: Session = Depends(get_db
     return {"ok": True, "username": name}
 
 
+@router.get("/users")
+def users_list(request: Request, db: Session = Depends(get_db)):
+    """Списък с потребителите и дали са активни (без пароли). Само главният потребител или API ключ."""
+    from . import main as _main
+    who = getattr(request.state, "user", None)
+    if who and who != _main.APP_USER.lower():
+        raise HTTPException(403, "Само главният потребител")
+    prof = lambda n: ("само Аномалии" if n in _main.anomalies_only_users() else "само Анализи" if n in _main.analytics_only_users()  # noqa: E731
+                      else "само четене" if n in _main.readonly_users() else "пълен")
+    return [{"username": u.username, "name": u.display_name, "active": u.is_active, "profile": prof(u.username)}
+            for u in db.execute(select(m.AppUser).order_by(m.AppUser.username)).scalars()]
+
+
 @router.post("/users/{username}/active")
 def users_set_active(username: str, active: bool, request: Request, db: Session = Depends(get_db)):
     """Спира/пуска достъпа на потребител (сесиите му спират веднага). Само главният потребител или API ключ."""
