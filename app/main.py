@@ -168,7 +168,8 @@ async def _require_auth(request: Request, call_next):
         return await call_next(request)
     # профили „само Заявки НДК" (Ани): вижда и коригира заявките, проверява списъци, тегли Excel-ите. Нищо друго.
     if user0 is not None and user0.lower() in orders_only_users():
-        get_ok = (p in ("/", "/ui/me", "/ui/version", "/stores", "/orders", "/ui/order-edits", "/ui/article-check")
+        get_ok = (p in ("/", "/ui/me", "/ui/version", "/stores", "/orders", "/ui/order-edits", "/ui/article-check", "/ui/assortment")
+                  or re.fullmatch(r"/settings/\d+", p) is not None          # мин/макс - само за показване в заявката
                   or p.startswith(("/ui/orders/", "/orders/preview/", "/orders/export/"))
                   or re.fullmatch(r"/orders/\d+(/additions(/export)?)?", p) is not None)
         post_ok = (p in ("/ui/article-check/list", "/ui/export-xlsx")
