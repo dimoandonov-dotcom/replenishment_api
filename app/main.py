@@ -40,7 +40,7 @@ APP_USER = _os.getenv("APP_USER", "").strip()
 APP_PASSWORD = _os.getenv("APP_PASSWORD", "").strip()
 SESSION_COOKIE = "minmax_session"
 _OPEN_PATHS = {
-    "/", "/health", "/docs", "/openapi.json", "/redoc",
+    "/", "/health",
     "/dashboard", "/orders-view", "/ui/login", "/ui/logout", "/brand/logo",
     "/viber/webhook",   # Viber бот - проверява се подписът на Viber
     "/telegram/webhook",  # Telegram бот - проверява се тайната в заглавката
@@ -167,14 +167,15 @@ async def _require_auth(request: Request, call_next):
         return await call_next(request)
     # профили „само Аномалии" (напр. Надежда - ревизори и доставчици)
     if user0 is not None and user0.lower() in anomalies_only_users():
-        ok = ((request.method == "GET" and (p.startswith("/ui/anomalies") or p.startswith("/ui/mistral/") or p.startswith("/ui/ndkinv") or p.startswith("/ui/ownstock-score")
+        ok = ((request.method == "GET" and (p.startswith("/ui/anomalies") or p in ("/ui/mistral/article-docs", "/ui/mistral/delivery-docs") or p.startswith("/ui/ndkinv") or p.startswith("/ui/ownstock-score")
                                             or p in ("/", "/ui/me", "/stores", "/ui/version")))
               or (request.method == "POST" and (p in ("/ui/export-xlsx", "/ui/anomalies/minusi/fix")
                                                  or (p.startswith("/ui/ndkinv/") and p.endswith("/fixed")))))
         if not ok:
             return JSONResponse(status_code=403, content={"detail": "Профилът е само за „Аномалии“"})
-    # Бандитс - само главният потребител (Димо) или API ключ
-    if p.startswith("/ui/bandits") or p.startswith("/ui/margin"):
+    # Бандитс, свободни заявки към Мистрал и документацията на API - само главният потребител (Димо) или API ключ
+    if (p.startswith("/ui/bandits") or p.startswith("/ui/margin") or p in ("/docs", "/openapi.json", "/redoc", "/docs/oauth2-redirect")
+            or p in ("/ui/mistral/q", "/ui/mistral/ping")):
         is_owner = user0 is not None and bool(APP_USER) and user0.lower() == APP_USER.lower()
         main_key = user0 is None and bool(_API_KEY) and _hmac.compare_digest(request.headers.get("X-API-Key", ""), _API_KEY)
         if not (is_owner or main_key):           # никой друг: нито Асен, нито ключът само за четене
