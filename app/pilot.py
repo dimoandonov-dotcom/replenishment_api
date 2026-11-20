@@ -67,7 +67,7 @@ def readiness(db: Session) -> list[dict]:
                 ORDER BY store_id, article_id, captured_at DESC, id DESC)
     SELECT s.id, s.name, (p.store_id IS NOT NULL) AS pilot,
            COUNT(pl.article_id) AS plano,
-           COUNT(x.id) FILTER (WHERE x.max_stock > 0) AS with_minmax,
+           COUNT(x.article_id) FILTER (WHERE x.max_stock > 0) AS with_minmax,
            COUNT(r.id) AS in_review,
            COUNT(*) FILTER (WHERE st.quantity < 0) AS negative,
            COUNT(*) FILTER (WHERE st.article_id IS NULL) AS no_stock
