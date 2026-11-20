@@ -53,3 +53,35 @@ def set_pilot(db: Session, store_id: int, on: bool, since=None) -> dict:
         db.execute(text("DELETE FROM pilot_stores WHERE store_id = :s"), {"s": store_id})
     db.commit()
     return {"store_id": store_id, "pilot": on}
+
+
+def readiness(db: Session) -> list[dict]:
+    """Готовност на всеки Варненски обект за автоматични заявки към НДК (Димо 20.11):
+    колко артикула са в планограмата, колко имат потвърден мин/макс, колко чакат преглед,
+    колко са с отрицателна/липсваща наличност и колко бързи артикула (2+/ден) има."""
+    _ensure(db)
+    q = text("""
+    WITH pl AS (SELECT store_id, article_id FROM planogram),
+         ndk AS (SELECT a.id FROM articles a WHERE a.default_supplier_id = 1 AND a.is_active AND NOT COALESCE(a.no_order, false)),
+         st AS (SELECT DISTINCT ON (store_id, article_id) store_id, article_id, quantity FROM stock_snapshots
+                ORDER BY store_id, article_id, captured_at DESC, id DESC)
+    SELECT s.id, s.name, (p.store_id IS NOT NULL) AS pilot,
+           COUNT(pl.article_id) AS plano,
+           COUNT(x.id) FILTER (WHERE x.max_stock > 0) AS with_minmax,
+           COUNT(r.id) AS in_review,
+           COUNT(*) FILTER (WHERE st.quantity < 0) AS negative,
+           COUNT(*) FILTER (WHERE st.article_id IS NULL) AS no_stock
+    FROM stores s
+    LEFT JOIN pilot_stores p ON p.store_id = s.id
+    LEFT JOIN pl ON pl.store_id = s.id AND pl.article_id IN (SELECT id FROM ndk)
+    LEFT JOIN store_article_settings x ON x.store_id = s.id AND x.article_id = pl.article_id
+    LEFT JOIN settings_review_queue r ON r.store_id = s.id AND r.article_id = pl.article_id AND NOT r.resolved
+    LEFT JOIN st ON st.store_id = s.id AND st.article_id = pl.article_id
+    WHERE s.is_active AND COALESCE(s.mistral_db_path, '') <> 'sofia'
+    GROUP BY s.id, s.name, p.store_id ORDER BY s.name""")
+    out = []
+    for r in db.execute(q).mappings():
+        d = dict(r)
+        d["ready_pct"] = round(100 * (d["with_minmax"] - d["in_review"]) / d["plano"]) if d["plano"] else 0
+        out.append(d)
+    return out

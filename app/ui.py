@@ -659,6 +659,12 @@ def ui_compare_review(day: date | None = None, fmt: str = Query("json", pattern=
     return review.build(db, day)
 
 
+@router.get("/ui/readiness")
+def ui_readiness(db: Session = Depends(get_db)):
+    from . import pilot
+    return pilot.readiness(db)
+
+
 @router.get("/ui/pilot")
 def ui_pilot(db: Session = Depends(get_db)):
     from . import pilot
