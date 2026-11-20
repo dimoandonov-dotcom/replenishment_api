@@ -3523,6 +3523,12 @@ fetch("/ui/summary").then(r => {
       ["kpis", "freshInfo"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
       if (location.hash !== "#anal") location.hash = "#anal";
     }
+    if (m.orders_only) {   // профил само за заявките към НДК (Ани)
+      document.querySelectorAll('nav a').forEach(a => { if (a.dataset.tab !== "orders") a.remove(); });
+      document.querySelectorAll('section.tab').forEach(t => { if (t.id !== "tab-orders") t.remove(); });
+      ["kpis", "freshInfo"].forEach(id => { const e = document.getElementById(id); if (e) e.remove(); });
+      if (location.hash !== "#orders") location.hash = "#orders";
+    }
     if (m.anomalies_only) {   // профил само за „Аномалии"
       document.querySelectorAll('nav a').forEach(a => { if (!["anom", "ndkinv"].includes(a.dataset.tab)) a.remove(); });
       document.querySelectorAll('section.tab').forEach(t => { if (!["tab-anom", "tab-ndkinv"].includes(t.id)) t.remove(); });

@@ -28,6 +28,7 @@ import json
 import hmac as _hmac
 import hashlib as _hashlib
 import os as _os
+import re
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
@@ -165,6 +166,16 @@ async def _require_auth(request: Request, call_next):
         if request.method != "GET" or not (p == "/" or p.startswith(ro_prefixes)):
             return JSONResponse(status_code=403, content={"detail": "Профилът е само за четене на наличности и анализи"})
         return await call_next(request)
+    # профили „само Заявки НДК" (Ани): вижда и коригира заявките, проверява списъци, тегли Excel-ите. Нищо друго.
+    if user0 is not None and user0.lower() in orders_only_users():
+        get_ok = (p in ("/", "/ui/me", "/ui/version", "/stores", "/orders", "/ui/order-edits", "/ui/article-check")
+                  or p.startswith(("/ui/orders/", "/orders/preview/", "/orders/export/"))
+                  or re.fullmatch(r"/orders/\d+(/additions(/export)?)?", p) is not None)
+        post_ok = (p in ("/ui/article-check/list", "/ui/export-xlsx")
+                   or re.fullmatch(r"/ui/orders/\d+/edit", p) is not None)
+        if not ((request.method == "GET" and get_ok) or (request.method == "POST" and post_ok)):
+            return JSONResponse(status_code=403, content={"detail": "Профилът е само за заявките към НДК"})
+        return await call_next(request)
     # профили „само Аномалии" (напр. Надежда - ревизори и доставчици)
     if user0 is not None and user0.lower() in anomalies_only_users():
         ok = ((request.method == "GET" and (p.startswith("/ui/anomalies") or p in ("/ui/mistral/article-docs", "/ui/mistral/delivery-docs") or p.startswith("/ui/ndkinv") or p.startswith("/ui/ownstock-score")
@@ -203,6 +214,12 @@ def readonly_users() -> set[str]:
 def anomalies_only_users() -> set[str]:
     import os as __os
     raw = __os.getenv("ANOMALIES_ONLY_USERS", "nadejda")
+    return {x.strip().lower() for x in raw.split(",") if x.strip()}
+
+
+def orders_only_users() -> set[str]:
+    import os as __os
+    raw = __os.getenv("ORDERS_ONLY_USERS", "ani")
     return {x.strip().lower() for x in raw.split(",") if x.strip()}
 
 

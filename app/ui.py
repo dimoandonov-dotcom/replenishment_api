@@ -135,6 +135,7 @@ def ui_me(request: Request, db: Session = Depends(get_db)):
             "analytics": user.lower() in _main.analytics_users(),
             "analytics_only": user.lower() in _main.analytics_only_users(),
             "anomalies_only": user.lower() in _main.anomalies_only_users(),
+            "orders_only": user.lower() in _main.orders_only_users(),
             "owner": bool(_main.APP_USER) and user.lower() == _main.APP_USER.lower()}
 
 
@@ -173,7 +174,7 @@ def users_list(request: Request, db: Session = Depends(get_db)):
     who = getattr(request.state, "user", None)
     if who and who != _main.APP_USER.lower():
         raise HTTPException(403, "Само главният потребител")
-    prof = lambda n: ("само Аномалии" if n in _main.anomalies_only_users() else "само Анализи" if n in _main.analytics_only_users()  # noqa: E731
+    prof = lambda n: ("само Заявки НДК" if n in _main.orders_only_users() else "само Аномалии" if n in _main.anomalies_only_users() else "само Анализи" if n in _main.analytics_only_users()  # noqa: E731
                       else "само четене" if n in _main.readonly_users() else "пълен")
     return [{"username": u.username, "name": u.display_name, "active": u.is_active, "profile": prof(u.username)}
             for u in db.execute(select(m.AppUser).order_by(m.AppUser.username)).scalars()]
