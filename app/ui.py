@@ -665,6 +665,17 @@ def ui_readiness(db: Session = Depends(get_db)):
     return pilot.readiness(db)
 
 
+@router.get("/ui/readiness/{store_id}/review")
+def ui_readiness_review(store_id: int, db: Session = Depends(get_db)):
+    """Артикулите на обекта, които чакат преглед на мин/макс (не се поръчват), с мин/макс ако има."""
+    rows = db.execute(select(m.Article, m.StoreArticleSetting).join(
+        m.SettingsReviewQueue, m.SettingsReviewQueue.article_id == m.Article.id).outerjoin(
+        m.StoreArticleSetting, (m.StoreArticleSetting.article_id == m.Article.id) & (m.StoreArticleSetting.store_id == store_id)).where(
+        m.SettingsReviewQueue.store_id == store_id, m.SettingsReviewQueue.resolved.is_(False))).all()
+    return [{"sku": a.sku, "name": a.name, "no_order": a.no_order, "min": float(x.min_stock) if x else None,
+             "max": float(x.max_stock) if x else None} for a, x in rows]
+
+
 @router.get("/ui/pilot")
 def ui_pilot(db: Session = Depends(get_db)):
     from . import pilot
