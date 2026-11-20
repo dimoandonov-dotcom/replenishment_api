@@ -166,6 +166,21 @@ def users_upsert(payload: UserIn, request: Request, db: Session = Depends(get_db
     return {"ok": True, "username": name}
 
 
+@router.post("/users/{username}/active")
+def users_set_active(username: str, active: bool, request: Request, db: Session = Depends(get_db)):
+    """Спира/пуска достъпа на потребител (сесиите му спират веднага). Само главният потребител или API ключ."""
+    from . import main as _main
+    who = getattr(request.state, "user", None)
+    if who and who != _main.APP_USER.lower():
+        raise HTTPException(403, "Само главният потребител")
+    u = db.get(m.AppUser, username.strip().lower())
+    if u is None:
+        raise HTTPException(404, "Няма такъв потребител")
+    u.is_active = bool(active)
+    db.commit()
+    return {"ok": True, "username": u.username, "is_active": u.is_active}
+
+
 @router.post("/ui/logout", include_in_schema=False)
 def ui_logout():
     from . import main as _main
