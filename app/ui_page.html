@@ -210,6 +210,24 @@ nav a[data-tab="sklad"] .skNew{display:inline-block;margin-left:6px;background:#
 .skPill{display:inline-block;border-radius:999px;padding:1px 9px;font-size:12px;font-weight:700}
 .skPill.s{background:#E0F2FE;color:#075985}.skPill.n{background:#FEF3C7;color:#92400E}
 .skRow.chg{background:#F0FDF4}
+
+/* ---- помощник „Бавни“: водач стъпка по стъпка ---- */
+.slHelpBtn{position:fixed;right:18px;bottom:18px;z-index:60;border:none;border-radius:999px;padding:12px 16px;font-weight:800;color:#fff;background:#1f7a3a;box-shadow:0 8px 20px rgba(31,122,58,.35);cursor:pointer}
+.slHelp{position:fixed;right:18px;bottom:76px;z-index:70;width:min(420px,calc(100vw - 24px));max-height:min(74vh,640px);overflow:auto;background:#fff;border-radius:16px;box-shadow:0 18px 50px rgba(0,0,0,.25);display:none;font-size:14px;line-height:1.55}
+.slHelp.on{display:block}
+.slHelp header{position:sticky;top:0;background:#1f7a3a;color:#fff;padding:10px 14px;font-weight:800;display:flex;justify-content:space-between;align-items:center}
+.slHelp .b{padding:12px 14px}
+.slHelp .sc{display:block;width:100%;text-align:left;margin:0 0 8px;padding:10px 12px;border:1px solid #d9e7dc;background:#f4faf5;border-radius:12px;cursor:pointer;font:inherit}
+.slHelp .sc b{display:block}
+.slHelp .sc span{color:#555;font-size:12.5px}
+.slTip{position:fixed;z-index:90;width:min(360px,calc(100vw - 24px));background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.35);padding:12px 14px;font-size:14px;line-height:1.55}
+.slTip .t{font-weight:800;margin-bottom:4px}
+.slTip .n{display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:10px}
+.slTip .n button{border:none;border-radius:10px;padding:7px 12px;font-weight:700;cursor:pointer}
+.slTip .n .nx{background:#1f7a3a;color:#fff}
+.slTip .n .bk{background:#eee}
+.slSpot{position:fixed;z-index:80;border-radius:12px;box-shadow:0 0 0 4px #1f7a3a,0 0 0 9999px rgba(0,0,0,.45);pointer-events:none;transition:all .2s}
+
 .skHelpBtn{position:fixed;right:18px;bottom:18px;z-index:60;border:none;border-radius:999px;padding:12px 16px;font-weight:800;color:#fff;background:#0369A1;box-shadow:0 8px 20px rgba(3,105,161,.35);cursor:pointer}
 .skHelp{position:fixed;right:18px;bottom:76px;z-index:61;width:min(380px,calc(100vw - 32px));max-height:70vh;display:none;flex-direction:column;background:#fff;border:1px solid #CBD5E1;border-radius:16px;box-shadow:0 18px 40px rgba(0,0,0,.18);overflow:hidden}
 .skHelp.on{display:flex}
@@ -854,6 +872,11 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <tbody id="skLog"></tbody>
   </table></div>
 </section>
+<button class="slHelpBtn" id="slHelpBtn" style="display:none" title="Как се работи с „Бавни“">🧭 Как се работи</button>
+<div class="slHelp" id="slHelp">
+  <header><span>🧭 Водач — „Бавни артикули“</span><a href="#" id="slHelpX" style="color:#fff;text-decoration:none">✕</a></header>
+  <div class="b" id="slHelpBody"></div>
+</div>
 <button class="skHelpBtn" id="skHelpBtn" style="display:none" title="Помощник">💬 Помощ</button>
 <div class="skHelp" id="skHelp">
   <header><span>💬 Помощник — „От склада“</span><a href="#" id="skHelpX" style="color:#fff;text-decoration:none">✕</a></header>
@@ -1104,6 +1127,7 @@ const loaded = {};
 function show(tab) {
   document.querySelectorAll("section.tab").forEach(s => s.classList.toggle("on", s.id === "tab-" + tab));
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
+  { const sb = document.getElementById("slHelpBtn"); if (sb) { sb.style.display = tab === "slow" ? "" : "none"; if (tab !== "slow") { document.getElementById("slHelp")?.classList.remove("on"); slTourEnd(); } } }
   { const hb = document.getElementById("skHelpBtn"); if (hb) { hb.style.display = tab === "sklad" ? "" : "none"; if (tab !== "sklad") document.getElementById("skHelp")?.classList.remove("on"); } }
   if (tab === "sklad") { if (loaded.sklad) loadSklad(); api("/ui/sklad/seen", { method: "POST" }).then(() => skBadge(0)).catch(() => {}); }
   if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: () => loadMinusi(), bandits: initBandits, promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, slow: initSlow, cmp: initCmp, sklad: initSklad, margin: initMargin, ndkinv: initNdkInv, learn: initLearn, run: initRun})[tab]?.(); }
@@ -3193,6 +3217,10 @@ async function initSlow() {
   sel.innerHTML = `<option value="0">Всички магазини</option>` + list.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
   document.getElementById("slLoad").onclick = loadSlow;
   document.getElementById("slTrBtn").onclick = slTransfers;
+  document.getElementById("slHelpBtn").onclick = () => { const b = document.getElementById("slHelp"); b.classList.contains("on") ? b.classList.remove("on") : slHelpOpen(); };
+  document.getElementById("slHelpX").onclick = e => { e.preventDefault(); document.getElementById("slHelp").classList.remove("on"); };
+  let seen = false; try { seen = localStorage.getItem("slHelpSeen") === "1"; localStorage.setItem("slHelpSeen", "1"); } catch (e) {}
+  if (!seen) setTimeout(slHelpOpen, 1200);
   sel.onchange = loadSlow; document.getElementById("slAdr").onchange = loadSlow;
   document.getElementById("slQ").oninput = drawSlow; document.getElementById("slHideStop").onchange = drawSlow;
   loadSlow();
@@ -3331,6 +3359,96 @@ async function slStop(sku, on, cb) {
     drawSlow();
   } catch (e) { cb.checked = !on; toast(e.message, false); }
 }
+
+/* ---------- водач „Бавни“ ---------- */
+const SL_TOURS = {
+  start: { t: "Първи стъпки", d: "Какво има на екрана и как се чете таблицата", steps: [
+    ["#slStore", "1. Магазин", "Избери <b>„Всички магазини“</b>, за да видиш цялата верига, или един магазин, за да работиш само за него."],
+    ["#slAdr", "2. Колко бавен", "Кое да се смята за бавно. По подразбиране <b>под 1 бр. на 3 дни</b> на магазин. За по-строг списък избери „на 10 дни“ – тогава остават само съвсем мъртвите."],
+    ["#slQ", "3. Търсене", "Пиши част от името или кода – таблицата се филтрира веднага."],
+    ["#slKpis", "4. Обобщение", "Колко бавни артикула има, <b>колко бройки стоят в складовете</b> и колко са продадени за 30 дни. Целта е числото в средата да пада."],
+    ["#slBody tr:first-child", "5. Един ред = един артикул", "Отгоре са тези, които <b>заемат най-много място</b>. Зелено „бърз в N“ = в толкова магазина се продава добре и там нищо не се пипа. „Бавен в 32 от 38“ = в колко магазина е бавен. „Дни запас“ = за колко дни стига стоката при сегашните продажби."],
+    ["#slBody tr:first-child [data-slmax]", "6. Нов макс", "Тук пишеш нов максимум и натискаш <b>Enter</b>. Записва се веднага и важи само в бавните магазини."],
+    ["#slBody tr:first-child [data-slstop]", "7. Спри", "Тикче = спират поръчките. Ако артикулът е бърз някъде, спира <b>само в бавните</b> магазини. Махаш тикчето – пуска се отново."],
+  ]},
+  max: { t: "Намали склада: по-нисък максимум", d: "Артикулът се продава по малко – да остане, но да не заема място", steps: [
+    ["#slStore", "1. Всички магазини", "Остави <b>„Всички магазини“</b>."],
+    ["#slBody tr:first-child", "2. Избери артикул", "Гледай „Наличност“ и „Дни запас“. Над 60 дни запас = стоката стои. Пример: Мадри – 686 бр., стигат за 234 дни."],
+    ["#slBody tr:first-child [data-slmax]", "3. Напиши максимум", "Правило: <b>колкото се продават за 2–3 седмици, но поне 1–2 бр. на рафта</b>. Ако на магазин се продава 0,1/ден → макс 2. Пиши числото и <b>Enter</b>."],
+    ["#slKpis", "4. Готово", "Ще излезе зелено съобщение „✓ … в 32 магазина“. Ако максимумът е под опаковката, ще те предупреди – пак ще идва цял кашон, но <b>само когато свърши</b>. Стоката, която вече е в склада, се изпродава."],
+  ]},
+  stop: { t: "Спри артикул", d: "Не се продава – да не се поръчва повече", steps: [
+    ["#slAdr", "1. Само мъртвите", "Избери <b>„под 1 бр. на 10 дни“</b> – остават артикулите, които почти не се продават."],
+    ["#slBody tr:first-child", "2. Провери реда", "Ако има зелено „бърз в N“ – не е мъртъв навсякъде. Тикчето ще го спре само в бавните магазини, което е правилно."],
+    ["#slBody tr:first-child [data-slstop]", "3. Сложи тикче", "Сложи тикчето „Спри“. Редът става блед. Наличното се изпродава, нов кашон не идва."],
+    ["#slHideStop", "4. Скрий спрените", "Сложи това тикче, за да не ти пречат вече спрените."],
+  ]},
+  store: { t: "Бърз тук, бавен там – по магазини", d: "Реши магазин по магазин", steps: [
+    ["#slBody tr:first-child [data-slopen]", "1. Отвори артикула", "Цъкни върху името – ще се разгънат <b>всички магазини</b>: 🟢 бързите отгоре, ⚪ бавните отдолу."],
+    ["#slBody [data-slsmax]", "2. Нов макс за един магазин", "На реда на магазина пиши максимум и Enter – важи <b>само за този магазин</b>."],
+    ["#slBody [data-slsstop]", "3. Спри само тук", "Тикче „Спри тук“ = само този магазин спира да го поръчва. Махаш тикчето – връща се с мин 1 / макс 1 кашон."],
+    ["#slBody [data-slopen]", "4. Затвори", "Цъкни пак върху името, за да го прибереш."],
+  ], prep: () => { const r = document.querySelector("#slBody [data-slopen]"); if (r && !SL_OPEN.has(r.dataset.slopen)) r.click(); } },
+  transfer: { t: "Прехвърли от бавен към бърз магазин", d: "Вместо да поръчваме нова стока", steps: [
+    ["#slStore", "1. Всички магазини", "Прехвърлянето е между магазини, затова трябва да е <b>„Всички магазини“</b>."],
+    ["#slTrBtn", "2. Предложи прехвърляне", "Натисни бутона. Системата смята: бавният магазин задържа продажби за 14 дни, бързият се допълва до 7 дни. Дребни (1–2 бр.) не предлага."],
+    ["#slTr", "3. Списъкът", "Всеки ред: <b>от кой магазин – какво – колко бройки – към кой</b>. „Там има“ и „Там /ден“ показват защо бързият има нужда."],
+    ["#slTrCopy", "4. Копирай и прати", "„📋 Копирай списъка“ – копира го групиран по магазин. Пращаш го на склада/шофьора във Viber. Прехвърлянето се прави в Мистрал като обикновено."],
+  ], prep: () => { if (!document.getElementById("slTr").innerHTML) document.getElementById("slTrBtn").click(); } },
+  undo: { t: "Сгреших – как да върна", d: "Връщане на максимум или пускане на спрян артикул", steps: [
+    ["#slHideStop", "1. Покажи спрените", "Махни тикчето „скрий спрените“, за да ги виждаш."],
+    ["#slQ", "2. Намери артикула", "Пиши кода или името."],
+    ["#slBody tr:first-child [data-slstop]", "3. Махни тикчето", "Махаш „Спри“ – артикулът се пуска отново."],
+    ["#slBody tr:first-child [data-slmax]", "4. Върни максимума", "Пиши стария максимум и Enter. Всяка промяна се пази в историята с твоето име – ако не помниш стария, питай Димо."],
+  ]},
+};
+let SL_TOUR = null;
+function slHelpOpen() {
+  const box = document.getElementById("slHelp"), body = document.getElementById("slHelpBody");
+  body.innerHTML = `<p style="margin:0 0 10px">Целта на раздела: <b>по-малко бавна стока в складовете на магазините</b>, за да има място за бързите. Избери какво искаш да направиш – водачът ще ти покаже стъпка по стъпка.</p>`
+    + Object.entries(SL_TOURS).map(([k, v]) => `<button class="sc" data-tour="${k}"><b>${v.t}</b><span>${v.d}</span></button>`).join("")
+    + `<p class="note" style="margin:8px 0 0">Съвет: започни с „Първи стъпки“. Всичко се записва веднага и се заключва – нощното обучение не го пипа.</p>`;
+  box.classList.add("on");
+  body.querySelectorAll("[data-tour]").forEach(b => b.onclick = () => { box.classList.remove("on"); slTourStart(b.dataset.tour); });
+}
+function slTourStart(k) {
+  const tour = SL_TOURS[k]; if (!tour) return;
+  if (tour.prep) try { tour.prep(); } catch (e) {}
+  SL_TOUR = { k, i: 0 };
+  setTimeout(slTourShow, tour.prep ? 400 : 0);
+}
+function slTourEnd() {
+  SL_TOUR = null;
+  document.querySelectorAll(".slSpot,.slTip").forEach(e => e.remove());
+}
+function slTourShow() {
+  document.querySelectorAll(".slSpot,.slTip").forEach(e => e.remove());
+  if (!SL_TOUR) return;
+  const tour = SL_TOURS[SL_TOUR.k], st = tour.steps[SL_TOUR.i];
+  const el = document.querySelector(st[0]);
+  const tip = document.createElement("div"); tip.className = "slTip";
+  tip.innerHTML = `<div class="t">${st[1]}</div><div>${st[2]}</div>${el ? "" : `<div class="note" style="margin-top:6px">(Този елемент още не е на екрана – натисни „Покажи“ или зареди таблицата.)</div>`}
+    <div class="n"><span class="note">${SL_TOUR.i + 1} / ${tour.steps.length} · ${tour.t}</span>
+    <span>${SL_TOUR.i ? '<button class="bk">← Назад</button> ' : ""}<button class="nx">${SL_TOUR.i + 1 < tour.steps.length ? "Напред →" : "Готово ✓"}</button></span></div>
+    <div style="text-align:right;margin-top:4px"><a href="#" class="x note">затвори водача</a></div>`;
+  document.body.appendChild(tip);
+  if (el) {
+    el.scrollIntoView({ block: "center", behavior: "instant" });
+    const r = el.getBoundingClientRect();
+    const sp = document.createElement("div"); sp.className = "slSpot";
+    Object.assign(sp.style, { left: r.left - 6 + "px", top: r.top - 6 + "px", width: r.width + 12 + "px", height: r.height + 12 + "px" });
+    document.body.appendChild(sp);
+    const tw = tip.offsetWidth, th = tip.offsetHeight, vw = innerWidth, vh = innerHeight;
+    let top = r.bottom + 14; if (top + th > vh - 8) top = Math.max(8, r.top - th - 14);
+    let left = Math.min(Math.max(8, r.left), vw - tw - 8);
+    Object.assign(tip.style, { top: top + "px", left: left + "px" });
+  } else Object.assign(tip.style, { top: "30%", left: "50%", transform: "translateX(-50%)" });
+  tip.querySelector(".nx").onclick = () => { if (SL_TOUR.i + 1 < tour.steps.length) { SL_TOUR.i++; slTourShow(); } else { slTourEnd(); toast("Браво! Водачът е в бутона „🧭 Как се работи“, когато ти потрябва."); } };
+  const bk = tip.querySelector(".bk"); if (bk) bk.onclick = () => { SL_TOUR.i--; slTourShow(); };
+  tip.querySelector(".x").onclick = e => { e.preventDefault(); slTourEnd(); };
+}
+window.addEventListener("resize", () => { if (SL_TOUR) slTourShow(); });
+window.addEventListener("keydown", e => { if (e.key === "Escape" && SL_TOUR) slTourEnd(); });
 
 function toast(text, ok = true) {
   const t = document.getElementById("toast"); if (!t || !text) return;
