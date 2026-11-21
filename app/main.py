@@ -739,6 +739,8 @@ from .partner_orders import router as _partner_router  # noqa: E402
 app.include_router(_partner_router)
 from .morning import router as _morning_router  # noqa: E402
 app.include_router(_morning_router)
+from .slow import router as _slow_router  # noqa: E402
+app.include_router(_slow_router)
 
 
 # ---------------------------------------------------------------- Telegram бот
