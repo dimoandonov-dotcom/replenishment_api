@@ -39,13 +39,15 @@ def transfers(a: dict) -> list[dict]:
             takers.append([s, need])
     donors.sort(key=lambda d: -d[1])
     takers.sort(key=lambda t: -t[0]["adr"])          # първо най-бързите
+    # дребни прехвърляния (1-2 бр.) не си струват курса: поне 4 бр. или половин опаковка
+    minq = max(4, math.ceil(a["pack"] / 2))
     out = []
     for t in takers:
         for d in donors:
             if t[1] <= 0:
                 break
             q = min(t[1], d[1])
-            if q <= 0:
+            if q < minq:
                 continue
             out.append({"from_id": d[0]["store_id"], "from": d[0]["store"], "to_id": t[0]["store_id"], "to": t[0]["store"],
                         "qty": q, "to_adr": t[0]["adr"], "to_stock": t[0]["stock"]})
