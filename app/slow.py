@@ -18,6 +18,42 @@ from .db import get_db
 router = APIRouter()
 
 
+KEEP_DAYS_SLOW = 14     # бавният магазин задържа продажби за толкова дни (поне 1 бр. и минимума си)
+TARGET_DAYS_FAST = 7    # бързият магазин се допълва до толкова дни продажби (поне минимума си)
+
+
+def transfers(a: dict) -> list[dict]:
+    """Предложение за прехвърляне: излишъкът от бавните магазини към бързите, на които не им стига."""
+    import math
+    donors = []
+    for s in a["stores"]:
+        keep = max(s["min"], math.ceil(s["adr"] * KEEP_DAYS_SLOW), 1 if s["max"] > 0 else 0)
+        extra = int(s["stock"] - keep)
+        if extra > 0:
+            donors.append([s, extra])
+    takers = []
+    for s in a.get("fast", []):
+        target = max(s["min"], math.ceil(s["adr"] * TARGET_DAYS_FAST))
+        need = int(math.ceil(target - max(s["stock"], 0)))
+        if need > 0:
+            takers.append([s, need])
+    donors.sort(key=lambda d: -d[1])
+    takers.sort(key=lambda t: -t[0]["adr"])          # първо най-бързите
+    out = []
+    for t in takers:
+        for d in donors:
+            if t[1] <= 0:
+                break
+            q = min(t[1], d[1])
+            if q <= 0:
+                continue
+            out.append({"from_id": d[0]["store_id"], "from": d[0]["store"], "to_id": t[0]["store_id"], "to": t[0]["store"],
+                        "qty": q, "to_adr": t[0]["adr"], "to_stock": t[0]["stock"]})
+            d[1] -= q
+            t[1] -= q
+    return out
+
+
 @router.get("/ui/slow")
 def slow(store_id: int = 0, max_adr: float = 0.3, days: int = 30, db: Session = Depends(get_db)):
     days = max(7, min(days, 90))
@@ -46,12 +82,14 @@ def slow(store_id: int = 0, max_adr: float = 0.3, days: int = 30, db: Session = 
         a = arts.setdefault(r["aid"], {"sku": r["sku"], "name": r["name"], "pack": int(r["pk"] or 1),
                                        "no_order": r["no_order"], "stores": [], "fast_stores": 0, "all_stores": 0})
         a["all_stores"] += 1
+        row = {"store_id": r["sid"], "store": r["sname"], "min": float(r["mn"]), "max": float(r["mx"]),
+               "locked": r["auto"] is False, "stock": float(r["stock"]), "sold": float(r["sold"]),
+               "adr": round(adr, 3)}
         if adr > max_adr:
             a["fast_stores"] += 1
+            a.setdefault("fast", []).append(row)
             continue
-        a["stores"].append({"store_id": r["sid"], "store": r["sname"], "min": float(r["mn"]), "max": float(r["mx"]),
-                            "locked": r["auto"] is False, "stock": float(r["stock"]), "sold": float(r["sold"]),
-                            "adr": round(adr, 3)})
+        a["stores"].append(row)
     out = []
     for a in arts.values():
         ss = a["stores"]
@@ -64,6 +102,8 @@ def slow(store_id: int = 0, max_adr: float = 0.3, days: int = 30, db: Session = 
                   "adr_store": round(sold / days / len(ss), 3),
                   "days_stock": round(stock / (sold / days)) if sold else None,
                   "max_now": median(live) if live else 0, "stopped_stores": sum(1 for s in ss if s["max"] <= 0)})
+        a.setdefault("fast", [])
+        a["transfers"] = transfers(a)
         out.append(a)
     # най-отгоре: най-много стока, която стои в складовете (места), после най-бавните
     out.sort(key=lambda a: (-a["stock"], -(a["days_stock"] if a["days_stock"] is not None else 10**6)))

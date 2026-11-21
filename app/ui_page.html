@@ -813,8 +813,11 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
     <input id="slQ" placeholder="Търси артикул или код" style="min-width:180px">
     <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="slHideStop"> скрий спрените</label>
     <button class="go" id="slLoad">Покажи</button>
+    <button class="warm" id="slTrBtn" title="Излишъкът от бавните магазини към бързите, на които не им стига">🔁 Предложи прехвърляне</button>
   </div>
   <div class="board" id="slKpis"></div>
+  <div id="slTr"></div>
+  <p class="note" style="margin:6px 0">Цъкни върху артикул, за да видиш всички магазини: бързите в зелено, бавните в сиво. Във всеки магазин можеш да смениш максимума или да го спреш само там.</p>
   <div class="scroll"><table>
     <thead><tr><th>Артикул</th><th class="num">Опак.</th><th class="num">Бавен в</th><th class="num">Наличност</th><th class="num">Прод. 30 дни</th><th class="num">Ср./ден на магазин</th><th class="num">Дни запас</th><th class="num">Макс сега</th><th class="num">Нов макс</th><th>Спри</th></tr></thead>
     <tbody id="slBody"></tbody>
@@ -3189,6 +3192,7 @@ async function initSlow() {
   const list = await stores();
   sel.innerHTML = `<option value="0">Всички магазини</option>` + list.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
   document.getElementById("slLoad").onclick = loadSlow;
+  document.getElementById("slTrBtn").onclick = slTransfers;
   sel.onchange = loadSlow; document.getElementById("slAdr").onchange = loadSlow;
   document.getElementById("slQ").oninput = drawSlow; document.getElementById("slHideStop").onchange = drawSlow;
   loadSlow();
@@ -3196,6 +3200,7 @@ async function initSlow() {
 async function loadSlow() {
   const sid = +document.getElementById("slStore").value, adr = document.getElementById("slAdr").value;
   document.getElementById("slBody").innerHTML = `<tr><td colspan="10" class="note">Зарежда…</td></tr>`;
+  document.getElementById("slTr").innerHTML = "";
   try { SL = await api(`/ui/slow?store_id=${sid}&max_adr=${adr}`); } catch (e) { toast(e.message, false); return; }
   drawSlow();
 }
@@ -3214,14 +3219,16 @@ function drawSlow() {
     const stop = slStopped(a);
     const where = sid ? "" : `<span class="note">${a.slow_stores}${a.fast_stores ? ` от ${a.all_stores}` : ""}</span>`;
     const ds = a.days_stock == null ? (a.stock > 0 ? "без продажби" : "–") : a.days_stock;
+    const open = SL_OPEN.has(a.sku);
     return `<tr${stop ? ' style="opacity:.55"' : ""}>
-      <td><b>${esc(a.sku)}</b> ${esc(a.name)}${a.no_order ? ' <span class="tag bad">🚫 спрян навсякъде</span>' : ""}${a.fast_stores && !sid ? ` <span class="tag" title="В тези магазини се продава добре и не се пипа">бърз в ${a.fast_stores}</span>` : ""}</td>
+      <td data-slopen="${esc(a.sku)}" style="cursor:pointer">${open ? "▾" : "▸"} <b>${esc(a.sku)}</b> ${esc(a.name)}${a.no_order ? ' <span class="tag bad">🚫 спрян навсякъде</span>' : ""}${a.fast_stores && !sid ? ` <span class="tag" title="В тези магазини се продава добре и не се пипа">бърз в ${a.fast_stores}</span>` : ""}</td>
       <td class="num">${a.pack}</td><td class="num">${sid ? "" : where}</td>
       <td class="num">${Math.round(a.stock)}</td><td class="num">${Math.round(a.sold)}</td>
       <td class="num">${a.adr_store.toFixed(2)}</td><td class="num">${ds}</td>
       <td class="num">${a.max_now}${a.stopped_stores && !stop ? ` <span class="note">(${a.stopped_stores} спр.)</span>` : ""}</td>
       <td class="num"><input type="number" min="0" step="1" data-slmax="${esc(a.sku)}" placeholder="${a.max_now}" style="width:64px;text-align:right" ${a.no_order ? "disabled" : ""}></td>
-      <td style="text-align:center"><input type="checkbox" data-slstop="${esc(a.sku)}" ${stop ? "checked" : ""} title="Спри поръчките"></td></tr>`;
+      <td style="text-align:center"><input type="checkbox" data-slstop="${esc(a.sku)}" ${stop ? "checked" : ""} title="Спри поръчките"></td></tr>`
+      + (open ? slDetail(a) : "");
   }).join("") + (rows.length > 600 ? `<tr><td colspan="10" class="note">Показани са първите 600 – търси, за да стесниш.</td></tr>` : "")
     || `<tr><td colspan="10" class="note">Няма бавни артикули по този филтър.</td></tr>`;
   document.querySelectorAll("[data-slmax]").forEach(i => {
@@ -3229,6 +3236,63 @@ function drawSlow() {
     i.onchange = () => slSetMax(i.dataset.slmax, i.value === "" ? null : Math.max(0, Math.round(+i.value)), i);
   });
   document.querySelectorAll("[data-slstop]").forEach(c => c.onchange = () => slStop(c.dataset.slstop, c.checked, c));
+  document.querySelectorAll("[data-slopen]").forEach(td => td.onclick = () => {
+    const k = td.dataset.slopen; SL_OPEN.has(k) ? SL_OPEN.delete(k) : SL_OPEN.add(k); drawSlow(); });
+  document.querySelectorAll("[data-slsmax]").forEach(i => {
+    i.onkeydown = e => { if (e.key === "Enter") i.blur(); };
+    i.onchange = () => { if (i.value !== "") slStoreSet(i.dataset.slsmax, +i.dataset.sid, Math.max(0, Math.round(+i.value)), null); };
+  });
+  document.querySelectorAll("[data-slsstop]").forEach(c => c.onchange = () => slStoreSet(c.dataset.slsstop, +c.dataset.sid, null, c.checked, c));
+}
+const SL_OPEN = new Set();
+function slDetail(a) {
+  const all = [...(a.fast || []).map(s => ({ ...s, fast: true })), ...a.stores.map(s => ({ ...s, fast: false }))]
+    .sort((x, y) => y.adr - x.adr);
+  const tr = (a.transfers || []);
+  return `<tr><td colspan="10" style="background:var(--paper-2,#faf6ee);padding:8px 12px">
+    <table style="width:100%;font-size:12.5px"><thead><tr><th>Магазин</th><th class="num">Наличност</th><th class="num">Прод. 30 дни</th><th class="num">/ден</th><th class="num">Мин</th><th class="num">Макс</th><th class="num">Нов макс</th><th>Спри тук</th></tr></thead><tbody>
+    ${all.map(s => `<tr style="${s.fast ? "color:#1f7a3a" : "color:#777"}${s.max <= 0 ? ";opacity:.55" : ""}">
+      <td>${s.fast ? "🟢" : "⚪"} ${esc(s.store)}${s.locked ? ' <span class="note" title="Заключен ръчно">🔒</span>' : ""}</td>
+      <td class="num">${Math.round(s.stock)}</td><td class="num">${Math.round(s.sold)}</td><td class="num">${s.adr.toFixed(2)}</td>
+      <td class="num">${s.min}</td><td class="num">${s.max}</td>
+      <td class="num"><input type="number" min="0" step="1" data-slsmax="${esc(a.sku)}" data-sid="${s.store_id}" placeholder="${s.max}" style="width:58px;text-align:right"></td>
+      <td style="text-align:center"><input type="checkbox" data-slsstop="${esc(a.sku)}" data-sid="${s.store_id}" ${s.max <= 0 ? "checked" : ""}></td></tr>`).join("")}
+    </tbody></table>
+    ${tr.length ? `<div style="margin-top:8px"><b>🔁 Предложение за прехвърляне:</b> ${tr.map(t => `${esc(t.from)} → <b>${esc(t.to)}</b> ${t.qty} бр.`).join(" · ")}</div>` : ""}
+  </td></tr>`;
+}
+async function slStoreSet(sku, sid, mx, stop, cb) {
+  const a = SL.articles.find(x => x.sku === sku); if (!a) return;
+  const s = [...a.stores, ...(a.fast || [])].find(x => x.store_id === sid); if (!s) return;
+  let mn, mxv, why;
+  if (stop === true) { mn = 0; mxv = 0; why = "Спрян за магазина"; }
+  else if (stop === false) { mn = 1; mxv = Math.max(a.pack, 2); why = "Пуснат отново за магазина"; }
+  else { mxv = mx; mn = Math.min(s.min, mx); why = `Макс ${mx} за магазина`; }
+  try {
+    await slPut([{ store_id: sid, sku, min_stock: mn, max_stock: mxv }], why);
+    s.min = mn; s.max = mxv; s.locked = true;
+    toast(`${sku} · ${s.store}: ${why.toLowerCase()} ✓`);
+    drawSlow();
+  } catch (e) { if (cb) cb.checked = !stop; toast(e.message, false); }
+}
+function slTransfers() {
+  const box = document.getElementById("slTr");
+  if (box.innerHTML) { box.innerHTML = ""; return; }
+  if (+document.getElementById("slStore").value) { toast("Избери „Всички магазини“ – прехвърлянето е между магазини", false); return; }
+  const list = [];
+  SL.articles.forEach(a => (a.transfers || []).forEach(t => list.push({ ...t, sku: a.sku, name: a.name })));
+  if (!list.length) { box.innerHTML = `<p class="note">Няма какво да се прехвърли при този филтър.</p>`; return; }
+  const by = {};
+  list.forEach(t => (by[t.from] = by[t.from] || []).push(t));
+  const total = list.reduce((x, t) => x + t.qty, 0);
+  const txt = Object.entries(by).map(([f, ts]) => `ОТ ${f}:\n` + ts.map(t => `  ${t.sku} ${t.name} – ${t.qty} бр. → ${t.to}`).join("\n")).join("\n\n");
+  box.innerHTML = `<div class="head"><h2>🔁 Прехвърляне: ${list.length} реда, ${total} бр.</h2>
+      <span class="note">бавният задържа ${14} дни продажби, бързият се допълва до 7 дни</span>
+      <button class="mini" id="slTrCopy">📋 Копирай списъка</button></div>
+    <div class="scroll"><table><thead><tr><th>От (бавен)</th><th>Артикул</th><th class="num">Бр.</th><th>Към (бърз)</th><th class="num">Там има</th><th class="num">Там /ден</th></tr></thead><tbody>
+    ${list.sort((x, y) => x.from.localeCompare(y.from) || y.qty - x.qty).map(t => `<tr><td>${esc(t.from)}</td><td><b>${esc(t.sku)}</b> ${esc(t.name)}</td><td class="num"><b>${t.qty}</b></td><td>${esc(t.to)}</td><td class="num">${Math.round(t.to_stock)}</td><td class="num">${t.to_adr.toFixed(2)}</td></tr>`).join("")}
+    </tbody></table></div>`;
+  document.getElementById("slTrCopy").onclick = () => navigator.clipboard.writeText(txt).then(() => toast("Копирано ✓"));
 }
 async function slPut(items, reason) {
   if (!items.length) return;
