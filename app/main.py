@@ -42,7 +42,7 @@ APP_PASSWORD = _os.getenv("APP_PASSWORD", "").strip()
 SESSION_COOKIE = "minmax_session"
 _OPEN_PATHS = {
     "/", "/health",
-    "/dashboard", "/orders-view", "/ui/login", "/ui/logout", "/brand/logo",
+    "/dashboard", "/orders-view", "/ui/login", "/ui/logout", "/brand/logo", "/ui/magic",
     "/viber/webhook",   # Viber бот - проверява се подписът на Viber
     "/telegram/webhook",  # Telegram бот - проверява се тайната в заглавката
 }
@@ -78,6 +78,16 @@ def session_token(username: str | None = None) -> str:
     sig = _hmac.new((_API_KEY + "|" + sec).encode(), ("session:" + username).encode(),
                     _hashlib.sha256).hexdigest()
     return f"{username}.{sig}"
+
+
+def magic_token(username: str, exp: int) -> str:
+    """Линк за вход без парола (Димо 21.11): потребител + срок + подпис. Спира с изтичане,
+    смяна на паролата или спиране на потребителя."""
+    username = username.lower()
+    sec = _secret_for(username) or ""
+    sig = _hmac.new((_API_KEY + "|" + sec).encode(), f"magic:{username}:{exp}".encode(),
+                    _hashlib.sha256).hexdigest()[:32]
+    return f"{username}.{exp}.{sig}"
 
 
 def session_user(request: Request) -> str | None:

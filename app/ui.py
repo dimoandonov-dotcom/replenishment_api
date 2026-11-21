@@ -167,6 +167,44 @@ def users_upsert(payload: UserIn, request: Request, db: Session = Depends(get_db
     return {"ok": True, "username": name}
 
 
+@router.post("/users/{username}/magic-link")
+def users_magic_link(username: str, request: Request, days: int = 7, tab: str = "", db: Session = Depends(get_db)):
+    """Линк за вход с едно цъкване (без парола). Само главният потребител или API ключ."""
+    import time
+    from . import main as _main
+    who = getattr(request.state, "user", None)
+    if who and who != _main.APP_USER.lower():
+        raise HTTPException(403, "Само главният потребител")
+    u = db.get(m.AppUser, username.strip().lower())
+    if u is None or not u.is_active:
+        raise HTTPException(404, "Няма такъв активен потребител")
+    exp = int(time.time()) + max(1, min(days, 30)) * 86400
+    base = str(request.base_url).rstrip("/").replace("http://", "https://")
+    t = _main.magic_token(u.username, exp)
+    return {"url": f"{base}/ui/magic?t={t}" + (f"&tab={tab}" if tab else ""), "expires_days": days}
+
+
+@router.get("/ui/magic", include_in_schema=False)
+def ui_magic(t: str, request: Request, tab: str = "", db: Session = Depends(get_db)):
+    import time
+    from fastapi.responses import RedirectResponse
+    from . import main as _main
+    try:
+        user, exp, sig = t.split(".")
+        exp_i = int(exp)
+    except ValueError:
+        raise HTTPException(400, "Невалиден линк")
+    u = db.get(m.AppUser, user)
+    if (u is None or not u.is_active or exp_i < time.time()
+            or not hmac.compare_digest(_main.magic_token(user, exp_i), t)):
+        return HTMLResponse("<p style='font:16px sans-serif;padding:24px'>Линкът е изтекъл или е невалиден. Поискай нов.</p>", 403)
+    tab = tab if tab.isalnum() else ""
+    resp = RedirectResponse("/" + (f"#{tab}" if tab else ""), 302)
+    resp.set_cookie(_main.SESSION_COOKIE, _main.session_token(user), max_age=60 * 60 * 24 * 365, httponly=True,
+                    samesite="lax", secure=request.headers.get("x-forwarded-proto", request.url.scheme) == "https")
+    return resp
+
+
 @router.get("/users")
 def users_list(request: Request, db: Session = Depends(get_db)):
     """Списък с потребителите и дали са активни (без пароли). Само главният потребител или API ключ."""
