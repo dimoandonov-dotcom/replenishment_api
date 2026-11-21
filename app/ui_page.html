@@ -437,6 +437,7 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   <a href="#ndkinv" data-tab="ndkinv">📄 НДК фактури</a>
   <a href="#bandits" data-tab="bandits">🥪 Бандитс</a>
   <a href="#margin" data-tab="margin">💰 Марж</a>
+  <a href="#slow" data-tab="slow">🐢 Бавни</a>
   <a href="#nord" data-tab="nord">Не се поръчват</a>
   <a href="#cmp" data-tab="cmp">Сравнение</a>
   <a href="#learn" data-tab="learn">Обучение</a>
@@ -797,6 +798,29 @@ section.tab.on { animation:tabIn .45s cubic-bezier(.2,.8,.2,1) both; }
   </table></div>
 </section>
 
+<!-- ============ БАВНИ АРТИКУЛИ ============ -->
+<section class="tab" id="tab-slow">
+  <p class="note" style="margin:0 0 12px;line-height:1.6">Артикули, които се продават бавно. Сложи им <b>по-нисък максимум</b>, за да остане място в склада за бързите, или ги <b>спри</b> с тикчето.
+  Промяната се записва веднага и се заключва, нощното обучение не я пипа. „Всички магазини“ сменя само магазините, в които артикулът е бавен. Където се продава добре, не се пипа.</p>
+  <div class="bar">
+    <select id="slStore" aria-label="Магазин"></select>
+    <select id="slAdr" aria-label="Колко бавен">
+      <option value="0.1">под 1 бр. на 10 дни</option>
+      <option value="0.2">под 1 бр. на 5 дни</option>
+      <option value="0.3" selected>под 1 бр. на 3 дни</option>
+      <option value="0.5">под 1 бр. на 2 дни</option>
+    </select>
+    <input id="slQ" placeholder="Търси артикул или код" style="min-width:180px">
+    <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="slHideStop"> скрий спрените</label>
+    <button class="go" id="slLoad">Покажи</button>
+  </div>
+  <div class="board" id="slKpis"></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Артикул</th><th class="num">Опак.</th><th class="num">Бавен в</th><th class="num">Наличност</th><th class="num">Прод. 30 дни</th><th class="num">Ср./ден на магазин</th><th class="num">Дни запас</th><th class="num">Макс сега</th><th class="num">Нов макс</th><th>Спри</th></tr></thead>
+    <tbody id="slBody"></tbody>
+  </table></div>
+</section>
+
 <!-- ============ ОТ СКЛАДА ============ -->
 <section class="tab" id="tab-sklad">
   <p class="note" style="margin:0 0 14px;line-height:1.6">Артикулите тук идват от <b>нашия склад (Т Логистик)</b> и <b>не влизат в заявката към НДК</b>.
@@ -1079,7 +1103,7 @@ function show(tab) {
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
   { const hb = document.getElementById("skHelpBtn"); if (hb) { hb.style.display = tab === "sklad" ? "" : "none"; if (tab !== "sklad") document.getElementById("skHelp")?.classList.remove("on"); } }
   if (tab === "sklad") { if (loaded.sklad) loadSklad(); api("/ui/sklad/seen", { method: "POST" }).then(() => skBadge(0)).catch(() => {}); }
-  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: () => loadMinusi(), bandits: initBandits, promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, cmp: initCmp, sklad: initSklad, margin: initMargin, ndkinv: initNdkInv, learn: initLearn, run: initRun})[tab]?.(); }
+  if (!loaded[tab]) { loaded[tab] = true; ({board: loadBoard, orders: initOrders, assort: loadAssort, plano: initPlano, anal: initAnalScope, qual: loadQual, anom: () => loadMinusi(), bandits: initBandits, promo: initPromo, turn: initTurn, delist: initDelist, nord: loadNord, slow: initSlow, cmp: initCmp, sklad: initSklad, margin: initMargin, ndkinv: initNdkInv, learn: initLearn, run: initRun})[tab]?.(); }
 }
 window.addEventListener("hashchange", () => show((location.hash || "#board").slice(1)));
 
@@ -3157,6 +3181,93 @@ async function initRun() {
 
 /* ---------- визия 300: известия, броячи, вълна при клик ---------- */
 let _tt;
+
+/* ---------- бавни артикули (за Асен: макс/спиране) ---------- */
+let SL = null;
+async function initSlow() {
+  const sel = document.getElementById("slStore");
+  const list = await stores();
+  sel.innerHTML = `<option value="0">Всички магазини</option>` + list.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
+  document.getElementById("slLoad").onclick = loadSlow;
+  sel.onchange = loadSlow; document.getElementById("slAdr").onchange = loadSlow;
+  document.getElementById("slQ").oninput = drawSlow; document.getElementById("slHideStop").onchange = drawSlow;
+  loadSlow();
+}
+async function loadSlow() {
+  const sid = +document.getElementById("slStore").value, adr = document.getElementById("slAdr").value;
+  document.getElementById("slBody").innerHTML = `<tr><td colspan="10" class="note">Зарежда…</td></tr>`;
+  try { SL = await api(`/ui/slow?store_id=${sid}&max_adr=${adr}`); } catch (e) { toast(e.message, false); return; }
+  drawSlow();
+}
+function slStopped(a) { return a.no_order || (a.stores.length && a.stores.every(s => s.max <= 0)); }
+function drawSlow() {
+  if (!SL) return;
+  const q = document.getElementById("slQ").value.trim().toLowerCase(), hide = document.getElementById("slHideStop").checked;
+  const sid = +document.getElementById("slStore").value;
+  const rows = SL.articles.filter(a => (!q || a.name.toLowerCase().includes(q) || a.sku.includes(q)) && !(hide && slStopped(a)));
+  const t = SL.totals;
+  document.getElementById("slKpis").innerHTML =
+    [["Бавни артикули", t.articles, "по избрания филтър"], ["Стоят в складовете", Math.round(t.stock).toLocaleString("bg") + " бр.", "наличност на бавните"],
+     ["Продадени за 30 дни", Math.round(t.sold).toLocaleString("bg") + " бр.", "от бавните"]]
+      .map(([l, v, sub]) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${sub}</div></div>`).join("");
+  document.getElementById("slBody").innerHTML = rows.slice(0, 600).map(a => {
+    const stop = slStopped(a);
+    const where = sid ? "" : `<span class="note">${a.slow_stores}${a.fast_stores ? ` от ${a.all_stores}` : ""}</span>`;
+    const ds = a.days_stock == null ? (a.stock > 0 ? "без продажби" : "–") : a.days_stock;
+    return `<tr${stop ? ' style="opacity:.55"' : ""}>
+      <td><b>${esc(a.sku)}</b> ${esc(a.name)}${a.no_order ? ' <span class="tag bad">🚫 спрян навсякъде</span>' : ""}${a.fast_stores && !sid ? ` <span class="tag" title="В тези магазини се продава добре и не се пипа">бърз в ${a.fast_stores}</span>` : ""}</td>
+      <td class="num">${a.pack}</td><td class="num">${sid ? "" : where}</td>
+      <td class="num">${Math.round(a.stock)}</td><td class="num">${Math.round(a.sold)}</td>
+      <td class="num">${a.adr_store.toFixed(2)}</td><td class="num">${ds}</td>
+      <td class="num">${a.max_now}${a.stopped_stores && !stop ? ` <span class="note">(${a.stopped_stores} спр.)</span>` : ""}</td>
+      <td class="num"><input type="number" min="0" step="1" data-slmax="${esc(a.sku)}" placeholder="${a.max_now}" style="width:64px;text-align:right" ${a.no_order ? "disabled" : ""}></td>
+      <td style="text-align:center"><input type="checkbox" data-slstop="${esc(a.sku)}" ${stop ? "checked" : ""} title="Спри поръчките"></td></tr>`;
+  }).join("") + (rows.length > 600 ? `<tr><td colspan="10" class="note">Показани са първите 600 – търси, за да стесниш.</td></tr>` : "")
+    || `<tr><td colspan="10" class="note">Няма бавни артикули по този филтър.</td></tr>`;
+  document.querySelectorAll("[data-slmax]").forEach(i => {
+    i.onkeydown = e => { if (e.key === "Enter") i.blur(); };
+    i.onchange = () => slSetMax(i.dataset.slmax, i.value === "" ? null : Math.max(0, Math.round(+i.value)), i);
+  });
+  document.querySelectorAll("[data-slstop]").forEach(c => c.onchange = () => slStop(c.dataset.slstop, c.checked, c));
+}
+async function slPut(items, reason) {
+  if (!items.length) return;
+  await api(`/settings?source=manual&reason=${encodeURIComponent(reason)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(items) });
+}
+async function slSetMax(sku, mx, inp) {
+  if (mx == null) return;
+  const a = SL.articles.find(x => x.sku === sku); if (!a) return;
+  const items = a.stores.map(s => ({ store_id: s.store_id, sku, min_stock: Math.min(s.min, mx), max_stock: mx }));
+  try {
+    await slPut(items, `Бавен артикул – макс ${mx}`);
+    a.stores.forEach(s => { s.min = Math.min(s.min, mx); s.max = mx; }); a.max_now = mx;
+    inp.value = ""; inp.placeholder = mx;
+    toast(`${sku}: макс ${mx} в ${items.length} магазин${items.length === 1 ? "" : "а"} ✓${mx > 0 && mx < a.pack ? ` (опаковката е ${a.pack} – идва цял кашон)` : ""}`);
+    drawSlow();
+  } catch (e) { toast(e.message, false); }
+}
+async function slStop(sku, on, cb) {
+  const a = SL.articles.find(x => x.sku === sku); if (!a) return;
+  const sid = +document.getElementById("slStore").value;
+  try {
+    if (!sid) {   // всички магазини -> „Не се поръчва“ за артикула
+      await api(`/articles/${encodeURIComponent(sku)}/no-order`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ no_order: on, reason: on ? "Бавен – спрян от списъка с бавни" : "" }) });
+      a.no_order = on;
+      toast(`${sku}: ${on ? "спрян навсякъде" : "пуснат отново"} ✓`);
+    } else {      // един магазин -> 0/0 за магазина; при връщане - мин 1 / макс 1 опаковка
+      const items = a.stores.map(s => on ? ({ store_id: s.store_id, sku, min_stock: 0, max_stock: 0 })
+                                         : ({ store_id: s.store_id, sku, min_stock: 1, max_stock: Math.max(a.pack, 2) }));
+      await slPut(items, on ? "Бавен – спрян за магазина" : "Бавен – пуснат отново");
+      a.stores.forEach((s, i) => { s.min = items[i].min_stock; s.max = items[i].max_stock; });
+      a.max_now = on ? 0 : Math.max(a.pack, 2); a.stopped_stores = on ? a.stores.length : 0;
+      toast(`${sku}: ${on ? "спрян за магазина" : "пуснат отново"} ✓`);
+    }
+    drawSlow();
+  } catch (e) { cb.checked = !on; toast(e.message, false); }
+}
+
 function toast(text, ok = true) {
   const t = document.getElementById("toast"); if (!t || !text) return;
   document.getElementById("toastTxt").textContent = text;

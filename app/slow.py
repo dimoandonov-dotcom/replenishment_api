@@ -36,9 +36,9 @@ def slow(store_id: int = 0, max_adr: float = 0.3, days: int = 30, db: Session = 
         JOIN store_article_settings x ON x.store_id = s.id AND x.article_id = a.id
         LEFT JOIN st ON st.store_id = s.id AND st.article_id = a.id
         LEFT JOIN sl ON sl.store_id = s.id AND sl.article_id = a.id
-        WHERE s.is_active AND COALESCE(s.mistral_db_path, '') <> 'sofia'
+        WHERE s.is_active AND COALESCE(s.mistral_db_path, '') <> 'sofia' AND a.name NOT ILIKE :amb
           AND (:sid = 0 OR s.id = :sid)
-    """), {"since": since, "sid": store_id}).mappings().all()
+    """), {"since": since, "sid": store_id, "amb": "%АМБАЛАЖ%"}).mappings().all()
 
     arts: dict[int, dict] = {}
     for r in rows:
@@ -65,8 +65,8 @@ def slow(store_id: int = 0, max_adr: float = 0.3, days: int = 30, db: Session = 
                   "days_stock": round(stock / (sold / days)) if sold else None,
                   "max_now": median(live) if live else 0, "stopped_stores": sum(1 for s in ss if s["max"] <= 0)})
         out.append(a)
-    # най-отгоре: най-много стока, която стои (дни запас), после наличност
-    out.sort(key=lambda a: (-(a["days_stock"] if a["days_stock"] is not None else 10**6), -a["stock"]))
+    # най-отгоре: най-много стока, която стои в складовете (места), после най-бавните
+    out.sort(key=lambda a: (-a["stock"], -(a["days_stock"] if a["days_stock"] is not None else 10**6)))
     return {"days": days, "max_adr": max_adr, "store_id": store_id, "articles": out,
             "totals": {"articles": len(out), "stock": sum(a["stock"] for a in out),
                        "sold": sum(a["sold"] for a in out)}}
