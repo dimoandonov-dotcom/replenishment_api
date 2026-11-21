@@ -3199,7 +3199,7 @@ async function loadSlow() {
   try { SL = await api(`/ui/slow?store_id=${sid}&max_adr=${adr}`); } catch (e) { toast(e.message, false); return; }
   drawSlow();
 }
-function slStopped(a) { return a.no_order || (a.stores.length && a.stores.every(s => s.max <= 0)); }
+function slStopped(a) { return a.no_order || (a.stores.length > 0 && a.stores.every(s => s.max <= 0)); }
 function drawSlow() {
   if (!SL) return;
   const q = document.getElementById("slQ").value.trim().toLowerCase(), hide = document.getElementById("slHideStop").checked;
@@ -3251,12 +3251,12 @@ async function slStop(sku, on, cb) {
   const a = SL.articles.find(x => x.sku === sku); if (!a) return;
   const sid = +document.getElementById("slStore").value;
   try {
-    if (!sid) {   // всички магазини -> „Не се поръчва“ за артикула
+    if (!sid && !a.fast_stores) {   // бавен навсякъде -> „Не се поръчва“ за артикула
       await api(`/articles/${encodeURIComponent(sku)}/no-order`, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ no_order: on, reason: on ? "Бавен – спрян от списъка с бавни" : "" }) });
       a.no_order = on;
       toast(`${sku}: ${on ? "спрян навсякъде" : "пуснат отново"} ✓`);
-    } else {      // един магазин -> 0/0 за магазина; при връщане - мин 1 / макс 1 опаковка
+    } else {      // само магазините, където е бавен -> 0/0; при връщане - мин 1 / макс 1 опаковка
       const items = a.stores.map(s => on ? ({ store_id: s.store_id, sku, min_stock: 0, max_stock: 0 })
                                          : ({ store_id: s.store_id, sku, min_stock: 1, max_stock: Math.max(a.pack, 2) }));
       await slPut(items, on ? "Бавен – спрян за магазина" : "Бавен – пуснат отново");
